@@ -2,7 +2,7 @@
 
 > Ce fichier est le guide de référence du projet. Il doit être **mis à jour à chaque nouvelle décision** (architecture, périmètre, convention) pour rester la source de vérité — y compris quand on change de machine.
 
-Nom du projet : **SimLogix** (Sim + Logic). Le dossier/repo est encore nommé `new-logisim` (nom de code de travail) — à renommer en `simlogix` quand ça t'arrange, voir Avancement.
+Nom du projet : **SimLogix** (Sim + Logic).
 
 ## Contexte du projet
 
@@ -30,9 +30,8 @@ _(état actuel — rien n'est encore implémenté, voir Avancement)_
   - `Pin` : entrée/sortie d'un composant, connectée à un `Net`.
   - `Component` : trait avec `eval(&self, inputs) -> outputs` + `propagation_delay()`. Les sous-circuits implémentent aussi ce trait (hiérarchie = citoyen de première classe, pas un hack).
   - `Circuit` : graphe de composants + nets, file d'événements, horloge logique.
-- **Dev container** (`.devcontainer/`) : image `rust:1-slim-bookworm` + libs X11/GL/GTK nécessaires à eframe (`libx11-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libgtk-3-dev` pour les futurs dialogues de fichiers natifs via `rfd`, etc.), `clippy`/`rustfmt` installés. Le socket X11 de l'hôte (`/tmp/.X11-unix`) est monté et `DISPLAY` propagé, pour que `cargo run` depuis le conteneur ouvre la fenêtre directement sur le bureau hôte (X11 forwarding). `remoteUser: vscode` pour rester cohérent avec le pattern déjà utilisé sur `file-checker`.
-  - Prérequis côté hôte à faire une fois par session avant de lancer le conteneur : `xhost +local:docker` pour autoriser les connexions X11 locales depuis Docker.
-  - Le conteneur ne sert que pour la toolchain de build/dev (le code source est monté en volume par VS Code, pas copié dans l'image).
+- **Dev container** (`.devcontainer/`) : image `rust:1-slim-bookworm` + libs X11/GL/GTK nécessaires à eframe (`libx11-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libgtk-3-dev` pour les futurs dialogues de fichiers natifs via `rfd`, etc.), `clippy`/`rustfmt` installés. Le socket X11 de l'hôte (`/tmp/.X11-unix`) est monté et `DISPLAY` propagé, pour que `cargo run` depuis le conteneur ouvre la fenêtre directement sur le bureau hôte (X11 forwarding). `remoteUser: vscode` pour rester cohérent avec le pattern déjà utilisé sur `file-checker`. Le conteneur ne sert que pour la toolchain de build/dev (le code source est monté en volume par VS Code, pas copié dans l'image).
+  - Instructions pratiques de setup (prérequis `xhost`, comment ouvrir le devcontainer) : voir [README.md](README.md), pas dupliquées ici.
 
 ## Périmètre v1 / Hors-scope
 
@@ -57,7 +56,8 @@ _(état actuel — rien n'est encore implémenté, voir Avancement)_
 
 - [x] Cadrage du projet et de l'architecture (ce document).
 - [x] Scaffold git + devcontainer (toolchain Rust, X11 GUI passthrough).
-- [ ] Renommer le dossier/repo `new-logisim` → `simlogix`.
+- [x] Renommer le dossier/repo `new-logisim` → `simlogix`.
+- [x] README.md (setup pratique) séparé de CLAUDE.md (décisions/contexte).
 - [ ] Scaffold du workspace Cargo.
 - [ ] Moteur `simlogix-core` (modèle de données + événements discrets).
 - [ ] Tests boucles rétroactives (bascule SR-NAND, oscillateur en anneau).
