@@ -3,13 +3,30 @@
 use std::collections::HashMap;
 
 use simlogix_core::{
-    Button, Circuit, ComponentId, Led, NetId, Pin, PinDirection, Probe, Rail, Signal, Transistor,
+    Button, Circuit, Clock, ComponentId, Led, NetId, Pin, PinDirection, Probe, Rail, Signal,
+    Transistor,
 };
 
 use crate::canvas;
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
 use crate::project::{SavedCircuit, SavedComponent, SavedProject};
+
+/// Logical ticks the circuit advances per real second — the resolution the
+/// whole simulation runs at. A `Clock`'s period is expressed in these ticks
+/// (see `CLOCK_PERIOD_TICKS`), so this constant is what ties "one clock
+/// toggle" to a specific amount of real time.
+const TICKS_PER_SECOND: f32 = 60.0;
+/// A placed `Clock` toggles once every this many ticks — with
+/// `TICKS_PER_SECOND` above, that's once per real second.
+const CLOCK_PERIOD_TICKS: u64 = 60;
+/// How far an interactive change (a press, a new wire, a deletion) advances
+/// the circuit to settle. Deliberately small: unlike `Circuit::run` (which
+/// would let a `Clock` anywhere in the circuit burn through a huge chunk of
+/// its future ticks in one synchronous burst), this barely nudges real time,
+/// while still being generous enough for a modest chain of gates to fully
+/// propagate in one go.
+pub(crate) const SETTLE_TICKS: u64 = 32;
 
 /// Pick a kind from the palette, click the canvas to drop it (snapped to the
 /// grid), then drag from one pin to another to wire them together — that
@@ -31,6 +48,9 @@ pub struct SimLogixApp {
     wire_bends: HashMap<(NetId, usize), f32>,
     /// The last save/load failure, if any, shown in a dismissible window.
     error: Option<String>,
+    /// Fractional logical ticks owed to `circuit` from real elapsed time,
+    /// carried between frames so `TICKS_PER_SECOND` isn't rounded away.
+    tick_budget: f32,
 }
 
 impl SimLogixApp {
@@ -119,10 +139,27 @@ impl SimLogixApp {
                 );
                 PlacedComponent::probe(id, center)
             }
+            ComponentKind::Clock => {
+                let net = self.circuit.add_net();
+                let id = self.circuit.add_component(
+                    Box::new(Clock::new()),
+                    vec![Pin {
+                        direction: PinDirection::Output,
+                        net,
+                    }],
+                );
+                // Periodic, not schedule_now: a Clock must keep re-triggering
+                // itself forever (see Circuit::schedule_periodic), which the
+                // per-frame advance() call in `ui()` then processes over time.
+                self.circuit.schedule_periodic(id, CLOCK_PERIOD_TICKS);
+                PlacedComponent::clock(id, center)
+            }
         };
-        // A newly placed, unconnected component can't be part of a feedback
-        // loop yet, so this can't actually be unstable.
-        let _ = self.circuit.run();
+        // Process just this component's own initial schedule (if any) --
+        // never circuit.run(), which would let a just-placed Clock's endless
+        // self-reschedule burn through a huge chunk of its future ticks
+        // instantly instead of over real time.
+        let _ = self.circuit.advance(0);
         let id = placed.id();
         self.placed.push(placed);
         id
@@ -207,7 +244,7 @@ impl SimLogixApp {
                 }
             }
         }
-        let _ = app.circuit.run();
+        let _ = app.circuit.advance(SETTLE_TICKS);
 
         app
     }
@@ -252,6 +289,20 @@ impl SimLogixApp {
 
 impl eframe::App for SimLogixApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Advance the circuit by real elapsed time every frame, not just
+        // after an explicit interaction -- this is what lets a placed Clock
+        // keep ticking on its own. Requesting continuous repaint is what
+        // makes egui keep calling this at all without new input; the
+        // tradeoff is constant redraw (and CPU use) instead of only on
+        // interaction, even for a circuit with no Clock in it.
+        self.tick_budget += ui.ctx().input(|i| i.stable_dt) * TICKS_PER_SECOND;
+        let ticks_due = self.tick_budget.floor();
+        if ticks_due > 0.0 {
+            self.tick_budget -= ticks_due;
+            let _ = self.circuit.advance(ticks_due as u64);
+        }
+        ui.ctx().request_repaint();
+
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -401,7 +452,7 @@ impl eframe::App for SimLogixApp {
                     if let Some(endpoint) = handles_by_net.get(&net).and_then(|h| h.get(index)) {
                         self.circuit
                             .disconnect_pin(endpoint.component, endpoint.pin_index);
-                        let _ = self.circuit.run();
+                        let _ = self.circuit.advance(SETTLE_TICKS);
                     }
                     self.wire_bends.remove(&(net, index));
                     self.selected_wire = None;
@@ -435,7 +486,7 @@ impl eframe::App for SimLogixApp {
                     });
                     if let Some(target) = target {
                         self.circuit.merge_nets(from_net, target.net);
-                        let _ = self.circuit.run();
+                        let _ = self.circuit.advance(SETTLE_TICKS);
                     }
                     self.wiring_from = None;
                 }

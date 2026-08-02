@@ -1,6 +1,6 @@
 # Simulation engine
 
-> **Status: implemented in `simlogix-core::Circuit`** (`schedule_now`/`run`), exercised end to end by `Button`/`Led`. Not yet wired to the GUI — see [overview.md](overview.md#current-status) for what's actually built.
+> **Status: implemented in `simlogix-core::Circuit`** (`schedule_now`/`schedule_periodic`/`advance`/`run`) and wired into the GUI's real-time frame loop — see [overview.md](overview.md#current-status) for what's actually built.
 
 ## The problem it solves
 
@@ -12,13 +12,19 @@ SimLogix's engine is a discrete-event simulator, the same family of technique us
 
 - Every component has a **propagation delay** (defaults to 1 logical tick).
 - A change on a component's input doesn't instantly update its output. Instead, it schedules that component's own re-evaluation at `t + delay` — the delay belongs to the component whose input changed (the reader), not the one that drove the change.
-- Events are kept in a queue ordered by logical time and processed in that order (`Circuit::run`).
+- Events are kept in a queue ordered by logical time and processed in that order (`Circuit::advance`/`run`).
 
 Because outputs only ever change in response to a scheduled future event, a feedback loop can't cause infinite synchronous recursion — an SR-NAND latch settles into a stable state after a few ticks, and a ring oscillator oscillates (as real hardware would) instead of hanging the simulator.
 
 ### Oscillation detection
 
-If a net changes state more than a threshold number of times within a single `run()` call (currently 1,000), the engine stops and returns an `UnstableCircuit` error instead of looping forever. Verified with a unit test: a single NOT gate wired back to its own input never settles and is correctly reported as unstable.
+If a net changes state more than a threshold number of times within a single `advance()`/`run()` call (currently 1,000), the engine stops and returns an `UnstableCircuit` error instead of looping forever. Verified with a unit test: a single NOT gate wired back to its own input never settles and is correctly reported as unstable.
+
+### Periodic components (`Clock`)
+
+Not every component settles — a `Clock` is meant to oscillate forever. `Circuit::schedule_periodic(component, period)` marks it as self-rescheduling: after every evaluation, it reschedules itself `period` ticks later automatically, regardless of whether its output changed. Because of this, `Circuit::run()` (drain the queue until empty) can never truly finish once a periodic component exists — it's redefined as `Circuit::advance` bounded to a large-but-finite tick count (1,000,000) purely so it returns instead of hanging, not as a real way to "settle" a clocked circuit.
+
+The actual way to drive a `Clock`: `Circuit::advance(ticks)` processes events up to a given point and *stops*, leaving anything further out (including the clock's next self-reschedule) queued for later. The GUI calls this once per frame with a tick count derived from real elapsed time, so a `Clock` ticks at a genuine, wall-clock-tied rate rather than free-running as fast as the CPU allows.
 
 ## Data model
 

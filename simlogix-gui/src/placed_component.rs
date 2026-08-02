@@ -62,6 +62,11 @@ pub enum PlacedComponent {
         center: Pos2,
         rotation: Rotation,
     },
+    Clock {
+        id: ComponentId,
+        center: Pos2,
+        rotation: Rotation,
+    },
 }
 
 impl PlacedComponent {
@@ -108,13 +113,22 @@ impl PlacedComponent {
         }
     }
 
+    pub fn clock(id: ComponentId, center: Pos2) -> Self {
+        Self::Clock {
+            id,
+            center,
+            rotation: Rotation::default(),
+        }
+    }
+
     pub fn id(&self) -> ComponentId {
         match self {
             PlacedComponent::Button { id, .. }
             | PlacedComponent::Led { id, .. }
             | PlacedComponent::Transistor { id, .. }
             | PlacedComponent::Rail { id, .. }
-            | PlacedComponent::Probe { id, .. } => *id,
+            | PlacedComponent::Probe { id, .. }
+            | PlacedComponent::Clock { id, .. } => *id,
         }
     }
 
@@ -124,7 +138,8 @@ impl PlacedComponent {
             | PlacedComponent::Led { center, .. }
             | PlacedComponent::Transistor { center, .. }
             | PlacedComponent::Rail { center, .. }
-            | PlacedComponent::Probe { center, .. } => *center,
+            | PlacedComponent::Probe { center, .. }
+            | PlacedComponent::Clock { center, .. } => *center,
         }
     }
 
@@ -134,7 +149,8 @@ impl PlacedComponent {
             | PlacedComponent::Led { rotation, .. }
             | PlacedComponent::Transistor { rotation, .. }
             | PlacedComponent::Rail { rotation, .. }
-            | PlacedComponent::Probe { rotation, .. } => *rotation,
+            | PlacedComponent::Probe { rotation, .. }
+            | PlacedComponent::Clock { rotation, .. } => *rotation,
         }
     }
 
@@ -146,6 +162,7 @@ impl PlacedComponent {
             PlacedComponent::Led { .. } => ComponentKind::Led,
             PlacedComponent::Transistor { kind, .. } | PlacedComponent::Rail { kind, .. } => *kind,
             PlacedComponent::Probe { .. } => ComponentKind::Probe,
+            PlacedComponent::Clock { .. } => ComponentKind::Clock,
         }
     }
 
@@ -156,7 +173,8 @@ impl PlacedComponent {
             | PlacedComponent::Led { rotation, .. }
             | PlacedComponent::Transistor { rotation, .. }
             | PlacedComponent::Rail { rotation, .. }
-            | PlacedComponent::Probe { rotation, .. } => rotation,
+            | PlacedComponent::Probe { rotation, .. }
+            | PlacedComponent::Clock { rotation, .. } => rotation,
         };
         *rotation = new_rotation;
     }
@@ -212,7 +230,7 @@ impl PlacedComponent {
                     if is_pressed != pressed.get() {
                         pressed.set(is_pressed);
                         circuit.schedule_now(id);
-                        let _ = circuit.run();
+                        let _ = circuit.advance(crate::app::SETTLE_TICKS);
                     }
                 }
                 if response.drag_stopped() {
@@ -369,6 +387,42 @@ impl PlacedComponent {
 
                 let net = circuit.pins(id)[0].net;
                 let pin = pin_handle(ui, id, 0, pin_positions.inputs[0], net);
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    pins: vec![pin],
+                }
+            }
+            PlacedComponent::Clock {
+                center, rotation, ..
+            } => {
+                let signal = circuit
+                    .pins(id)
+                    .first()
+                    .map(|pin| circuit.signal_at(pin.net))
+                    .unwrap_or(Signal::Unknown);
+                let fill = if signal == Signal::High {
+                    Color32::from_rgb(220, 30, 30)
+                } else {
+                    Color32::from_gray(45)
+                };
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions =
+                    canvas::draw_component(painter, rect, "Clock", fill, *rotation, &[], &["OUT"]);
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect);
+                }
+
+                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                if response.dragged() {
+                    *center += response.drag_delta();
+                }
+                if response.drag_stopped() {
+                    *center = canvas::snap_to_grid(*center);
+                }
+
+                let net = circuit.pins(id)[0].net;
+                let pin = pin_handle(ui, id, 0, pin_positions.outputs[0], net);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),

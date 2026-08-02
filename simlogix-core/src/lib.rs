@@ -10,6 +10,7 @@ mod signal;
 pub use circuit::{Circuit, ComponentId, UnstableCircuit};
 pub use component::Component;
 pub use components::button::Button;
+pub use components::clock::Clock;
 pub use components::led::Led;
 pub use components::probe::Probe;
 pub use components::rail::Rail;

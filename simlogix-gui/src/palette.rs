@@ -15,6 +15,7 @@ pub enum ComponentKind {
     Ground,
     Power,
     Probe,
+    Clock,
 }
 
 impl ComponentKind {
@@ -27,6 +28,7 @@ impl ComponentKind {
             ComponentKind::Ground => "GND",
             ComponentKind::Power => "PWR",
             ComponentKind::Probe => "Probe",
+            ComponentKind::Clock => "Clock",
         }
     }
 }
@@ -59,6 +61,9 @@ pub fn show(ui: &mut Ui, pending: Option<ComponentKind>) -> Option<ComponentKind
     }
     if ui.button("Probe").clicked() {
         clicked = Some(ComponentKind::Probe);
+    }
+    if ui.button("Clock").clicked() {
+        clicked = Some(ComponentKind::Clock);
     }
 
     ui.add_space(8.0);

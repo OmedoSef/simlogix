@@ -230,13 +230,19 @@ pub fn draw_selection_outline(painter: &Painter, rect: Rect) {
     );
 }
 
-/// `count` values evenly spaced between `min` and `max` (never right on
-/// either edge, so a single pin lands dead center).
+/// `count` values centered between `min` and `max`, each a multiple of
+/// `GRID_SPACING` away from the midpoint — so every pin lands exactly on a
+/// grid dot instead of an arbitrary fraction of the box's height/width. A
+/// single pin lands dead center; an even count is one grid step off-center
+/// rather than split evenly, since two pins can't both sit on grid dots
+/// while also being symmetric around one.
 fn evenly_spaced(min: f32, max: f32, count: usize) -> Vec<f32> {
+    let center = (min + max) / 2.0;
+    let first_offset = -((count as i32 - 1) / 2);
     (0..count)
         .map(|i| {
-            let fraction = (i as f32 + 1.0) / (count as f32 + 1.0);
-            min + fraction * (max - min)
+            let steps = first_offset + i as i32;
+            center + steps as f32 * GRID_SPACING
         })
         .collect()
 }

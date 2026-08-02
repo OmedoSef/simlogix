@@ -17,9 +17,15 @@ struct ScheduledEvent {
     component: ComponentId,
 }
 
-/// A net toggling more than this many times within a single [`Circuit::run`] call
-/// is considered unstable (e.g. a ring oscillator) rather than left to loop forever.
+/// A net toggling more than this many times within a single [`Circuit::advance`]
+/// call is considered unstable (e.g. a ring oscillator) rather than left to loop
+/// forever.
 const MAX_TOGGLES_PER_NET: u32 = 1_000;
+
+/// [`Circuit::run`] is [`Circuit::advance`] with this many ticks — enormously more
+/// than any settling (non-periodic) circuit needs, but still a hard bound so a
+/// periodic component (a `Clock`) can't make it hang forever.
+const MAX_RUN_TICKS: u64 = 1_000_000;
 
 /// Returned by [`Circuit::run`] when a net toggles more than [`MAX_TOGGLES_PER_NET`]
 /// times without settling — e.g. a combinational feedback loop that oscillates
@@ -55,6 +61,9 @@ pub struct Circuit {
     settled: HashMap<NetId, Signal>,
     clock: u64,
     events: BinaryHeap<Reverse<ScheduledEvent>>,
+    /// Components that reschedule themselves forever after every evaluation
+    /// (e.g. a `Clock`), and how many ticks between each reschedule.
+    periodic: HashMap<ComponentId, u64>,
 }
 
 impl Circuit {
@@ -175,6 +184,8 @@ impl Circuit {
             }
             self.resettle(net);
         }
+
+        self.periodic.remove(&component);
     }
 
     /// The net's current resolved signal: `Unknown` if undriven, the shared value
@@ -210,13 +221,35 @@ impl Circuit {
             .push(Reverse(ScheduledEvent { tick, component }));
     }
 
-    /// Processes scheduled events in logical-time order until none remain (the
-    /// circuit has settled). Returns an error if a net toggles more than
-    /// [`MAX_TOGGLES_PER_NET`] times, meaning the circuit doesn't converge.
-    pub fn run(&mut self) -> Result<(), UnstableCircuit> {
+    /// Marks `component` as periodic and schedules its first evaluation now.
+    /// After every evaluation, a periodic component reschedules itself
+    /// `period` ticks later automatically, regardless of whether its output
+    /// changed — this is what lets a [`crate::Clock`] keep ticking forever
+    /// instead of settling. Because of that, [`Circuit::run`]/[`Circuit::advance`]
+    /// never truly "finish" once a periodic component exists — advance by a
+    /// bounded tick count tied to real elapsed time (once per UI frame, say)
+    /// rather than relying on the queue emptying out.
+    pub fn schedule_periodic(&mut self, component: ComponentId, period: u64) {
+        self.periodic.insert(component, period);
+        self.schedule_now(component);
+    }
+
+    /// Processes scheduled events in logical-time order up through
+    /// `self.clock + ticks`, then stops — any events still further out
+    /// (including a periodic component's next reschedule) stay queued for a
+    /// later call.
+    ///
+    /// Returns an error if a net toggles more than [`MAX_TOGGLES_PER_NET`] times,
+    /// meaning the circuit doesn't converge.
+    pub fn advance(&mut self, ticks: u64) -> Result<(), UnstableCircuit> {
+        let deadline = self.clock.saturating_add(ticks);
         let mut toggles: HashMap<NetId, u32> = HashMap::new();
 
-        while let Some(Reverse(event)) = self.events.pop() {
+        while let Some(Reverse(event)) = self.events.peek().copied() {
+            if event.tick > deadline {
+                break;
+            }
+            self.events.pop();
             // A component can be removed (e.g. deleted in the GUI) after being
             // scheduled but before its event is processed; just drop it.
             if !self.components.contains_key(&event.component) {
@@ -226,7 +259,21 @@ impl Circuit {
             self.evaluate(event.component, &mut toggles)?;
         }
 
+        self.clock = self.clock.max(deadline);
         Ok(())
+    }
+
+    /// [`Circuit::advance`] by [`MAX_RUN_TICKS`] — in practice "settle
+    /// completely" for a circuit with no periodic component, since real
+    /// circuits converge in a handful of ticks. **Do not rely on this for a
+    /// circuit that contains a `Clock`**: it returns promptly rather than
+    /// hanging forever, but a fast-enough clock ticking up to a million times
+    /// in one call will look indistinguishable from genuine instability and
+    /// trip [`MAX_TOGGLES_PER_NET`] — this is the wrong tool for a clocked
+    /// circuit either way; use [`Circuit::advance`] tied to real elapsed time
+    /// instead.
+    pub fn run(&mut self) -> Result<(), UnstableCircuit> {
+        self.advance(MAX_RUN_TICKS)
     }
 
     fn evaluate(
@@ -275,6 +322,10 @@ impl Circuit {
                 let delay = self.components[&reader].component.propagation_delay();
                 self.schedule_at(reader, self.clock + delay);
             }
+        }
+
+        if let Some(&period) = self.periodic.get(&component) {
+            self.schedule_at(component, self.clock + period);
         }
 
         Ok(())
@@ -697,5 +748,72 @@ mod tests {
 
         // Must not panic on an event referencing a component that's now gone.
         assert_eq!(circuit.run(), Ok(()));
+    }
+
+    use crate::components::clock::Clock;
+
+    #[test]
+    fn a_periodic_clock_keeps_toggling_across_advance_calls() {
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+
+        circuit.schedule_periodic(clock, 5);
+        circuit.advance(0).unwrap();
+        assert_eq!(circuit.signal_at(net), Signal::High);
+
+        circuit.advance(5).unwrap();
+        assert_eq!(circuit.signal_at(net), Signal::Low);
+
+        circuit.advance(5).unwrap();
+        assert_eq!(circuit.signal_at(net), Signal::High);
+    }
+
+    #[test]
+    fn advance_leaves_a_clocks_next_tick_queued_for_later() {
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+
+        circuit.schedule_periodic(clock, 100);
+        circuit.advance(0).unwrap();
+        assert_eq!(circuit.signal_at(net), Signal::High);
+
+        // Advancing by far less than the period must not fast-forward it.
+        circuit.advance(1).unwrap();
+        assert_eq!(circuit.signal_at(net), Signal::High);
+    }
+
+    #[test]
+    fn run_terminates_instead_of_hanging_with_a_periodic_component() {
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+
+        circuit.schedule_periodic(clock, 1);
+
+        // A period this tight will trip MAX_TOGGLES_PER_NET within
+        // MAX_RUN_TICKS -- that's fine (run() is documented as the wrong
+        // tool for a clocked circuit anyway). What this test actually
+        // guards against is a hang: reaching this line at all is the point.
+        let _ = circuit.run();
     }
 }
