@@ -1,15 +1,16 @@
-//! Moteur de simulation logique de SimLogix : modèle de circuit et événements discrets.
+//! SimLogix simulation engine: circuit model and discrete events.
 
-pub fn hello() -> String {
-    "Hello, SimLogix!".to_string()
-}
+mod circuit;
+mod component;
+mod components;
+mod net;
+mod pin;
+mod signal;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hello_says_hello() {
-        assert_eq!(hello(), "Hello, SimLogix!");
-    }
-}
+pub use circuit::{Circuit, ComponentId, UnstableCircuit};
+pub use component::Component;
+pub use components::button::Button;
+pub use components::led::Led;
+pub use net::NetId;
+pub use pin::{Pin, PinDirection};
+pub use signal::Signal;

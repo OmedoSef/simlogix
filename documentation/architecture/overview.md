@@ -22,14 +22,14 @@ It's also natively cross-platform, with a WASM export path available later if a 
 
 ## Simulation engine
 
-See [simulation-engine.md](simulation-engine.md) for the discrete-event model that handles feedback loops — this is the direct answer to the "circuits with feedback lock up the simulator" problem from Logisim. **Not implemented yet**; only the design decision exists so far.
+See [simulation-engine.md](simulation-engine.md) for the discrete-event model that handles feedback loops — this is the direct answer to the "circuits with feedback lock up the simulator" problem from Logisim. **Implemented** in `Circuit`; not yet wired to the GUI or exercised by concrete components.
 
 ## Current status
 
-As of now, the only working code is:
+As of now, the working code is:
 
 - The Cargo workspace scaffold (`simlogix-core`, `simlogix-gui`).
-- A `hello()` function with a unit test in `simlogix-core`, exercising the crate/test setup.
-- A minimal `simlogix-gui` window ("Hello, SimLogix!") confirming the GUI toolchain (including X11 forwarding from the devcontainer) works end to end.
+- In `simlogix-core`: `Signal` (`High`/`Low`/`Unknown`/`Error`/`HighZ`), `NetId`, `PinDirection` (`Input`/`Output`/`InOut`), `Pin`, the `Component` trait, `Circuit` — net/component registration plus a real discrete-event engine (`schedule_now`, `run`, logical clock, per-net toggle-count instability detection returning `UnstableCircuit`) — and two concrete components, `Button` and `Led`, wired together and tested end to end (press → the shared net goes `High`). Each piece has unit tests, including a self-looped inverter correctly caught as unstable.
+- In `simlogix-gui`: a minimal window with a menu bar (`File` → Quit, `?` → About) plus a fixed demo scene — a push button wired to an LED through a real `simlogix-core::Circuit`. Holding the button drives the shared net `High` (LED lights up), releasing drives it back `Low`. The wiring is hardcoded in `main.rs`, not placed/connected by the user yet.
 
-None of the actual circuit model (`Signal`, `Pin`, `Component`, `Circuit`) or the event-driven engine exists in code yet.
+Not implemented yet: the general canvas editor (placing components, drawing wires, snapping, rotation, selection), logic gates, save/load.

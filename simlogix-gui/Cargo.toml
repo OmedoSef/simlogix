@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 eframe = "0.35"
 egui = "0.35"
+simlogix-core = { path = "../simlogix-core" }

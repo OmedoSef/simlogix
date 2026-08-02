@@ -2,7 +2,7 @@
 
 ## Language
 
-Identifiers (types, functions, variables) and comments/doc-comments (`///`, `//!`) are in English. Project-internal docs (`CLAUDE.md`, root `README.md`) stay in French.
+Identifiers (types, functions, variables) and comments/doc-comments (`///`, `//!`) are in English. Root `README.md` stays in French; `CLAUDE.md` is in English.
 
 ## Error handling
 
@@ -18,8 +18,17 @@ Run `cargo fmt` (default configuration, no `rustfmt.toml`) and `cargo clippy` be
 
 ## Tests
 
-Unit tests live in a `#[cfg(test)] mod tests` block at the bottom of the file they test (see `simlogix-core/src/lib.rs`).
+Unit tests live in a `#[cfg(test)] mod tests` block at the bottom of the file they test, preceded by a banner comment (see `simlogix-core/src/signal.rs`):
+
+```rust
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+```
 
 ## Module organization
 
-While `simlogix-core` stays small, everything can live in `lib.rs`. Once a concept (`Signal`, `Pin`, `Component`, `Circuit`, ...) grows past a few dozen lines, it moves into its own file (`src/signal.rs`, etc.) instead of letting `lib.rs` grow indefinitely.
+One file per concept: `signal.rs`, `pin.rs` (`Pin`, `PinDirection`), `net.rs` (`NetId`), `component.rs` (the `Component` trait only), `circuit.rs`. `lib.rs` stays crate doc + `mod`/`pub use` declarations, nothing else. Once there are several concrete components (gates, `Button`, `Led`, ...), they go under a `components/` subfolder rather than piling into `component.rs`.

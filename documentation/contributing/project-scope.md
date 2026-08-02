@@ -3,6 +3,7 @@
 ## In scope for v1 (minimal simulator)
 
 - Basic gates: AND, OR, NOT, NAND, NOR, XOR, XNOR, buffer.
+- Bidirectional/tri-state buffer (bus transceiver) — needs multi-driver net resolution, see [simulation-engine.md](../architecture/simulation-engine.md#data-model).
 - Input (switch/button), output (LED), clock.
 - Schematic editing: placement, wire routing with grid snapping and orthogonal routing, rotation, multi-select/move.
 - Real-time simulation wired into the UI loop.

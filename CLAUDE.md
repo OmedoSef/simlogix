@@ -26,10 +26,11 @@ _(current state — nothing implemented yet, see Progress)_
 - **Simulation engine: discrete events with propagation delay.** This is the answer to the feedback-loop problem. Every component has a propagation delay (defaults to 1 logical tick); an input change schedules an output event at `t + delay` instead of propagating instantly. An event queue ordered by logical time processes events in order — like HDL simulators (Verilog). This avoids infinite recursion on a combinational loop by construction (an SR-NAND latch or ring oscillator converges/oscillates instead of crashing).
   - Oscillation detection: if a net changes state more than N times within the same time step, the engine stops and reports "unstable circuit" instead of freezing the UI.
 - **Data model**:
-  - `Signal::{High, Low, Unknown, Error}` — the unknown/error state is planned from the start (one of the "simulation bug" irritants often comes from mishandling X/Z).
-  - `Pin`: input/output of a component, connected to a `Net`.
+  - `Signal::{High, Low, Unknown, Error, HighZ}` — the unknown/error state is planned from the start (one of the "simulation bug" irritants often comes from mishandling X/Z). `HighZ` is distinct from `Unknown`: `Unknown` means "not driven / not simulated yet", `HighZ` means "this specific driver is deliberately not driving right now" (tri-state).
+  - `Pin`: input, output, or bidirectional (`PinDirection::InOut`) terminal of a component, connected to a `Net`.
   - `Component`: a trait with `eval(&self, inputs) -> outputs` + `propagation_delay()`. Sub-circuits also implement this trait (hierarchy is a first-class citizen, not a hack).
   - `Circuit`: graph of components + nets, event queue, logical clock.
+  - **Multi-driver nets (not implemented yet)**: to support bidirectional/tri-state buffers (e.g. a bus transceiver), a `Net` must be able to have more than one potential driver. `Circuit`'s resolution rule when computing a net's `Signal`: ignore drivers reporting `HighZ`; if 0 remaining drivers → `Unknown`; if 1 → that driver's value; if ≥2 with differing values → `Error`. This needs to be designed when `Circuit`/`Net` are implemented, not before.
 - **Dev container** (`.devcontainer/`): `rust:1-slim-bookworm` image + X11/GL/GTK libs needed by eframe (`libx11-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libgtk-3-dev` for future native file dialogs via `rfd`, etc.), `clippy`/`rustfmt` installed. The host's X11 socket (`/tmp/.X11-unix`) is mounted and `DISPLAY` propagated, so `cargo run` from the container opens the window directly on the host desktop (X11 forwarding). `remoteUser: vscode` to stay consistent with the pattern already used on `file-checker`. The container is only for the build/dev toolchain (source code is bind-mounted by VS Code, not copied into the image).
   - Practical setup instructions (`xhost` prerequisite, how to open the devcontainer): see [README.md](README.md), not duplicated here.
 
@@ -37,6 +38,7 @@ _(current state — nothing implemented yet, see Progress)_
 
 **In v1 (minimal simulator):**
 - Basic gates: AND, OR, NOT, NAND, NOR, XOR, XNOR, buffer.
+- Bidirectional/tri-state buffer (bus transceiver) — added to scope because Romain will need it; requires the multi-driver net resolution described above.
 - Input (switch/button), output (LED), clock.
 - Schematic editing: placement, wire routing with grid snapping and orthogonal routing, rotation, multi-select/move.
 - Real-time simulation wired into the UI loop.
@@ -62,8 +64,16 @@ _(current state — nothing implemented yet, see Progress)_
 - **Error handling**: custom errors via an `enum` + [`thiserror`](https://docs.rs/thiserror) (no raw `String` errors, no `anyhow` in `simlogix-core` — it's a lib, callers need to be able to match on precise variants).
 - **Panics**: `panic!`/`unwrap()`/`expect()` forbidden outside `#[cfg(test)]`. An invalid input or malformed circuit must always surface as a `Result`, never panic.
 - **Formatting/linting**: `cargo fmt` (default config, no `rustfmt.toml`) and `cargo clippy` before considering a step done. No custom clippy config for now (may tighten later — `deny(warnings)`, `pedantic` — if needed).
-- **Tests**: unit tests co-located in a `#[cfg(test)] mod tests` module at the bottom of the file they test (pattern already used in `simlogix-core/src/lib.rs`).
-- **Module organization**: while `simlogix-core` stays small, everything can live in `lib.rs`. Once a concept (Signal, Pin, Component, Circuit...) exceeds ~a few dozen lines, it moves into its own file (`src/signal.rs`, etc.) instead of letting `lib.rs` grow indefinitely.
+- **Tests**: unit tests co-located in a `#[cfg(test)] mod tests` module at the bottom of the file they test, preceded by a banner comment separating it from the real code:
+  ```rust
+  // -----------------------------------------------------------------------------
+  // Tests
+  // -----------------------------------------------------------------------------
+
+  #[cfg(test)]
+  mod tests {
+  ```
+- **Module organization**: one file per concept — `signal.rs`, `pin.rs` (`Pin`, `PinDirection`), `net.rs` (`NetId`, later `Net`), `component.rs` (the `Component` trait only), `circuit.rs`. `lib.rs` stays just crate doc + `mod`/`pub use` declarations, nothing else. Once there are several concrete components (gates, `Button`, `Led`...), they go under a `components/` subfolder rather than piling into `component.rs`. Each file keeps its own `#[cfg(test)] mod tests` at the bottom.
 
 ## Progress
 
@@ -74,8 +84,8 @@ _(current state — nothing implemented yet, see Progress)_
 - [x] Cargo workspace scaffold (`simlogix-core`, `simlogix-gui`).
 - [x] Minimal eframe/egui GUI shell ("Hello, SimLogix!" displayed, X11 forwarding validated — required adding `libxkbcommon-x11-dev` to the devcontainer).
 - [x] `documentation/` folder started (getting-started, architecture, contributing).
-- [ ] `simlogix-core` engine (data model + discrete events) — for now just a `hello()` + test, no real model yet.
+- [x] `simlogix-core` engine, enough for `Button`/wire/`Led`: `Signal`, `NetId`, `PinDirection`, `Pin`, `Component` trait, `Circuit` (discrete-event engine — `add_component`, `schedule_now`, `run`, logical clock, `UnstableCircuit` instability detection), and concrete components `Button` (`components/button.rs`, pressed state shared via `Rc<Cell<bool>>` so the GUI can toggle it without a `&mut` back from `Circuit`) and `Led` (`components/led.rs`, a pure sink — read its state via `Circuit::signal_at` on its input net). All unit-tested, including an end-to-end button→net→LED test. Not implemented: gates (AND/OR/NOT/...), the bidirectional/tri-state buffer, save/load.
 - [ ] Feedback-loop tests (SR-NAND latch, ring oscillator).
-- [ ] Editor interaction (placement, wire routing, snapping, rotation, selection).
-- [ ] Real-time simulation ↔ UI integration.
+- [x] First real-time simulation ↔ UI integration: a fixed (not yet placeable/wireable) demo scene in `simlogix-gui` — a push button wired to an LED through `simlogix-core::Circuit`, holding the button drives the net `High` and lights the LED, releasing drives it back `Low`. Proves the engine runs correctly inside the `eframe` loop before building the general editor.
+- [ ] Editor interaction (placement, wire routing, snapping, rotation, selection) — the general canvas editor; today's scene is hardcoded, not placed/wired by the user.
 - [ ] Save/load a circuit.
