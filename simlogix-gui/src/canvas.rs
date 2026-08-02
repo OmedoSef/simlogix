@@ -3,6 +3,7 @@
 //! yet — out of scope for v1).
 
 use egui::{pos2, Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
+use serde::{Deserialize, Serialize};
 
 pub const GRID_SPACING: f32 = 20.0;
 /// Default box size for the auto-generated component appearance.
@@ -13,7 +14,7 @@ const PIN_RADIUS: f32 = 3.0;
 /// A component's orientation: which box edge its inputs/outputs are drawn on.
 /// The box itself stays axis-aligned (so its label stays horizontal and
 /// readable) — only which side is "input" vs "output" rotates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Rotation {
     /// Inputs left, outputs right.
     #[default]

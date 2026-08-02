@@ -8,6 +8,7 @@ use egui::{Color32, Id, Painter, Pos2, Rect, Sense, Ui};
 use simlogix_core::{Circuit, ComponentId, NetId, Signal};
 
 use crate::canvas::{self, Rotation, BOX_SIZE};
+use crate::palette::ComponentKind;
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
 /// it is, which net it's on, and whether a wire-drag just started there.
@@ -27,11 +28,11 @@ pub struct FrameResult {
     pub pins: Vec<PinHandle>,
 }
 
-/// A `Button` needs its pressed handle to react to clicks; a `Led`,
-/// `Transistor`, and `Rail` need nothing extra — their state is read straight
-/// from the net(s) their pins are on. `Transistor`/`Rail` carry their display
-/// label ("NMOS"/"PMOS", "GND"/"PWR") since `Circuit` only stores the opaque
-/// `Component` trait object.
+/// A `Button` needs its pressed handle to react to clicks; a `Led` and a
+/// `Probe` need nothing extra — their state is read straight from the net
+/// their pin is on. `Transistor`/`Rail` carry which specific `ComponentKind`
+/// they are (N/P-type, Ground/Power) since `Circuit` only stores the opaque
+/// `Component` trait object and can't tell them apart from the outside.
 pub enum PlacedComponent {
     Button {
         id: ComponentId,
@@ -48,13 +49,13 @@ pub enum PlacedComponent {
         id: ComponentId,
         center: Pos2,
         rotation: Rotation,
-        label: &'static str,
+        kind: ComponentKind,
     },
     Rail {
         id: ComponentId,
         center: Pos2,
         rotation: Rotation,
-        label: &'static str,
+        kind: ComponentKind,
     },
     Probe {
         id: ComponentId,
@@ -81,21 +82,21 @@ impl PlacedComponent {
         }
     }
 
-    pub fn transistor(id: ComponentId, center: Pos2, label: &'static str) -> Self {
+    pub fn transistor(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
         Self::Transistor {
             id,
             center,
             rotation: Rotation::default(),
-            label,
+            kind,
         }
     }
 
-    pub fn rail(id: ComponentId, center: Pos2, label: &'static str) -> Self {
+    pub fn rail(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
         Self::Rail {
             id,
             center,
             rotation: Rotation::default(),
-            label,
+            kind,
         }
     }
 
@@ -117,8 +118,39 @@ impl PlacedComponent {
         }
     }
 
-    /// Rotates this component a quarter-turn clockwise.
-    pub fn rotate(&mut self) {
+    pub fn center(&self) -> Pos2 {
+        match self {
+            PlacedComponent::Button { center, .. }
+            | PlacedComponent::Led { center, .. }
+            | PlacedComponent::Transistor { center, .. }
+            | PlacedComponent::Rail { center, .. }
+            | PlacedComponent::Probe { center, .. } => *center,
+        }
+    }
+
+    pub fn rotation(&self) -> Rotation {
+        match self {
+            PlacedComponent::Button { rotation, .. }
+            | PlacedComponent::Led { rotation, .. }
+            | PlacedComponent::Transistor { rotation, .. }
+            | PlacedComponent::Rail { rotation, .. }
+            | PlacedComponent::Probe { rotation, .. } => *rotation,
+        }
+    }
+
+    /// Which palette entry would place an identical component — what a
+    /// project file needs to reconstruct this on load.
+    pub fn kind(&self) -> ComponentKind {
+        match self {
+            PlacedComponent::Button { .. } => ComponentKind::Button,
+            PlacedComponent::Led { .. } => ComponentKind::Led,
+            PlacedComponent::Transistor { kind, .. } | PlacedComponent::Rail { kind, .. } => *kind,
+            PlacedComponent::Probe { .. } => ComponentKind::Probe,
+        }
+    }
+
+    /// Sets this component's rotation directly (used when loading a project).
+    pub fn set_rotation(&mut self, new_rotation: Rotation) {
         let rotation = match self {
             PlacedComponent::Button { rotation, .. }
             | PlacedComponent::Led { rotation, .. }
@@ -126,7 +158,12 @@ impl PlacedComponent {
             | PlacedComponent::Rail { rotation, .. }
             | PlacedComponent::Probe { rotation, .. } => rotation,
         };
-        *rotation = rotation.next_clockwise();
+        *rotation = new_rotation;
+    }
+
+    /// Rotates this component a quarter-turn clockwise.
+    pub fn rotate(&mut self) {
+        self.set_rotation(self.rotation().next_clockwise());
     }
 
     /// Draws this component at its current position, highlighted if
@@ -229,14 +266,14 @@ impl PlacedComponent {
             PlacedComponent::Transistor {
                 center,
                 rotation,
-                label,
+                kind,
                 ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = canvas::draw_component(
                     painter,
                     rect,
-                    label,
+                    kind.label(),
                     Color32::from_gray(45),
                     *rotation,
                     &["G", "S"],
@@ -267,14 +304,14 @@ impl PlacedComponent {
             PlacedComponent::Rail {
                 center,
                 rotation,
-                label,
+                kind,
                 ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = canvas::draw_component(
                     painter,
                     rect,
-                    label,
+                    kind.label(),
                     Color32::from_gray(45),
                     *rotation,
                     &[],

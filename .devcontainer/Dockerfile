@@ -22,11 +22,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rustup component add clippy rustfmt
-RUN cargo install cargo-audit --locked
-
 ARG USERNAME=vscode
 RUN useradd -ms /bin/bash $USERNAME
 
 USER $USERNAME
 WORKDIR /workspace
+
+# Run as vscode (not root) so the cargo registry cache these populate stays
+# owned by the same user who'll be running cargo afterward — doing this as
+# root left root-owned files blocking vscode from writing new cache entries.
+RUN rustup component add clippy rustfmt
+RUN cargo install cargo-audit --locked

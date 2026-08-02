@@ -9,6 +9,7 @@ use simlogix_core::{
 use crate::canvas;
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
+use crate::project::{SavedCircuit, SavedComponent, SavedProject};
 
 /// Pick a kind from the palette, click the canvas to drop it (snapped to the
 /// grid), then drag from one pin to another to wire them together — that
@@ -25,10 +26,15 @@ pub struct SimLogixApp {
     /// The currently selected wire: a net, and the index (within that net's
     /// group of pins sharing it) of the "far" endpoint — see the drawing loop.
     selected_wire: Option<(NetId, usize)>,
+    /// The last save/load failure, if any, shown in a dismissible window.
+    error: Option<String>,
 }
 
 impl SimLogixApp {
-    fn place(&mut self, kind: ComponentKind, center: egui::Pos2) {
+    /// Registers a new component of `kind` in `circuit` and adds it to
+    /// `placed` at `center`. Returns its id — used both for interactive
+    /// placement and to rebuild a saved project (see `project.rs`).
+    fn place(&mut self, kind: ComponentKind, center: egui::Pos2) -> ComponentId {
         let placed = match kind {
             ComponentKind::Button => {
                 let net = self.circuit.add_net();
@@ -80,7 +86,7 @@ impl SimLogixApp {
                         },
                     ],
                 );
-                PlacedComponent::transistor(id, center, kind.label())
+                PlacedComponent::transistor(id, center, kind)
             }
             ComponentKind::Ground | ComponentKind::Power => {
                 let net = self.circuit.add_net();
@@ -97,7 +103,7 @@ impl SimLogixApp {
                     }],
                 );
                 self.circuit.schedule_now(id);
-                PlacedComponent::rail(id, center, kind.label())
+                PlacedComponent::rail(id, center, kind)
             }
             ComponentKind::Probe => {
                 let net = self.circuit.add_net();
@@ -114,7 +120,130 @@ impl SimLogixApp {
         // A newly placed, unconnected component can't be part of a feedback
         // loop yet, so this can't actually be unstable.
         let _ = self.circuit.run();
+        let id = placed.id();
         self.placed.push(placed);
+        id
+    }
+
+    /// Snapshots the current layout and wiring into a saveable project.
+    /// Runtime state (button presses, signal values) is deliberately left out
+    /// — see `project.rs`.
+    fn to_project(&self) -> SavedProject {
+        let components = self
+            .placed
+            .iter()
+            .map(|placed| {
+                let center = placed.center();
+                SavedComponent {
+                    kind: placed.kind(),
+                    x: center.x,
+                    y: center.y,
+                    rotation: placed.rotation(),
+                }
+            })
+            .collect();
+
+        // Group every pin (across all placed components) by the net it's on;
+        // any group with 2+ members is a wire to remember.
+        let mut groups: HashMap<NetId, Vec<(usize, usize)>> = HashMap::new();
+        for (component_index, placed) in self.placed.iter().enumerate() {
+            for (pin_index, pin) in self.circuit.pins(placed.id()).iter().enumerate() {
+                groups
+                    .entry(pin.net)
+                    .or_default()
+                    .push((component_index, pin_index));
+            }
+        }
+        let wires = groups
+            .into_values()
+            .filter(|group| group.len() >= 2)
+            .collect();
+
+        SavedProject {
+            version: crate::project::CURRENT_VERSION,
+            circuits: vec![SavedCircuit {
+                name: "main".to_string(),
+                components,
+                wires,
+            }],
+        }
+    }
+
+    /// Rebuilds a fresh app from a saved project, re-registering every
+    /// component and re-merging every saved wire group. Only the first
+    /// circuit is loaded — there's no multi-circuit editing yet.
+    fn from_project(project: &SavedProject) -> Self {
+        let mut app = Self::default();
+
+        let Some(circuit) = project.circuits.first() else {
+            return app;
+        };
+
+        let ids: Vec<ComponentId> = circuit
+            .components
+            .iter()
+            .map(|saved| {
+                let id = app.place(saved.kind, egui::pos2(saved.x, saved.y));
+                if let Some(placed) = app.placed.iter_mut().find(|p| p.id() == id) {
+                    placed.set_rotation(saved.rotation);
+                }
+                id
+            })
+            .collect();
+
+        for group in &circuit.wires {
+            let endpoint_nets: Vec<NetId> = group
+                .iter()
+                .map(|&(component_index, pin_index)| {
+                    app.circuit.pins(ids[component_index])[pin_index].net
+                })
+                .collect();
+            if let Some((&first_net, rest)) = endpoint_nets.split_first() {
+                for &net in rest {
+                    app.circuit.merge_nets(net, first_net);
+                }
+            }
+        }
+        let _ = app.circuit.run();
+
+        app
+    }
+
+    fn save_project(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("SimLogix project", &["simlogix"])
+            .set_file_name("circuit.simlogix")
+            .save_file()
+        else {
+            return;
+        };
+
+        let project = self.to_project();
+        let result = serde_json::to_string_pretty(&project)
+            .map_err(|err| err.to_string())
+            .and_then(|json| std::fs::write(&path, json).map_err(|err| err.to_string()));
+        if let Err(message) = result {
+            self.error = Some(format!("Couldn't save project: {message}"));
+        }
+    }
+
+    fn open_project(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("SimLogix project", &["simlogix"])
+            .pick_file()
+        else {
+            return;
+        };
+
+        let result = std::fs::read_to_string(&path)
+            .map_err(|err| err.to_string())
+            .and_then(|json| {
+                serde_json::from_str::<SavedProject>(&json).map_err(|err| err.to_string())
+            });
+        match result {
+            Ok(project) => *self = Self::from_project(&project),
+            Err(message) => self.error = Some(format!("Couldn't open project: {message}")),
+        }
     }
 }
 
@@ -123,6 +252,15 @@ impl eframe::App for SimLogixApp {
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    if ui.button("New").clicked() {
+                        *self = Self::default();
+                    }
+                    if ui.button("Open Project…").clicked() {
+                        self.open_project();
+                    }
+                    if ui.button("Save Project…").clicked() {
+                        self.save_project();
+                    }
                     if ui.button("Quit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -280,5 +418,19 @@ impl eframe::App for SimLogixApp {
                 ui.label("SimLogix — a cross-platform logic simulator.");
                 ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
             });
+
+        let mut error_open = self.error.is_some();
+        if let Some(message) = &self.error {
+            egui::Window::new("Error")
+                .open(&mut error_open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(message);
+                });
+        }
+        if !error_open {
+            self.error = None;
+        }
     }
 }

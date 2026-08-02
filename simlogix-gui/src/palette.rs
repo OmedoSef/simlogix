@@ -1,9 +1,12 @@
 //! The left palette panel: pick a component kind to place next.
 
 use egui::Ui;
+use serde::{Deserialize, Serialize};
 
 /// Which kind of component the palette currently has queued for placement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Also the tag saved in a project file (see `project.rs`) to say which
+/// concrete component a saved entry should become on load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComponentKind {
     Button,
     Led,

@@ -4,6 +4,7 @@ mod app;
 mod canvas;
 mod palette;
 mod placed_component;
+mod project;
 
 fn main() -> eframe::Result<()> {
     eframe::run_native(
