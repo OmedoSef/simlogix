@@ -30,6 +30,10 @@ As of now, the working code is:
 
 - The Cargo workspace scaffold (`simlogix-core`, `simlogix-gui`).
 - In `simlogix-core`: `Signal` (`High`/`Low`/`Unknown`/`Error`/`HighZ`), `NetId`, `PinDirection` (`Input`/`Output`/`InOut`), `Pin`, the `Component` trait, `Circuit` — net/component registration plus a real discrete-event engine (`schedule_now`, `run`, logical clock, per-net toggle-count instability detection returning `UnstableCircuit`) — and two concrete components, `Button` and `Led`, wired together and tested end to end (press → the shared net goes `High`). Each piece has unit tests, including a self-looped inverter correctly caught as unstable.
-- In `simlogix-gui`: a minimal window with a menu bar (`File` → Quit, `?` → About) plus a fixed demo scene — a push button wired to an LED through a real `simlogix-core::Circuit`. Holding the button drives the shared net `High` (LED lights up), releasing drives it back `Low`. The wiring is hardcoded in `main.rs`, not placed/connected by the user yet.
+- In `simlogix-gui`: a menu bar (`File` → Quit, `?` → About), a left palette (`Button`/`LED`), and a dot-grid canvas where clicking places the selected kind, snapped to the grid. Each placed component is a real `simlogix-core::Circuit` component rendered with the generic "box with named pins" renderer (`canvas.rs`) — the auto-generated appearance planned for v1. Holding a placed button toggles its own net; the LED box lighting up in response needs step 4 (wire drawing), since placed components aren't connected to each other yet.
 
-Not implemented yet: the general canvas editor (placing components, drawing wires, snapping, rotation, selection), logic gates, save/load.
+Placed components can also be selected (click, blue outline) and moved (drag freely, snap to grid on release). Dragging from one pin's hit target to another's connects them — `simlogix-core::Circuit::merge_nets` rewires both onto the same net — and a wire is drawn between them, colored by the net's signal. Wires are currently a straight line pin-to-pin; custom routing (waypoints, orthogonal routing) is planned but not built. Pressing `R` with a component selected rotates it a quarter-turn: the box stays axis-aligned, but which edge carries inputs vs. outputs rotates.
+
+This completes the general canvas editor's first pass (placement, selection, movement, wiring, rotation).
+
+Not implemented yet: wire routing (waypoints/orthogonal), logic gates, save/load.
