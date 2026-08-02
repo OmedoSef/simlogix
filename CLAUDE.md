@@ -1,67 +1,81 @@
 # SimLogix
 
-> Ce fichier est le guide de référence du projet. Il doit être **mis à jour à chaque nouvelle décision** (architecture, périmètre, convention) pour rester la source de vérité — y compris quand on change de machine.
+> This file is the project's reference guide. It must be **updated on every new decision** (architecture, scope, convention) to stay the source of truth — including when switching machines.
 
-Nom du projet : **SimLogix** (Sim + Logic).
+Project name: **SimLogix** (Sim + Logic).
 
-## Contexte du projet
+## Project context
 
-Romain veut remplacer Logisim par un outil qui corrige ses frustrations principales :
+Romain wants to replace Logisim with a tool that fixes his main frustrations:
 
-- **Interaction canevas laborieuse** : placer/relier portes et fils est lent et peu fluide.
-- **Apparence des composants pénible à créer** : l'éditeur de forme de Logisim est limité.
-- **Boucles rétroactives mal gérées** : les circuits avec feedback combinatoire (ex. bascule SR en NAND) provoquent des bugs/blocages dans le moteur de simulation.
-- **UI/UX datée** (Swing/Java).
+- **Tedious canvas interaction**: placing/wiring gates and wires is slow and clunky.
+- **Painful component appearance editing**: Logisim's shape editor is limited.
+- **Poorly handled feedback loops**: circuits with combinational feedback (e.g. an SR latch in NAND) cause bugs/hangs in the simulation engine.
+- **Dated UI/UX** (Swing/Java).
 
-Objectif : un simulateur logique multiplateforme, écrit en Rust.
+Goal: a cross-platform logic simulator, written in Rust.
 
-## Décisions d'architecture
+## Architecture decisions
 
-_(état actuel — rien n'est encore implémenté, voir Avancement)_
+_(current state — nothing implemented yet, see Progress)_
 
-- **Workspace Cargo à 2 crates** :
-  - `simlogix-core/` — modèle de circuit + moteur de simulation, sans dépendance GUI, testable en isolation.
-  - `simlogix-gui/` — éditeur de schéma + rendu + boucle de simulation temps réel.
-- **GUI : egui / eframe.** Choisi plutôt qu'iced ou Slint pour le contrôle direct du `Painter` (rendu custom fluide des portes/fils/grille) et le mode immédiat qui colle naturellement à une simulation temps réel. Cross-platform natif + export WASM possible plus tard.
-- **Moteur de simulation : événements discrets avec délai de propagation.** C'est la réponse au problème des boucles rétroactives. Chaque composant a un délai de propagation (par défaut 1 tick logique) ; un changement d'entrée planifie un événement de sortie à `t + délai` au lieu de se propager instantanément. Une file d'événements ordonnée par temps logique traite les événements dans l'ordre — comme les simulateurs HDL (Verilog). Ça évite par construction la récursion infinie sur une boucle combinatoire (bascule SR-NAND, oscillateur en anneau converge/oscille au lieu de planter).
-  - Détection d'oscillation : si un net change d'état plus de N fois dans le même pas de temps, le moteur arrête et signale "circuit instable" au lieu de geler l'UI.
-- **Modèle de données** :
-  - `Signal::{High, Low, Unknown, Error}` — l'état inconnu/erreur est prévu dès le départ (un des irritants "bugs de simulation" vient souvent d'un mauvais traitement de X/Z).
-  - `Pin` : entrée/sortie d'un composant, connectée à un `Net`.
-  - `Component` : trait avec `eval(&self, inputs) -> outputs` + `propagation_delay()`. Les sous-circuits implémentent aussi ce trait (hiérarchie = citoyen de première classe, pas un hack).
-  - `Circuit` : graphe de composants + nets, file d'événements, horloge logique.
-- **Dev container** (`.devcontainer/`) : image `rust:1-slim-bookworm` + libs X11/GL/GTK nécessaires à eframe (`libx11-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libgtk-3-dev` pour les futurs dialogues de fichiers natifs via `rfd`, etc.), `clippy`/`rustfmt` installés. Le socket X11 de l'hôte (`/tmp/.X11-unix`) est monté et `DISPLAY` propagé, pour que `cargo run` depuis le conteneur ouvre la fenêtre directement sur le bureau hôte (X11 forwarding). `remoteUser: vscode` pour rester cohérent avec le pattern déjà utilisé sur `file-checker`. Le conteneur ne sert que pour la toolchain de build/dev (le code source est monté en volume par VS Code, pas copié dans l'image).
-  - Instructions pratiques de setup (prérequis `xhost`, comment ouvrir le devcontainer) : voir [README.md](README.md), pas dupliquées ici.
+- **2-crate Cargo workspace**:
+  - `simlogix-core/` — circuit model + simulation engine, no GUI dependency, testable in isolation.
+  - `simlogix-gui/` — schematic editor + rendering + real-time simulation loop.
+- **GUI: egui / eframe.** Chosen over iced or Slint for direct control of the `Painter` (smooth custom rendering of gates/wires/grid) and the immediate mode which naturally fits a real-time simulation. Native cross-platform + WASM export possible later.
+- **Simulation engine: discrete events with propagation delay.** This is the answer to the feedback-loop problem. Every component has a propagation delay (defaults to 1 logical tick); an input change schedules an output event at `t + delay` instead of propagating instantly. An event queue ordered by logical time processes events in order — like HDL simulators (Verilog). This avoids infinite recursion on a combinational loop by construction (an SR-NAND latch or ring oscillator converges/oscillates instead of crashing).
+  - Oscillation detection: if a net changes state more than N times within the same time step, the engine stops and reports "unstable circuit" instead of freezing the UI.
+- **Data model**:
+  - `Signal::{High, Low, Unknown, Error}` — the unknown/error state is planned from the start (one of the "simulation bug" irritants often comes from mishandling X/Z).
+  - `Pin`: input/output of a component, connected to a `Net`.
+  - `Component`: a trait with `eval(&self, inputs) -> outputs` + `propagation_delay()`. Sub-circuits also implement this trait (hierarchy is a first-class citizen, not a hack).
+  - `Circuit`: graph of components + nets, event queue, logical clock.
+- **Dev container** (`.devcontainer/`): `rust:1-slim-bookworm` image + X11/GL/GTK libs needed by eframe (`libx11-dev`, `libxkbcommon-dev`, `libgl1-mesa-dev`, `libgtk-3-dev` for future native file dialogs via `rfd`, etc.), `clippy`/`rustfmt` installed. The host's X11 socket (`/tmp/.X11-unix`) is mounted and `DISPLAY` propagated, so `cargo run` from the container opens the window directly on the host desktop (X11 forwarding). `remoteUser: vscode` to stay consistent with the pattern already used on `file-checker`. The container is only for the build/dev toolchain (source code is bind-mounted by VS Code, not copied into the image).
+  - Practical setup instructions (`xhost` prerequisite, how to open the devcontainer): see [README.md](README.md), not duplicated here.
 
-## Périmètre v1 / Hors-scope
+## v1 scope / Out-of-scope
 
-**Dans la v1 (simulateur minimal) :**
-- Portes de base : AND, OR, NOT, NAND, NOR, XOR, XNOR, buffer.
-- Entrée (switch/bouton), sortie (LED), horloge.
-- Édition de schéma : placement, tracé de fils avec snapping à la grille et routage orthogonal, rotation, sélection/déplacement multiple.
-- Simulation temps réel branchée sur la boucle UI.
-- Sauvegarde/chargement de circuit (serde).
+**In v1 (minimal simulator):**
+- Basic gates: AND, OR, NOT, NAND, NOR, XOR, XNOR, buffer.
+- Input (switch/button), output (LED), clock.
+- Schematic editing: placement, wire routing with grid snapping and orthogonal routing, rotation, multi-select/move.
+- Real-time simulation wired into the UI loop.
+- Save/load a circuit (serde).
 
-**Hors-scope v1 (roadmap future, pas à construire maintenant) :**
-- Éditeur d'apparence/symbole personnalisé pour un composant — v1 utilise une apparence auto-générée (boîte + pins nommés). C'est le point de douleur n°2 de Romain, traité après que le noyau soit solide.
-- Bus multi-bits, mémoire (RAM/ROM), export VHDL/FPGA, collaboration.
+**Out of scope for v1 (future roadmap, not to be built now):**
+- Custom appearance/symbol editor for a component — v1 uses an auto-generated appearance (box + named pins). This is Romain's pain point #2, addressed after the core is solid.
+- Multi-bit buses, memory (RAM/ROM), VHDL/FPGA export, collaboration.
 
-## Conventions de travail
+## Working conventions
 
-- **On avance ensemble, petit à petit.** Ne pas scaffolder ou coder de gros blocs d'un coup sans validation — proposer une étape, discuter, puis implémenter.
-- Ce fichier doit être mis à jour dès qu'une nouvelle décision structurante est prise (architecture, périmètre, convention) — pas seulement en fin de session.
-- Toujours vérifier que ce fichier reflète l'état réel du code avant de s'y fier pleinement (le code fait foi en cas de divergence).
+- **We move forward together, step by step.** Don't scaffold or write large chunks of code at once without validation — propose a step, discuss, then implement.
+- This file must be updated as soon as a new structuring decision is made (architecture, scope, convention) — not only at the end of a session.
+- Always check that this file reflects the actual state of the code before fully relying on it (the code is authoritative in case of divergence).
+- **Dev tooling**: `rust-toolchain.toml` (pins Rust 1.97.1 + clippy/rustfmt), `.editorconfig`, `pre-commit` hook (`fmt --check` blocking + `clippy` informational, consistent with the choice not to `deny(warnings)` yet), `cargo-audit` installed in the image (RustSec scan, run manually for now — no CI yet). Details: [documentation/contributing/dev-tooling.md](documentation/contributing/dev-tooling.md).
+  - `cargo audit` had flagged 2 transitive vulnerabilities (`quick-xml` 0.30) and 2 unmaintained crates (`paste`, `ttf-parser`) via the eframe/accesskit dependency chain. Fixed by upgrading `eframe`/`egui` 0.29 → 0.35 (this required adapting `simlogix-gui`: `eframe::App::update(&Context, ...)` became `ui(&mut Ui, ...)` in 0.35). Only remaining flag is `ttf-parser` unmaintained (warning, not a vulnerability) — `cargo audit` now exits clean.
+- **Conventional Commits** (`feat:`, `fix:`, `docs:`, etc., scope = name of the crate/area touched). Enforced locally by a `commit-msg` hook versioned in `.githooks/`, wired up automatically in the devcontainer via `postCreateCommand`. Details: [documentation/contributing/commit-conventions.md](documentation/contributing/commit-conventions.md).
+- **User/contributor documentation**: [documentation/](documentation/README.md) folder, in English, split into subfolders (`getting-started/`, `architecture/`, `contributing/`) to avoid overloading the README. Grows along with features. CLAUDE.md remains the internal decision log ("why" + progress); documentation/ is the "what/how" for an external reader.
 
-## Avancement
+## Code conventions
 
-- [x] Cadrage du projet et de l'architecture (ce document).
-- [x] Scaffold git + devcontainer (toolchain Rust, X11 GUI passthrough).
-- [x] Renommer le dossier/repo `new-logisim` → `simlogix`.
-- [x] README.md (setup pratique) séparé de CLAUDE.md (décisions/contexte).
-- [ ] Scaffold du workspace Cargo.
-- [ ] Moteur `simlogix-core` (modèle de données + événements discrets).
-- [ ] Tests boucles rétroactives (bascule SR-NAND, oscillateur en anneau).
-- [ ] Shell GUI eframe/egui minimal.
-- [ ] Interaction éditeur (placement, tracé de fils, snapping, rotation, sélection).
-- [ ] Intégration simulation temps réel ↔ UI.
-- [ ] Sauvegarde/chargement de circuit.
+- **Language**: identifiers (types/functions/variables) in English (standard Rust convention); comments and doc-comments (`///`, `//!`) also in English. `README.md` stays in French; `CLAUDE.md` is in English (switched from French on request, no functional reason — just consistency with the rest of the written material).
+- **Error handling**: custom errors via an `enum` + [`thiserror`](https://docs.rs/thiserror) (no raw `String` errors, no `anyhow` in `simlogix-core` — it's a lib, callers need to be able to match on precise variants).
+- **Panics**: `panic!`/`unwrap()`/`expect()` forbidden outside `#[cfg(test)]`. An invalid input or malformed circuit must always surface as a `Result`, never panic.
+- **Formatting/linting**: `cargo fmt` (default config, no `rustfmt.toml`) and `cargo clippy` before considering a step done. No custom clippy config for now (may tighten later — `deny(warnings)`, `pedantic` — if needed).
+- **Tests**: unit tests co-located in a `#[cfg(test)] mod tests` module at the bottom of the file they test (pattern already used in `simlogix-core/src/lib.rs`).
+- **Module organization**: while `simlogix-core` stays small, everything can live in `lib.rs`. Once a concept (Signal, Pin, Component, Circuit...) exceeds ~a few dozen lines, it moves into its own file (`src/signal.rs`, etc.) instead of letting `lib.rs` grow indefinitely.
+
+## Progress
+
+- [x] Project and architecture framing (this document).
+- [x] Git + devcontainer scaffold (Rust toolchain, X11 GUI passthrough).
+- [x] Rename folder/repo `new-logisim` → `simlogix`.
+- [x] README.md (practical setup) split from CLAUDE.md (decisions/context).
+- [x] Cargo workspace scaffold (`simlogix-core`, `simlogix-gui`).
+- [x] Minimal eframe/egui GUI shell ("Hello, SimLogix!" displayed, X11 forwarding validated — required adding `libxkbcommon-x11-dev` to the devcontainer).
+- [x] `documentation/` folder started (getting-started, architecture, contributing).
+- [ ] `simlogix-core` engine (data model + discrete events) — for now just a `hello()` + test, no real model yet.
+- [ ] Feedback-loop tests (SR-NAND latch, ring oscillator).
+- [ ] Editor interaction (placement, wire routing, snapping, rotation, selection).
+- [ ] Real-time simulation ↔ UI integration.
+- [ ] Save/load a circuit.

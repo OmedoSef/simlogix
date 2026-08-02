@@ -15,8 +15,9 @@ Simulateur logique multiplateforme, écrit en Rust — pensé pour corriger les 
 
 1. Ouvrir le dossier dans VS Code.
 2. Palette de commandes → "Dev Containers: Reopen in Container".
-3. _(à venir une fois le workspace Cargo scaffoldé)_ `cargo run -p simlogix-gui`
+3. `cargo run -p simlogix-gui`
 
 ## Documentation
 
-Contexte du projet, décisions d'architecture et avancement : voir [CLAUDE.md](CLAUDE.md).
+- Utilisation, architecture et conventions de contribution : voir le dossier [documentation/](documentation/README.md).
+- Contexte du projet, décisions et avancement (notes internes) : voir [CLAUDE.md](CLAUDE.md).

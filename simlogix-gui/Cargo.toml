@@ -1,0 +1,8 @@
+[package]
+name = "simlogix-gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.35"
+egui = "0.35"

@@ -10,13 +10,14 @@
   "containerEnv": {
     "DISPLAY": "${localEnv:DISPLAY}"
   },
+  "postCreateCommand": "git config core.hooksPath .githooks",
   "customizations": {
     "vscode": {
       "extensions": [
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
         "vadimcn.vscode-lldb",
-        "serayuzgur.crates"
+        "fill-labs.dependi"
       ],
       "settings": {
         "rust-analyzer.check.command": "clippy"

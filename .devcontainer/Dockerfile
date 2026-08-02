@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-shape0-dev \
     libxcb-xfixes0-dev \
     libxkbcommon-dev \
+    libxkbcommon-x11-dev \
     libssl-dev \
     libx11-dev \
     libxi-dev \
@@ -22,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN rustup component add clippy rustfmt
+RUN cargo install cargo-audit --locked
 
 ARG USERNAME=vscode
 RUN useradd -ms /bin/bash $USERNAME

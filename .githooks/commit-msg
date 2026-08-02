@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Enforces Conventional Commits on the subject line.
+# See documentation/contributing/commit-conventions.md for the full convention.
+set -euo pipefail
+
+commit_msg_file="$1"
+subject_line="$(head -n1 "$commit_msg_file")"
+
+# Let git-generated / rebase-generated messages through untouched.
+case "$subject_line" in
+    "Merge "*|"Revert \""*|"fixup! "*|"squash! "*)
+        exit 0
+        ;;
+esac
+
+pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._-]+\))?!?: .{1,100}$'
+
+if ! [[ "$subject_line" =~ $pattern ]]; then
+    echo "error: commit message does not follow Conventional Commits" >&2
+    echo "  expected: <type>(<scope>)?: <description>" >&2
+    echo "  example:  feat(simlogix-core): add Signal enum" >&2
+    echo "  allowed types: feat fix docs style refactor perf test build ci chore revert" >&2
+    echo "  got: $subject_line" >&2
+    exit 1
+fi
