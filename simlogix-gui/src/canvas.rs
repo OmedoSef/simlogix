@@ -56,12 +56,14 @@ enum Edge {
     Bottom,
 }
 
+/// Snaps a single coordinate to the nearest grid line.
+pub fn snap_coord_to_grid(value: f32) -> f32 {
+    (value / GRID_SPACING).round() * GRID_SPACING
+}
+
 /// Snaps a canvas position to the nearest grid intersection.
 pub fn snap_to_grid(pos: Pos2) -> Pos2 {
-    pos2(
-        (pos.x / GRID_SPACING).round() * GRID_SPACING,
-        (pos.y / GRID_SPACING).round() * GRID_SPACING,
-    )
+    pos2(snap_coord_to_grid(pos.x), snap_coord_to_grid(pos.y))
 }
 
 /// The shortest distance from `point` to the segment `a`-`b` — used to hit-test
@@ -77,12 +79,45 @@ pub fn distance_to_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {
     (point - projection).length()
 }
 
+/// A 3-segment "Z" orthogonal route between two points, with the vertical
+/// segment (the "bend") at `bend_x`: out horizontally to `bend_x`, then
+/// vertically, then the rest of the way horizontally. Degenerates to a
+/// single straight segment when `a` and `b` already share a y-coordinate.
+pub fn orthogonal_path_with_bend(a: Pos2, b: Pos2, bend_x: f32) -> Vec<Pos2> {
+    vec![a, pos2(bend_x, a.y), pos2(bend_x, b.y), b]
+}
+
+/// [`orthogonal_path_with_bend`] with the bend at the horizontal midpoint —
+/// the default route before the user drags it anywhere else.
+pub fn orthogonal_path(a: Pos2, b: Pos2) -> Vec<Pos2> {
+    orthogonal_path_with_bend(a, b, (a.x + b.x) / 2.0)
+}
+
+/// Draws a polyline through every point of `path` in order.
+pub fn draw_path(painter: &Painter, path: &[Pos2], stroke: Stroke) {
+    for pair in path.windows(2) {
+        painter.line_segment([pair[0], pair[1]], stroke);
+    }
+}
+
+/// The shortest distance from `point` to any segment of `path` — used to
+/// hit-test a click against a (possibly multi-segment) drawn wire.
+pub fn distance_to_path(point: Pos2, path: &[Pos2]) -> f32 {
+    path.windows(2)
+        .map(|pair| distance_to_segment(point, pair[0], pair[1]))
+        .fold(f32::INFINITY, f32::min)
+}
+
 /// Draws a dot grid filling `rect`.
 pub fn draw_grid(painter: &Painter, rect: Rect) {
     let dot_color = Color32::from_gray(70);
-    let mut y = rect.top();
+    // Align dots to the same absolute grid `snap_to_grid` rounds to, not to
+    // this panel's own top-left corner — otherwise the visible grid drifts
+    // out of sync with where things actually snap whenever the canvas panel
+    // doesn't start at a multiple of `GRID_SPACING` (it usually doesn't).
+    let mut y = (rect.top() / GRID_SPACING).ceil() * GRID_SPACING;
     while y < rect.bottom() {
-        let mut x = rect.left();
+        let mut x = (rect.left() / GRID_SPACING).ceil() * GRID_SPACING;
         while x < rect.right() {
             painter.circle_filled(pos2(x, y), 1.0, dot_color);
             x += GRID_SPACING;

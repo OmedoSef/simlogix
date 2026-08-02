@@ -26,6 +26,9 @@ pub struct SimLogixApp {
     /// The currently selected wire: a net, and the index (within that net's
     /// group of pins sharing it) of the "far" endpoint — see the drawing loop.
     selected_wire: Option<(NetId, usize)>,
+    /// A user-dragged override for a wire's bend x-position, keyed the same
+    /// way as `selected_wire`. Absent means "use the automatic midpoint".
+    wire_bends: HashMap<(NetId, usize), f32>,
     /// The last save/load failure, if any, shown in a dismissible window.
     error: Option<String>,
 }
@@ -346,12 +349,45 @@ impl eframe::App for SimLogixApp {
                     } else {
                         egui::Stroke::new(2.0, color)
                     };
-                    painter.line_segment([anchor, endpoint.position], stroke);
+
+                    let default_bend_x = (anchor.x + endpoint.position.x) / 2.0;
+                    let bend_x = self
+                        .wire_bends
+                        .get(&(net, index))
+                        .copied()
+                        .unwrap_or(default_bend_x);
+                    let path = canvas::orthogonal_path_with_bend(anchor, endpoint.position, bend_x);
+                    canvas::draw_path(&painter, &path, stroke);
 
                     if let Some(click_pos) = click_pos {
-                        if canvas::distance_to_segment(click_pos, anchor, endpoint.position) < 6.0 {
+                        if canvas::distance_to_path(click_pos, &path) < 6.0 {
                             self.selected_wire = Some((net, index));
                         }
+                    }
+
+                    // The middle (vertical) segment is draggable, to move the bend.
+                    let bend_top = path[1].y.min(path[2].y) - 5.0;
+                    let bend_bottom = path[1].y.max(path[2].y) + 5.0;
+                    let bend_rect = egui::Rect::from_min_max(
+                        egui::pos2(bend_x - 5.0, bend_top),
+                        egui::pos2(bend_x + 5.0, bend_bottom),
+                    );
+                    let bend_response = ui.interact(
+                        bend_rect,
+                        egui::Id::new(("wire_bend", net, index)),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if bend_response.dragged() {
+                        self.wire_bends
+                            .insert((net, index), bend_x + bend_response.drag_delta().x);
+                    }
+                    if bend_response.drag_stopped() {
+                        if let Some(bend_x) = self.wire_bends.get_mut(&(net, index)) {
+                            *bend_x = canvas::snap_coord_to_grid(*bend_x);
+                        }
+                    }
+                    if bend_response.clicked() {
+                        self.selected_wire = Some((net, index));
                     }
                 }
             }
@@ -367,6 +403,7 @@ impl eframe::App for SimLogixApp {
                             .disconnect_pin(endpoint.component, endpoint.pin_index);
                         let _ = self.circuit.run();
                     }
+                    self.wire_bends.remove(&(net, index));
                     self.selected_wire = None;
                 } else if let Some(selected) = self.selected {
                     self.circuit.remove_component(selected);
@@ -385,8 +422,10 @@ impl eframe::App for SimLogixApp {
             }
             if let Some((from_net, anchor)) = self.wiring_from {
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(anchor);
-                painter.line_segment(
-                    [anchor, pointer_pos],
+                let path = canvas::orthogonal_path(anchor, pointer_pos);
+                canvas::draw_path(
+                    &painter,
+                    &path,
                     egui::Stroke::new(2.0, egui::Color32::from_gray(200)),
                 );
 
