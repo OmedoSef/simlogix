@@ -8,6 +8,7 @@ use simlogix_core::{
 };
 
 use crate::canvas;
+use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
 use crate::project::{SavedCircuit, SavedComponent, SavedProject};
@@ -31,7 +32,6 @@ pub(crate) const SETTLE_TICKS: u64 = 32;
 /// Pick a kind from the palette, click the canvas to drop it (snapped to the
 /// grid), then drag from one pin to another to wire them together — that
 /// merges their nets in `circuit` (see `Circuit::merge_nets`).
-#[derive(Default)]
 pub struct SimLogixApp {
     show_about: bool,
     circuit: Circuit,
@@ -51,6 +51,28 @@ pub struct SimLogixApp {
     /// Fractional logical ticks owed to `circuit` from real elapsed time,
     /// carried between frames so `TICKS_PER_SECOND` isn't rounded away.
     tick_budget: f32,
+    /// The UI's current language, overridable from the Settings menu.
+    language: Language,
+}
+
+impl Default for SimLogixApp {
+    fn default() -> Self {
+        Self {
+            show_about: false,
+            circuit: Circuit::default(),
+            placed: Vec::new(),
+            pending_placement: None,
+            selected: None,
+            wiring_from: None,
+            selected_wire: None,
+            wire_bends: HashMap::new(),
+            error: None,
+            tick_budget: 0.0,
+            // Everything else defaults trivially; only the language needs a
+            // real default, detected once from the OS locale at startup.
+            language: Language::detect_from_os(),
+        }
+    }
 }
 
 impl SimLogixApp {
@@ -263,7 +285,8 @@ impl SimLogixApp {
             .map_err(|err| err.to_string())
             .and_then(|json| std::fs::write(&path, json).map_err(|err| err.to_string()));
         if let Err(message) = result {
-            self.error = Some(format!("Couldn't save project: {message}"));
+            let strings = Strings::for_language(self.language);
+            self.error = Some(strings.error_save_failed.replace("{}", &message));
         }
     }
 
@@ -281,8 +304,17 @@ impl SimLogixApp {
                 serde_json::from_str::<SavedProject>(&json).map_err(|err| err.to_string())
             });
         match result {
-            Ok(project) => *self = Self::from_project(&project),
-            Err(message) => self.error = Some(format!("Couldn't open project: {message}")),
+            Ok(project) => {
+                // Loading a project resets everything else, but the
+                // language is a UI preference, not part of the circuit.
+                let language = self.language;
+                *self = Self::from_project(&project);
+                self.language = language;
+            }
+            Err(message) => {
+                let strings = Strings::for_language(self.language);
+                self.error = Some(strings.error_open_failed.replace("{}", &message));
+            }
         }
     }
 }
@@ -303,43 +335,85 @@ impl eframe::App for SimLogixApp {
         }
         ui.ctx().request_repaint();
 
+        let strings = Strings::for_language(self.language);
+
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("New").clicked() {
+                ui.menu_button(strings.menu_file, |ui| {
+                    if ui.button(strings.menu_file_new).clicked() {
+                        let language = self.language;
                         *self = Self::default();
+                        self.language = language;
                     }
-                    if ui.button("Open Project…").clicked() {
+                    if ui.button(strings.menu_file_open).clicked() {
                         self.open_project();
                     }
-                    if ui.button("Save Project…").clicked() {
+                    if ui.button(strings.menu_file_save).clicked() {
                         self.save_project();
                     }
-                    if ui.button("Quit").clicked() {
+                    if ui.button(strings.menu_file_quit).clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                ui.menu_button("?", |ui| {
-                    if ui.button("About").clicked() {
+                ui.menu_button(strings.menu_settings, |ui| {
+                    ui.label(strings.menu_settings_theme);
+                    // egui already defaults to ThemePreference::System (follows
+                    // the OS) and tracks the current choice itself -- read it,
+                    // let the built-in widget mutate the local copy, write it
+                    // back. No SimLogixApp-level state needed for this.
+                    let mut theme_preference = ui.ctx().options(|opt| opt.theme_preference);
+                    theme_preference.radio_buttons(ui);
+                    ui.ctx().set_theme(theme_preference);
+
+                    ui.separator();
+
+                    ui.label(strings.menu_settings_language);
+                    ui.horizontal(|ui| {
+                        for language in [Language::English, Language::French, Language::Italian] {
+                            ui.selectable_value(&mut self.language, language, language.label());
+                        }
+                    });
+                });
+                ui.menu_button(strings.menu_help, |ui| {
+                    if ui.button(strings.menu_help_about).clicked() {
                         self.show_about = true;
                     }
                 });
             });
         });
 
-        egui::Panel::left("palette").show(ui, |ui| {
-            if let Some(kind) = palette::show(ui, self.pending_placement) {
-                self.pending_placement = Some(kind);
-            }
-            if self.selected.is_some() {
-                ui.add_space(8.0);
-                ui.label("Press R to rotate, Delete to remove the selected component");
-            }
-            if self.selected_wire.is_some() {
-                ui.add_space(8.0);
-                ui.label("Press Delete to remove the selected wire");
-            }
+        egui::Panel::bottom("status_bar").show(ui, |ui| {
+            let hint = if let Some(kind) = self.pending_placement {
+                let label = strings.component_kind_label(kind);
+                Some(strings.palette_click_to_place.replace("{}", label))
+            } else if self.selected_wire.is_some() {
+                Some(strings.hint_delete_wire.to_string())
+            } else if self.selected.is_some() {
+                Some(strings.hint_rotate_delete_component.to_string())
+            } else {
+                None
+            };
+            ui.label(hint.unwrap_or_default());
         });
+
+        egui::Panel::left("palette")
+            .resizable(true)
+            .default_size(220.0)
+            .size_range(160.0..=400.0)
+            .show(ui, |ui| {
+                // A resizable panel only stays at the width the user drags it
+                // to if its content actually fills that width — otherwise it
+                // re-shrinks to fit content on the next layout (e.g. right
+                // after collapsing a category). `ScrollArea` does that, and
+                // also means a longer palette scrolls instead of shrinking
+                // the whole window.
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    if let Some(kind) = palette::show(ui, strings) {
+                        self.pending_placement = Some(kind);
+                    }
+                });
+            });
 
         egui::CentralPanel::default().show(ui, |ui| {
             let canvas_rect = ui.available_rect_before_wrap();
@@ -401,7 +475,11 @@ impl eframe::App for SimLogixApp {
                         egui::Stroke::new(2.0, color)
                     };
 
-                    let default_bend_x = (anchor.x + endpoint.position.x) / 2.0;
+                    // Grid-align the default midpoint too, not just a
+                    // manually-dragged bend — otherwise a freshly drawn wire
+                    // starts off-grid until the user drags its bend once.
+                    let default_bend_x =
+                        canvas::snap_coord_to_grid((anchor.x + endpoint.position.x) / 2.0);
                     let bend_x = self
                         .wire_bends
                         .get(&(net, index))
@@ -500,18 +578,22 @@ impl eframe::App for SimLogixApp {
             }
         });
 
-        egui::Window::new("About SimLogix")
+        egui::Window::new(strings.about_title)
             .open(&mut self.show_about)
             .collapsible(false)
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label("SimLogix — a cross-platform logic simulator.");
-                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                ui.label(strings.about_body);
+                ui.label(
+                    strings
+                        .about_version
+                        .replace("{}", env!("CARGO_PKG_VERSION")),
+                );
             });
 
         let mut error_open = self.error.is_some();
         if let Some(message) = &self.error {
-            egui::Window::new("Error")
+            egui::Window::new(strings.error_title)
                 .open(&mut error_open)
                 .collapsible(false)
                 .resizable(false)

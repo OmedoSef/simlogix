@@ -9,6 +9,7 @@ use simlogix_core::{Circuit, ComponentId, NetId, Signal};
 
 use crate::canvas::{self, Rotation, BOX_SIZE};
 use crate::palette::ComponentKind;
+use crate::symbol;
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
 /// it is, which net it's on, and whether a wire-drag just started there.
@@ -27,6 +28,15 @@ pub struct FrameResult {
     pub clicked: Option<ComponentId>,
     pub pins: Vec<PinHandle>,
 }
+
+/// The symbol's stroke/accent color for components with no on/off state of
+/// their own (button, transistor, rail).
+const SYMBOL_COLOR: Color32 = Color32::from_gray(220);
+/// Symbol color for a High signal.
+const ON_COLOR: Color32 = Color32::from_rgb(220, 30, 30);
+/// Symbol color for a Low signal — bright enough to stay visible against the
+/// dark canvas now that there's no box behind it to contrast against.
+const OFF_COLOR: Color32 = Color32::from_gray(180);
 
 /// A `Button` needs its pressed handle to react to clicks; a `Led` and a
 /// `Probe` need nothing extra — their state is read straight from the net
@@ -189,7 +199,10 @@ impl PlacedComponent {
     /// (snapped to the grid), while a plain press/release on a `Button`
     /// re-schedules and re-runs `circuit` so the change is visible the same
     /// frame. Each pin also gets its own small hit target, returned so the
-    /// caller can turn a drag between two pins into a wire.
+    /// caller can turn a drag between two pins into a wire. The canvas shows
+    /// only the component's symbol (`symbol::draw`) — no text label except
+    /// `Probe`'s own state readout, which is its whole purpose. The palette
+    /// is where every other component's name shows up.
     pub fn draw_and_interact(
         &mut self,
         ui: &mut Ui,
@@ -198,6 +211,7 @@ impl PlacedComponent {
         selected: Option<ComponentId>,
     ) -> FrameResult {
         let id = self.id();
+        let kind = self.kind();
         let is_selected = selected == Some(id);
         let rect_id = Id::new(("placed", id));
 
@@ -209,15 +223,7 @@ impl PlacedComponent {
                 ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = canvas::draw_component(
-                    painter,
-                    rect,
-                    "Button",
-                    Color32::from_gray(45),
-                    *rotation,
-                    &[],
-                    &["OUT"],
-                );
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect);
                 }
@@ -253,14 +259,13 @@ impl PlacedComponent {
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or(Signal::Unknown);
-                let fill = if signal == Signal::High {
-                    Color32::from_rgb(220, 30, 30)
+                let color = if signal == Signal::High {
+                    ON_COLOR
                 } else {
-                    Color32::from_gray(45)
+                    OFF_COLOR
                 };
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions =
-                    canvas::draw_component(painter, rect, "LED", fill, *rotation, &["IN"], &[]);
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, "");
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect);
                 }
@@ -282,21 +287,10 @@ impl PlacedComponent {
                 }
             }
             PlacedComponent::Transistor {
-                center,
-                rotation,
-                kind,
-                ..
+                center, rotation, ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = canvas::draw_component(
-                    painter,
-                    rect,
-                    kind.label(),
-                    Color32::from_gray(45),
-                    *rotation,
-                    &["G", "S"],
-                    &["D"],
-                );
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect);
                 }
@@ -320,21 +314,10 @@ impl PlacedComponent {
                 }
             }
             PlacedComponent::Rail {
-                center,
-                rotation,
-                kind,
-                ..
+                center, rotation, ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = canvas::draw_component(
-                    painter,
-                    rect,
-                    kind.label(),
-                    Color32::from_gray(45),
-                    *rotation,
-                    &[],
-                    &["OUT"],
-                );
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect);
                 }
@@ -363,16 +346,22 @@ impl PlacedComponent {
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or(Signal::Unknown);
-                let (label, fill) = match signal {
-                    Signal::High => ("Probe: High", Color32::from_rgb(220, 30, 30)),
-                    Signal::Low => ("Probe: Low", Color32::from_gray(45)),
-                    Signal::Unknown => ("Probe: ?", Color32::from_gray(70)),
-                    Signal::Error => ("Probe: Error", Color32::from_rgb(200, 60, 60)),
-                    Signal::HighZ => ("Probe: Z", Color32::from_gray(90)),
+                let color = match signal {
+                    Signal::High => ON_COLOR,
+                    Signal::Low => OFF_COLOR,
+                    Signal::Unknown => Color32::from_gray(140),
+                    Signal::Error => Color32::from_rgb(200, 60, 60),
+                    Signal::HighZ => Color32::from_gray(160),
+                };
+                let label = match signal {
+                    Signal::High => "1",
+                    Signal::Low => "0",
+                    Signal::Unknown => "?",
+                    Signal::Error => "E",
+                    Signal::HighZ => "Z",
                 };
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions =
-                    canvas::draw_component(painter, rect, label, fill, *rotation, &["IN"], &[]);
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, label);
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect);
                 }
@@ -401,14 +390,13 @@ impl PlacedComponent {
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or(Signal::Unknown);
-                let fill = if signal == Signal::High {
-                    Color32::from_rgb(220, 30, 30)
+                let color = if signal == Signal::High {
+                    ON_COLOR
                 } else {
-                    Color32::from_gray(45)
+                    OFF_COLOR
                 };
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions =
-                    canvas::draw_component(painter, rect, "Clock", fill, *rotation, &[], &["OUT"]);
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, "");
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect);
                 }

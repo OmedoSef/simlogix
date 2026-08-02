@@ -2,9 +2,11 @@
 
 mod app;
 mod canvas;
+mod i18n;
 mod palette;
 mod placed_component;
 mod project;
+mod symbol;
 
 fn main() -> eframe::Result<()> {
     eframe::run_native(
