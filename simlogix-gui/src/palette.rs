@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::canvas::Rotation;
 use crate::i18n::Strings;
 use crate::symbol;
+use crate::toolbar::Tool;
 
 /// Which kind of component the palette currently has queued for placement.
 /// Also the tag saved in a project file (see `project.rs`) to say which
@@ -37,9 +38,12 @@ const ICON_SIZE: f32 = 24.0;
 /// The full row's height (icon plus a little breathing room).
 const ROW_HEIGHT: f32 = 28.0;
 
-/// Draws the palette, grouped by category. Returns `Some(kind)` the frame a
-/// palette entry is clicked, requesting that kind be queued for placement.
-pub fn show(ui: &mut Ui, strings: &Strings) -> Option<ComponentKind> {
+/// Draws the palette, grouped by category. `pending` is the kind currently
+/// queued for placement (if any), drawn as a held-down entry so the palette
+/// itself shows what you're about to drop — not just the status bar.
+/// Returns `Some(kind)` the frame a palette entry is clicked, requesting
+/// that kind be queued for placement.
+pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
     ui.heading(strings.palette_heading);
 
     let mut clicked = None;
@@ -83,8 +87,14 @@ pub fn show(ui: &mut Ui, strings: &Strings) -> Option<ComponentKind> {
             .default_open(true)
             .show(ui, |ui| {
                 for &kind in kinds {
-                    if palette_row(ui, kind, strings.component_kind_label(kind)) {
-                        clicked = Some(kind);
+                    let is_active = active == Tool::Place(kind);
+                    if palette_row(
+                        ui,
+                        Some(kind),
+                        strings.component_kind_label(kind),
+                        is_active,
+                    ) {
+                        clicked = Some(Tool::Place(kind));
                     }
                 }
             });
@@ -94,34 +104,59 @@ pub fn show(ui: &mut Ui, strings: &Strings) -> Option<ComponentKind> {
 }
 
 /// A single palette entry: a small symbol followed by its name, sharing the
-/// same hover/click feedback as a regular button. Returns `true` if clicked
+/// same hover/click feedback as a regular button. `kind` of `None` draws the
+/// wire tool's own icon instead of a component symbol. `is_active` draws the
+/// entry as held down (this is the current tool). Returns `true` if clicked
 /// this frame.
-fn palette_row(ui: &mut Ui, kind: ComponentKind, name: &str) -> bool {
+fn palette_row(ui: &mut Ui, kind: Option<ComponentKind>, name: &str, is_active: bool) -> bool {
     let desired_size = egui::vec2(ui.available_width(), ROW_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
 
     if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
+        // A queued entry borrows the "active" (held-down) visuals rather
+        // than getting its own ad-hoc colors, so it stays consistent with
+        // the current theme, light or dark.
+        let visuals = if is_active {
+            &ui.style().visuals.widgets.active
+        } else {
+            ui.style().interact(&response)
+        };
         ui.painter()
             .rect_filled(rect, 4.0, visuals.bg_fill.gamma_multiply(0.6));
+        if is_active {
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(1.5, visuals.fg_stroke.color),
+                egui::StrokeKind::Inside,
+            );
+        }
 
         let icon_rect = Rect::from_min_size(
             pos2(rect.left() + 4.0, rect.center().y - ICON_SIZE / 2.0),
             egui::vec2(ICON_SIZE, ICON_SIZE),
         );
-        let preview_label = if kind == ComponentKind::Probe {
-            "1"
-        } else {
-            ""
-        };
-        symbol::draw(
-            ui.painter(),
-            kind,
-            icon_rect,
-            Rotation::Deg0,
-            visuals.fg_stroke.color,
-            preview_label,
-        );
+        match kind {
+            Some(kind) => {
+                let preview_label = if kind == ComponentKind::Probe {
+                    "1"
+                } else {
+                    ""
+                };
+                symbol::draw(
+                    ui.painter(),
+                    kind,
+                    icon_rect,
+                    Rotation::Deg0,
+                    visuals.fg_stroke.color,
+                    preview_label,
+                );
+            }
+            None => symbol::draw_wire_tool(ui.painter(), icon_rect, visuals.fg_stroke.color),
+        }
 
         ui.painter().text(
             pos2(icon_rect.right() + 8.0, rect.center().y),

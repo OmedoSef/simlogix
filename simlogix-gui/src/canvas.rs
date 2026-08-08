@@ -5,6 +5,51 @@
 
 use egui::{pos2, Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use serde::{Deserialize, Serialize};
+use simlogix_core::Signal;
+
+/// What colour a net at `signal` is drawn in — the single place the signal
+/// colour code is defined, so wires and anything else reading out a net
+/// can't drift apart.
+///
+/// Two sets, picked per theme rather than one compromise. A single palette
+/// can't serve both backgrounds: measured against them, an amber that reads
+/// at 8:1 on the dark canvas manages only 2:1 on the light one, and a true
+/// midnight blue is the reverse. Every value below clears 4.5:1 against the
+/// background it is used on.
+pub fn signal_color(signal: Signal, dark_mode: bool) -> Color32 {
+    if dark_mode {
+        match signal {
+            Signal::High => Color32::from_rgb(72, 200, 96),
+            Signal::Low => Color32::from_rgb(235, 193, 60),
+            Signal::Unknown => Color32::from_rgb(116, 138, 240),
+            Signal::Error => Color32::from_rgb(240, 78, 78),
+            // Not one of the four states with a colour of its own: `HighZ`
+            // is a driver deliberately not driving, so it reads as "nothing
+            // here" rather than as a value.
+            Signal::HighZ => Color32::from_gray(150),
+        }
+    } else {
+        match signal {
+            Signal::High => Color32::from_rgb(22, 120, 45),
+            Signal::Low => Color32::from_rgb(146, 104, 6),
+            Signal::Unknown => Color32::from_rgb(40, 52, 150),
+            Signal::Error => Color32::from_rgb(186, 24, 24),
+            Signal::HighZ => Color32::from_gray(105),
+        }
+    }
+}
+
+/// The highlight blue: selection outlines, and the rings marking a pin or
+/// waypoint you can drop a wire onto. One definition rather than a literal
+/// repeated at each site, and per theme — the bright blue that carries the
+/// dark canvas manages only 2.5:1 on the light one.
+pub fn accent_color(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgb(90, 160, 255)
+    } else {
+        Color32::from_rgb(16, 90, 200)
+    }
+}
 
 pub const GRID_SPACING: f32 = 20.0;
 /// Default box size for the auto-generated component appearance — each half
@@ -86,9 +131,12 @@ pub fn closest_segment(path: &[Pos2], point: Pos2) -> Option<(usize, f32)> {
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
-/// Draws a dot grid filling `rect`.
-pub fn draw_grid(painter: &Painter, rect: Rect) {
-    let dot_color = Color32::from_gray(70);
+/// Draws a dot grid filling `rect` in `dot_color`.
+///
+/// The colour comes from the caller rather than being fixed here: a grey
+/// picked to sit quietly on the dark canvas is either invisible or far too
+/// heavy on the light one, so it has to follow the active theme.
+pub fn draw_grid(painter: &Painter, rect: Rect, dot_color: Color32) {
     // Align dots to the same absolute grid `snap_to_grid` rounds to, not to
     // this panel's own top-left corner — otherwise the visible grid drifts
     // out of sync with where things actually snap whenever the canvas panel
@@ -104,12 +152,24 @@ pub fn draw_grid(painter: &Painter, rect: Rect) {
     }
 }
 
-/// Draws a highlight outline around a selected component's box.
-pub fn draw_selection_outline(painter: &Painter, rect: Rect) {
+/// Draws a faint outline around a component's box while the pointer is over
+/// it — the "you're about to grab this" cue, deliberately dimmer than
+/// [`draw_selection_outline`] so a hovered component never reads as selected.
+pub fn draw_hover_outline(painter: &Painter, rect: Rect, color: Color32) {
     painter.rect_stroke(
         rect.expand(3.0),
         6.0,
-        Stroke::new(2.0, Color32::from_rgb(90, 160, 255)),
+        Stroke::new(1.5, color),
+        StrokeKind::Outside,
+    );
+}
+
+/// Draws a highlight outline around a selected component's box.
+pub fn draw_selection_outline(painter: &Painter, rect: Rect, dark_mode: bool) {
+    painter.rect_stroke(
+        rect.expand(3.0),
+        6.0,
+        Stroke::new(2.0, accent_color(dark_mode)),
         StrokeKind::Outside,
     );
 }

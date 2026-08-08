@@ -27,17 +27,24 @@ pub struct PinHandle {
 pub struct FrameResult {
     /// This component's id, if it was clicked (not dragged) this frame.
     pub clicked: Option<ComponentId>,
+    /// Whether a drag on this component just began. The caller snapshots
+    /// for undo here rather than when it ends, since by then the pre-drag
+    /// position is many frames gone.
+    pub grab_started: bool,
+    /// Whether a drag on it just ended, so it has landed somewhere new —
+    /// the caller checks whether a pin came to rest on a loose wire end.
+    pub settled: bool,
+    /// Whether this component's own input changed (a `Button` pressed or
+    /// released), so the caller should let the circuit settle. Reported
+    /// rather than settled here: whether the simulation is even running is
+    /// the app's decision, not an individual component's.
+    pub input_changed: bool,
     pub pins: Vec<PinHandle>,
 }
 
-/// The symbol's stroke/accent color for components with no on/off state of
-/// their own (button, transistor, rail).
-const SYMBOL_COLOR: Color32 = Color32::from_gray(220);
-/// Symbol color for a High signal.
+/// A lit LED. The one colour that stays fixed: a real LED is red whatever
+/// the editor's theme, and red reads on both backgrounds anyway.
 const ON_COLOR: Color32 = Color32::from_rgb(220, 30, 30);
-/// Symbol color for a Low signal — bright enough to stay visible against the
-/// dark canvas now that there's no box behind it to contrast against.
-const OFF_COLOR: Color32 = Color32::from_gray(180);
 /// How far the component box's own drag/click area is inset from its full
 /// symbol rect — half a pin's hit-rect size, so the two never overlap. Pins
 /// sit exactly on the box's edge, so without this a click meant for a pin
@@ -274,6 +281,14 @@ impl PlacedComponent {
         let kind = self.kind();
         let is_selected = selected == Some(id);
         let rect_id = Id::new(("placed", id));
+        let mut input_changed = false;
+
+        // Taken from the theme rather than fixed: symbols are drawn straight
+        // onto the canvas with nothing behind them, so a light grey that
+        // reads well on the dark background all but vanishes on the light one.
+        let symbol_color = ui.visuals().strong_text_color();
+        let dark_mode = ui.visuals().dark_mode;
+        let off_color = ui.visuals().weak_text_color();
 
         match self {
             PlacedComponent::Button {
@@ -283,35 +298,31 @@ impl PlacedComponent {
                 ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                } else {
+                let response = interact_box(ui, painter, rect, rect_id, center);
+                // Press/release only counts while not dragging, so moving a
+                // button across the canvas never also toggles it.
+                if !response.dragged() {
                     let is_pressed = response.is_pointer_button_down_on();
                     if is_pressed != pressed.get() {
                         pressed.set(is_pressed);
                         circuit.schedule_now(id);
-                        let _ = circuit.advance(crate::app::SETTLE_TICKS);
+                        input_changed = true;
                     }
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
                 }
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![pin],
                 }
             }
@@ -326,31 +337,24 @@ impl PlacedComponent {
                 let color = if signal == Signal::High {
                     ON_COLOR
                 } else {
-                    OFF_COLOR
+                    off_color
                 };
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, id, 0, pin_positions.inputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![pin],
                 }
             }
@@ -358,30 +362,44 @@ impl PlacedComponent {
                 center, rotation, ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let circuit_pins = circuit.pins(id);
-                let gate = pin_handle(ui, id, 0, pin_positions.inputs[0], circuit_pins[0].net);
-                let source = pin_handle(ui, id, 1, pin_positions.inputs[1], circuit_pins[1].net);
-                let drain = pin_handle(ui, id, 2, pin_positions.outputs[0], circuit_pins[2].net);
+                let gate = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    0,
+                    pin_positions.inputs[0],
+                    circuit_pins[0].net,
+                );
+                let source = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    1,
+                    pin_positions.inputs[1],
+                    circuit_pins[1].net,
+                );
+                let drain = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    2,
+                    pin_positions.outputs[0],
+                    circuit_pins[2].net,
+                );
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![gate, source, drain],
                 }
             }
@@ -389,28 +407,21 @@ impl PlacedComponent {
                 center, rotation, ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![pin],
                 }
             }
@@ -422,13 +433,10 @@ impl PlacedComponent {
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or(Signal::Unknown);
-                let color = match signal {
-                    Signal::High => ON_COLOR,
-                    Signal::Low => OFF_COLOR,
-                    Signal::Unknown => Color32::from_gray(140),
-                    Signal::Error => Color32::from_rgb(200, 60, 60),
-                    Signal::HighZ => Color32::from_gray(160),
-                };
+                // A probe reads out the net it's attached to, so it uses the
+                // very colour code that net is drawn in — its own duplicate
+                // of the five states was the one place they could disagree.
+                let color = canvas::signal_color(signal, dark_mode);
                 let label = match signal {
                     Signal::High => "1",
                     Signal::Low => "0",
@@ -439,26 +447,19 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, label);
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, id, 0, pin_positions.inputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![pin],
                 }
             }
@@ -470,34 +471,27 @@ impl PlacedComponent {
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or(Signal::Unknown);
-                let color = if signal == Signal::High {
-                    ON_COLOR
-                } else {
-                    OFF_COLOR
-                };
+                // A clock is a signal source, so its symbol follows the same
+                // colour code as the wire it drives (`canvas::signal_color`)
+                // rather than a lit/unlit one of its own — green while high,
+                // not red.
+                let color = canvas::signal_color(signal, dark_mode);
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![pin],
                 }
             }
@@ -505,30 +499,44 @@ impl PlacedComponent {
                 center, rotation, ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let circuit_pins = circuit.pins(id);
-                let a = pin_handle(ui, id, 0, pin_positions.inputs[0], circuit_pins[0].net);
-                let b = pin_handle(ui, id, 1, pin_positions.inputs[1], circuit_pins[1].net);
-                let out = pin_handle(ui, id, 2, pin_positions.outputs[0], circuit_pins[2].net);
+                let a = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    0,
+                    pin_positions.inputs[0],
+                    circuit_pins[0].net,
+                );
+                let b = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    1,
+                    pin_positions.inputs[1],
+                    circuit_pins[1].net,
+                );
+                let out = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    2,
+                    pin_positions.outputs[0],
+                    circuit_pins[2].net,
+                );
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![a, b, out],
                 }
             }
@@ -536,29 +544,36 @@ impl PlacedComponent {
                 center, rotation, ..
             } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
-                    canvas::draw_selection_outline(painter, rect);
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = ui.interact(
-                    rect.shrink(PIN_HIT_MARGIN),
-                    rect_id,
-                    Sense::click_and_drag(),
-                );
-                if response.dragged() {
-                    *center += response.drag_delta();
-                }
-                if response.drag_stopped() {
-                    *center = canvas::snap_to_grid(*center);
-                }
+                let response = interact_box(ui, painter, rect, rect_id, center);
 
                 let circuit_pins = circuit.pins(id);
-                let input = pin_handle(ui, id, 0, pin_positions.inputs[0], circuit_pins[0].net);
-                let output = pin_handle(ui, id, 1, pin_positions.outputs[0], circuit_pins[1].net);
+                let input = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    0,
+                    pin_positions.inputs[0],
+                    circuit_pins[0].net,
+                );
+                let output = pin_handle(
+                    ui,
+                    painter,
+                    id,
+                    1,
+                    pin_positions.outputs[0],
+                    circuit_pins[1].net,
+                );
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
                     pins: vec![input, output],
                 }
             }
@@ -566,10 +581,54 @@ impl PlacedComponent {
     }
 }
 
+/// The drag-to-move handle every placed component shares, plus its hover
+/// feedback. Each `draw_and_interact` arm still gets the `Response` back so
+/// it can layer on its own behavior (a `Button`'s press, for instance).
+///
+/// The interactive area is inset by [`PIN_HIT_MARGIN`] so it never overlaps
+/// a pin's own hit-rect — see that constant.
+fn interact_box(
+    ui: &mut Ui,
+    painter: &Painter,
+    rect: Rect,
+    rect_id: Id,
+    center: &mut Pos2,
+) -> egui::Response {
+    let response = ui.interact(
+        rect.shrink(PIN_HIT_MARGIN),
+        rect_id,
+        Sense::click_and_drag(),
+    );
+
+    if response.drag_started() {
+        // Deliberately no movement on this one frame: the caller snapshots
+        // for undo when it sees `grab_started`, and leaving the position
+        // alone is what makes that snapshot the true pre-drag state. The
+        // delta skipped here is at most egui's drag threshold, and the
+        // position snaps to the grid on release anyway.
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if response.dragged() {
+        *center += response.drag_delta();
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if response.hovered() {
+        canvas::draw_hover_outline(painter, rect, ui.visuals().weak_text_color());
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    // Snap only on release: snapping every frame mid-drag feels jerky.
+    if response.drag_stopped() {
+        *center = canvas::snap_to_grid(*center);
+    }
+
+    response
+}
+
 /// A small, separate interactive hit area right at a pin's tip, distinct from
 /// the component box's own drag area (pins are drawn just outside the box).
+/// Hovering one draws a ring around it — without that cue there's no way to
+/// tell a pin is a wiring target until you've already clicked it.
 fn pin_handle(
     ui: &mut Ui,
+    painter: &Painter,
     component: ComponentId,
     pin_index: usize,
     position: Pos2,
@@ -581,6 +640,16 @@ fn pin_handle(
         Id::new(("pin", component, pin_index)),
         Sense::click(),
     );
+
+    if response.hovered() {
+        painter.circle_stroke(
+            position,
+            6.0,
+            egui::Stroke::new(1.5, canvas::accent_color(ui.visuals().dark_mode)),
+        );
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+
     PinHandle {
         component,
         pin_index,

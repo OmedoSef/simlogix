@@ -7,6 +7,7 @@ mod palette;
 mod placed_component;
 mod project;
 mod symbol;
+mod toolbar;
 
 fn main() -> eframe::Result<()> {
     eframe::run_native(

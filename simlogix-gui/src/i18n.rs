@@ -56,7 +56,14 @@ pub struct Strings {
     pub menu_file_new: &'static str,
     pub menu_file_open: &'static str,
     pub menu_file_save: &'static str,
+    pub menu_file_save_as: &'static str,
     pub menu_file_quit: &'static str,
+    pub menu_edit: &'static str,
+    pub menu_edit_undo: &'static str,
+    pub menu_edit_redo: &'static str,
+    pub menu_simulation: &'static str,
+    pub menu_simulation_run: &'static str,
+    pub menu_simulation_pause: &'static str,
     pub menu_settings: &'static str,
     pub menu_settings_theme: &'static str,
     pub menu_settings_language: &'static str,
@@ -68,6 +75,8 @@ pub struct Strings {
     /// `.replace("{}", name)`, not `format!` (the template isn't a
     /// compile-time literal).
     pub palette_click_to_place: &'static str,
+    pub tool_select: &'static str,
+    pub tool_wire: &'static str,
     pub category_sources: &'static str,
     pub category_outputs: &'static str,
     pub category_transistors: &'static str,
@@ -99,6 +108,19 @@ pub struct Strings {
     /// Contains a literal `{}` for the version number — see
     /// `palette_click_to_place` on how to fill it in.
     pub about_version: &'static str,
+
+    /// Shown in the window title bar when the circuit has never been saved.
+    pub title_untitled: &'static str,
+
+    pub confirm_discard_title: &'static str,
+    pub confirm_discard_body: &'static str,
+    pub confirm_discard_save: &'static str,
+    pub confirm_discard_discard: &'static str,
+    pub confirm_discard_cancel: &'static str,
+
+    pub status_paused: &'static str,
+    /// Contains a literal `{}` for the net number that wouldn't settle.
+    pub status_unstable: &'static str,
 
     pub error_title: &'static str,
     /// Contains a literal `{}` for the underlying error message.
@@ -144,8 +166,15 @@ static ENGLISH: Strings = Strings {
     menu_file: "File",
     menu_file_new: "New",
     menu_file_open: "Open Project…",
-    menu_file_save: "Save Project…",
+    menu_file_save: "Save",
+    menu_file_save_as: "Save As…",
     menu_file_quit: "Quit",
+    menu_edit: "Edit",
+    menu_edit_undo: "Undo",
+    menu_edit_redo: "Redo",
+    menu_simulation: "Simulation",
+    menu_simulation_run: "Run",
+    menu_simulation_pause: "Pause",
     menu_settings: "Settings",
     menu_settings_theme: "Theme",
     menu_settings_language: "Language",
@@ -153,7 +182,10 @@ static ENGLISH: Strings = Strings {
     menu_help_about: "About",
 
     palette_heading: "Palette",
-    palette_click_to_place: "Click the canvas to place a {}",
+    palette_click_to_place:
+        "Click the canvas to place a {} — hold Shift to place several",
+    tool_select: "Select",
+    tool_wire: "Draw wire",
     category_sources: "Sources",
     category_outputs: "Outputs",
     category_transistors: "Transistors",
@@ -178,12 +210,24 @@ static ENGLISH: Strings = Strings {
 
     hint_rotate_delete_component:
         "R to rotate, Delete to remove the selected component, Esc to deselect",
-    hint_delete_wire: "Delete to remove the selected wire, Esc to deselect",
-    hint_wiring: "Click to add a point, click a pin to finish, Esc to cancel",
+    hint_delete_wire: "Delete removes the wire, double-click adds a point, right-click removes one",
+    hint_wiring:
+        "Click to add a point, click a pin or wire to finish, Enter to leave the end loose, Esc to cancel",
 
     about_title: "About SimLogix",
     about_body: "SimLogix — a cross-platform logic simulator.",
     about_version: "Version {}",
+
+    title_untitled: "Untitled",
+
+    confirm_discard_title: "Unsaved changes",
+    confirm_discard_body: "This circuit has changes that haven't been saved.",
+    confirm_discard_save: "Save",
+    confirm_discard_discard: "Discard",
+    confirm_discard_cancel: "Cancel",
+
+    status_paused: "Simulation paused",
+    status_unstable: "Simulation paused: net {} keeps oscillating instead of settling",
 
     error_title: "Error",
     error_save_failed: "Couldn't save project: {}",
@@ -194,8 +238,15 @@ static FRENCH: Strings = Strings {
     menu_file: "Fichier",
     menu_file_new: "Nouveau",
     menu_file_open: "Ouvrir un projet…",
-    menu_file_save: "Enregistrer le projet…",
+    menu_file_save: "Enregistrer",
+    menu_file_save_as: "Enregistrer sous…",
     menu_file_quit: "Quitter",
+    menu_edit: "Édition",
+    menu_edit_undo: "Annuler",
+    menu_edit_redo: "Rétablir",
+    menu_simulation: "Simulation",
+    menu_simulation_run: "Démarrer",
+    menu_simulation_pause: "Pause",
     menu_settings: "Paramètres",
     menu_settings_theme: "Thème",
     menu_settings_language: "Langue",
@@ -203,7 +254,10 @@ static FRENCH: Strings = Strings {
     menu_help_about: "À propos",
 
     palette_heading: "Palette",
-    palette_click_to_place: "Cliquez sur le canevas pour placer : {}",
+    palette_click_to_place:
+        "Cliquez sur le canevas pour placer : {} — maintenez Maj pour en poser plusieurs",
+    tool_select: "Sélection",
+    tool_wire: "Tracer un fil",
     category_sources: "Sources",
     category_outputs: "Sorties",
     category_transistors: "Transistors",
@@ -228,12 +282,24 @@ static FRENCH: Strings = Strings {
 
     hint_rotate_delete_component:
         "R pour tourner, Suppr pour supprimer le composant sélectionné, Échap pour désélectionner",
-    hint_delete_wire: "Suppr pour supprimer le fil sélectionné, Échap pour désélectionner",
-    hint_wiring: "Cliquez pour ajouter un point, cliquez une pin pour finir, Échap pour annuler",
+    hint_delete_wire: "Suppr supprime le fil, double-clic ajoute un point, clic droit en retire un",
+    hint_wiring:
+        "Cliquez pour ajouter un point, une pin ou un fil pour finir, Entrée pour laisser le bout libre, Échap pour annuler",
 
     about_title: "À propos de SimLogix",
     about_body: "SimLogix — un simulateur logique multiplateforme.",
     about_version: "Version {}",
+
+    title_untitled: "Sans titre",
+
+    confirm_discard_title: "Modifications non enregistrées",
+    confirm_discard_body: "Ce circuit contient des modifications qui n'ont pas été enregistrées.",
+    confirm_discard_save: "Enregistrer",
+    confirm_discard_discard: "Abandonner",
+    confirm_discard_cancel: "Annuler",
+
+    status_paused: "Simulation en pause",
+    status_unstable: "Simulation en pause : le net {} oscille sans se stabiliser",
 
     error_title: "Erreur",
     error_save_failed: "Échec de l'enregistrement du projet : {}",
@@ -244,8 +310,15 @@ static ITALIAN: Strings = Strings {
     menu_file: "File",
     menu_file_new: "Nuovo",
     menu_file_open: "Apri progetto…",
-    menu_file_save: "Salva progetto…",
+    menu_file_save: "Salva",
+    menu_file_save_as: "Salva con nome…",
     menu_file_quit: "Esci",
+    menu_edit: "Modifica",
+    menu_edit_undo: "Annulla",
+    menu_edit_redo: "Ripeti",
+    menu_simulation: "Simulazione",
+    menu_simulation_run: "Avvia",
+    menu_simulation_pause: "Pausa",
     menu_settings: "Impostazioni",
     menu_settings_theme: "Tema",
     menu_settings_language: "Lingua",
@@ -253,7 +326,10 @@ static ITALIAN: Strings = Strings {
     menu_help_about: "Informazioni",
 
     palette_heading: "Tavolozza",
-    palette_click_to_place: "Clicca sulla tela per posizionare: {}",
+    palette_click_to_place:
+        "Clicca sulla tela per posizionare: {} — tieni premuto Maiusc per posarne più",
+    tool_select: "Selezione",
+    tool_wire: "Traccia un filo",
     category_sources: "Sorgenti",
     category_outputs: "Uscite",
     category_transistors: "Transistor",
@@ -278,12 +354,25 @@ static ITALIAN: Strings = Strings {
 
     hint_rotate_delete_component:
         "R per ruotare, Canc per eliminare il componente selezionato, Esc per deselezionare",
-    hint_delete_wire: "Canc per eliminare il filo selezionato, Esc per deselezionare",
-    hint_wiring: "Clicca per aggiungere un punto, clicca un pin per finire, Esc per annullare",
+    hint_delete_wire:
+        "Canc elimina il filo, doppio clic aggiunge un punto, clic destro ne rimuove uno",
+    hint_wiring:
+        "Clicca per aggiungere un punto, un pin o un filo per finire, Invio per lasciare l'estremità libera, Esc per annullare",
 
     about_title: "Informazioni su SimLogix",
     about_body: "SimLogix — un simulatore logico multipiattaforma.",
     about_version: "Versione {}",
+
+    title_untitled: "Senza titolo",
+
+    confirm_discard_title: "Modifiche non salvate",
+    confirm_discard_body: "Questo circuito contiene modifiche non salvate.",
+    confirm_discard_save: "Salva",
+    confirm_discard_discard: "Ignora",
+    confirm_discard_cancel: "Annulla",
+
+    status_paused: "Simulazione in pausa",
+    status_unstable: "Simulazione in pausa: il net {} oscilla senza stabilizzarsi",
 
     error_title: "Errore",
     error_save_failed: "Impossibile salvare il progetto: {}",

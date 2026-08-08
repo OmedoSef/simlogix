@@ -57,6 +57,53 @@ pub fn draw(
     }
 }
 
+/// The wire tool's palette icon: a routed run with its corner points, the
+/// same shape the tool actually draws. Not tied to a `ComponentKind` —
+/// a wire isn't a component.
+pub fn draw_wire_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let w = rect.width() * 0.36;
+    let h = rect.height() * 0.22;
+    let corner = pos2(c.x, c.y - h);
+    let points = [
+        pos2(c.x - w, c.y - h),
+        corner,
+        pos2(c.x, c.y + h),
+        pos2(c.x + w, c.y + h),
+    ];
+    painter.line(points.to_vec(), stroke);
+    for point in [points[0], corner, points[3]] {
+        painter.circle_filled(point, 2.0, color);
+    }
+}
+
+/// The select tool's palette icon: the familiar pointer arrow.
+pub fn draw_select_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let tip = pos2(
+        rect.left() + rect.width() * 0.3,
+        rect.top() + rect.height() * 0.1,
+    );
+    let w = rect.width() * 0.34;
+    let h = rect.height() * 0.62;
+    // Head, then the short tail that makes it read as a cursor rather than
+    // just a triangle.
+    let head = vec![
+        tip,
+        pos2(tip.x, tip.y + h),
+        pos2(tip.x + w * 0.55, tip.y + h * 0.72),
+        pos2(tip.x + w, tip.y + h * 0.5),
+    ];
+    painter.add(Shape::convex_polygon(head, color, Stroke::NONE));
+    painter.line_segment(
+        [
+            pos2(tip.x + w * 0.42, tip.y + h * 0.72),
+            pos2(tip.x + w * 0.72, tip.y + h * 1.25),
+        ],
+        Stroke::new(2.4, color),
+    );
+}
+
 /// Rotates `point` clockwise around `center` by `rotation`'s quarter-turns —
 /// the same clockwise convention the old edge-based layout used (a point on
 /// the left ends up on top after one quarter-turn, and so on), so a symbol's
