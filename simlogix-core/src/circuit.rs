@@ -92,8 +92,21 @@ impl Circuit {
     }
 
     /// The pins a registered component is wired to.
+    ///
+    /// # Panics
+    /// If `component` isn't registered. Use [`Circuit::try_pins`] when the
+    /// component may already have been removed.
     pub fn pins(&self, component: ComponentId) -> &[Pin] {
         &self.components[&component].pins
+    }
+
+    /// The pins a component is wired to, or `None` if it isn't registered —
+    /// the answer to "what is this pin on?" for callers holding an id that
+    /// may since have been removed.
+    pub fn try_pins(&self, component: ComponentId) -> Option<&[Pin]> {
+        self.components
+            .get(&component)
+            .map(|registered| registered.pins.as_slice())
     }
 
     /// Merges `from` into `to`: every pin currently wired to `from` (across every
@@ -137,11 +150,21 @@ impl Circuit {
     /// it. Both the old and new net are recomputed immediately, same as
     /// [`Circuit::merge_nets`] — call [`Circuit::run`] afterward to process any
     /// resulting schedule.
-    pub fn disconnect_pin(&mut self, component: ComponentId, pin_index: usize) -> NetId {
+    ///
+    /// Returns `None` if there's no such pin, because `component` has already
+    /// been removed or doesn't have that many pins. That's an ordinary case,
+    /// not a caller mistake: deleting a component in the GUI also deletes the
+    /// wires attached to it, and each of those still names the pin it used to
+    /// end on.
+    pub fn disconnect_pin(&mut self, component: ComponentId, pin_index: usize) -> Option<NetId> {
         let new_net = self.add_net();
 
         let old_net = {
-            let pin = &mut self.components.get_mut(&component).unwrap().pins[pin_index];
+            let pin = self
+                .components
+                .get_mut(&component)?
+                .pins
+                .get_mut(pin_index)?;
             std::mem::replace(&mut pin.net, new_net)
         };
 
@@ -157,7 +180,7 @@ impl Circuit {
         self.resettle(old_net);
         self.resettle(new_net);
 
-        new_net
+        Some(new_net)
     }
 
     /// Removes `component` from the circuit entirely (e.g. the user deleted it
@@ -641,7 +664,7 @@ mod tests {
         circuit.merge_nets(button_net, led_net);
         assert_eq!(circuit.signal_at(led_net), Signal::High);
 
-        let new_net = circuit.disconnect_pin(button, 0);
+        let new_net = circuit.disconnect_pin(button, 0).expect("pin exists");
 
         // The button keeps its already-driven value on its new, private net...
         assert_eq!(circuit.pins(button)[0].net, new_net);
@@ -649,6 +672,30 @@ mod tests {
         // ...while the LED's net (still shared with nothing else now) reverts.
         assert_eq!(circuit.pins(led)[0].net, led_net);
         assert_eq!(circuit.signal_at(led_net), Signal::Unknown);
+    }
+
+    #[test]
+    fn disconnecting_a_pin_of_an_already_removed_component_reports_nothing_to_do() {
+        // What the GUI does when a component is deleted: the component goes
+        // first, then every wire that was attached to it is torn down — and
+        // each of those still names the pin it used to end on. That has to
+        // read as "nothing to disconnect", not bring the program down.
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let (button_component, _pressed) = Button::new();
+        let button = circuit.add_component(
+            Box::new(button_component),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+
+        circuit.remove_component(button);
+
+        assert_eq!(circuit.disconnect_pin(button, 0), None);
+        // Out of range on a component that *is* still there, likewise.
+        assert_eq!(circuit.disconnect_pin(button, 99), None);
     }
 
     #[test]
@@ -692,7 +739,7 @@ mod tests {
 
         // Disconnect led_a (as if its wire to the group were deleted): the
         // button and led_b must remain connected to each other on button_net.
-        let led_a_new_net = circuit.disconnect_pin(led_a, 0);
+        let led_a_new_net = circuit.disconnect_pin(led_a, 0).expect("pin exists");
         assert_eq!(circuit.pins(button)[0].net, button_net);
         assert_eq!(circuit.pins(led_b)[0].net, button_net);
         assert_eq!(circuit.signal_at(button_net), Signal::High);
