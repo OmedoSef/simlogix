@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::canvas::Rotation;
 use crate::palette::ComponentKind;
+use crate::properties::Properties;
 
 /// Bump this whenever `SavedProject`'s shape changes, and write a migration
 /// from the previous version rather than silently breaking old files.
@@ -41,7 +42,10 @@ use crate::palette::ComponentKind;
 ///   imported from another project can be told apart from a local one of
 ///   the same name.
 /// - `6` — circuits can be filed in folders.
-pub const CURRENT_VERSION: u32 = 6;
+/// - `7` — a component can carry properties (a name, and per-kind settings
+///   such as a button's resting state or a LED's colour). Absent means the
+///   behaviour that was there before, so nothing needed migrating.
+pub const CURRENT_VERSION: u32 = 7;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";
@@ -123,6 +127,10 @@ pub struct SavedComponent {
     pub x: f32,
     pub y: f32,
     pub rotation: Rotation,
+    /// What the user has set on this one. Left out of the file entirely
+    /// when nothing has been — see [`Properties`].
+    #[serde(default, skip_serializing_if = "Properties::is_empty")]
+    pub properties: Properties,
 }
 
 /// One drawn wire: two endpoints and the route between them. Positions are
@@ -509,6 +517,7 @@ mod tests {
                     x: 40.0,
                     y: 60.0,
                     rotation: Rotation::Deg90,
+                    properties: Properties::default(),
                 }],
                 wires: vec![SavedWire {
                     from: SavedEndpoint::Pin(0, 0),
@@ -607,6 +616,7 @@ mod tests {
                 x: 20.0,
                 y: 40.0,
                 rotation: Rotation::Deg0,
+                properties: Properties::default(),
             }],
             wires: Vec::new(),
         }

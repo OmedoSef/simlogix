@@ -14,6 +14,7 @@ use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
 use crate::project::{self, SavedCircuit, SavedComponent, SavedEndpoint, SavedProject, SavedWire};
+use crate::properties::{self, Properties};
 use crate::toolbar::{self, Tool};
 
 /// Logical ticks the circuit advances per real second — the resolution the
@@ -226,9 +227,7 @@ pub struct SimLogixApp {
     /// than the panel leaves the new one below the fold — it *is* open, but
     /// nothing on screen says so.
     reveal_active: bool,
-    /// What is being renamed and the name as typed so far, if any. Also
-    /// the flag that keeps the canvas off the keyboard while it's set —
-    /// otherwise typing a name would rotate and delete components.
+    /// What is being renamed and the name as typed so far, if any.
     renaming: Option<(RenameTarget, String)>,
     /// The region of the circuit currently framed by the canvas, in scene
     /// coordinates — the whole of the zoom/pan state. `egui::Scene` derives
@@ -534,6 +533,7 @@ impl SimLogixApp {
                     x: center.x,
                     y: center.y,
                     rotation: placed.rotation(),
+                    properties: placed.properties().clone(),
                 }
             })
             .collect();
@@ -630,6 +630,7 @@ impl SimLogixApp {
                 let id = app.place(saved.kind, egui::pos2(saved.x, saved.y));
                 if let Some(placed) = app.placed.iter_mut().find(|p| p.id() == id) {
                     placed.set_rotation(saved.rotation);
+                    placed.set_properties(saved.properties.clone());
                 }
                 id
             })
@@ -1750,10 +1751,16 @@ impl eframe::App for SimLogixApp {
             self.save_project();
         }
 
-        // Guarded — and short-circuited before `consume_shortcut`, so the
-        // keystroke reaches the field instead of being eaten — because a
-        // circuit name can perfectly well contain a space.
-        if self.renaming.is_none()
+        // The canvas keeps off the keyboard entirely while text is being
+        // typed anywhere — the circuit tree's rename field, a component's
+        // name in the properties panel, or anything added later. Asking egui
+        // who has focus is what makes that hold for all of them; the first
+        // version of this guard knew only about the tree's own field, so
+        // Backspace in the properties panel deleted the component.
+        //
+        // Short-circuited before `consume_shortcut` so the keystroke reaches
+        // the field instead of being eaten: a name can contain a space.
+        if !ui.ctx().text_edit_focused()
             && ui.ctx().input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
                     egui::Modifiers::NONE,
@@ -2030,9 +2037,56 @@ impl eframe::App for SimLogixApp {
             None => {}
         }
 
-        // Declared after the palette so it spans only the canvas, not the
-        // whole window: panels claim their space in declaration order, and
-        // this bar acts on the canvas alone.
+        // The panel edits a *copy*: `record_edit` has to snapshot the state
+        // before the change, and it can't run while `self.placed` is
+        // borrowed by the panel. So the edit is carried back out and applied
+        // below, snapshot first.
+        let mut pending_properties: Option<(ComponentId, Properties, bool)> = None;
+        egui::Panel::right("properties")
+            .resizable(true)
+            .default_size(220.0)
+            .size_range(180.0..=400.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("properties_scroll")
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        let selected = self
+                            .selected
+                            .and_then(|id| self.placed.iter().find(|placed| placed.id() == id));
+                        match selected {
+                            Some(placed) => {
+                                let mut edited = placed.properties().clone();
+                                let started =
+                                    properties::show(ui, strings, placed.kind(), &mut edited);
+                                if started || edited != *placed.properties() {
+                                    pending_properties = Some((placed.id(), edited, started));
+                                }
+                            }
+                            None => {
+                                ui.label(strings.properties_none_selected);
+                            }
+                        }
+                    });
+            });
+
+        if let Some((id, edited, started)) = pending_properties {
+            // Only the frame an editing session begins, so a typed-in name
+            // is one undo step rather than one per keystroke.
+            if started {
+                self.record_edit();
+            }
+            if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
+                if *placed.properties() != edited {
+                    placed.set_properties(edited);
+                    self.dirty = true;
+                }
+            }
+        }
+
+        // Declared after the palette and the properties panel so it spans
+        // only the canvas, not the whole window: panels claim their space in
+        // declaration order, and this bar acts on the canvas alone.
         egui::Panel::top("toolbar").show(ui, |ui| {
             if let Some(tool) = toolbar::show(ui, strings, self.tool) {
                 self.tool = tool;
@@ -2100,7 +2154,7 @@ impl eframe::App for SimLogixApp {
                     );
 
                     if let Some(selected) = self.selected {
-                        if self.renaming.is_none()
+                        if !ui.ctx().text_edit_focused()
                             && ui.ctx().input(|i| i.key_pressed(egui::Key::R))
                             && self.placed.iter().any(|p| p.id() == selected)
                         {
@@ -2780,7 +2834,7 @@ impl eframe::App for SimLogixApp {
                         self.split_wire(wire_id, segment, &path);
                     }
 
-                    let delete_pressed = self.renaming.is_none()
+                    let delete_pressed = !ui.ctx().text_edit_focused()
                         && ui.ctx().input(|i| {
                             i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
                         });
@@ -2956,7 +3010,7 @@ impl eframe::App for SimLogixApp {
                     // something, which defeats drawing one ahead of what it will
                     // connect to.
                     if self.wiring_from.is_some()
-                        && self.renaming.is_none()
+                        && !ui.ctx().text_edit_focused()
                         && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
                     {
                         if let Some(in_progress) = self.wiring_from.take() {
@@ -2981,7 +3035,7 @@ impl eframe::App for SimLogixApp {
                     // thing to back out of, so it goes first; only once there's no
                     // wire being drawn does the same gesture clear the selection.
                     if !consumed_secondary
-                        && self.renaming.is_none()
+                        && !ui.ctx().text_edit_focused()
                         && ui.ctx().input(|i| {
                             i.key_pressed(egui::Key::Escape) || i.pointer.secondary_clicked()
                         })
@@ -3464,6 +3518,38 @@ mod tests {
             .collect();
         let distinct: std::collections::HashSet<&&str> = names.iter().collect();
         assert_eq!(distinct.len(), names.len(), "got {names:?}");
+    }
+
+    #[test]
+    fn properties_survive_a_save_and_load() {
+        let mut app = SimLogixApp::default();
+        let id = app.place(ComponentKind::Led, egui::pos2(40.0, 40.0));
+        if let Some(placed) = app.placed.iter_mut().find(|placed| placed.id() == id) {
+            placed.set_properties(Properties {
+                name: Some("status".to_string()),
+                color: Some([0, 200, 0]),
+                ..Default::default()
+            });
+        }
+
+        let project = app.to_project();
+        let reloaded = SimLogixApp::from_project(&project, 0);
+
+        let properties = reloaded.placed[0].properties();
+        assert_eq!(properties.label(), Some("status"));
+        assert_eq!(properties.color, Some([0, 200, 0]));
+    }
+
+    #[test]
+    fn a_component_with_nothing_set_writes_no_properties_at_all() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::Led, egui::pos2(40.0, 40.0));
+
+        let json = serde_json::to_string(&app.to_project()).expect("serializes");
+
+        // The whole point of every property being optional: a project that
+        // never touched them looks exactly as it did before they existed.
+        assert!(!json.contains("properties"), "got {json}");
     }
 
     #[test]

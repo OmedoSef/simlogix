@@ -88,3 +88,24 @@ file means — the language you edit in is invisible to the saved circuit.
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo |
 | `Ctrl+N` / `Ctrl+O` | New / open project |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save / save as |
+
+## Component properties
+
+Select a component and the panel on the right shows what can be set on it.
+Everything there is optional: leave a property alone and the component
+behaves exactly as it always has, and nothing about it is written to the
+project file.
+
+| Property | Applies to | What it does |
+|---|---|---|
+| **Name** | every component | Drawn under the symbol, as your own annotation. |
+| **Pressed at rest** | Button | The button rests pressed, so clicking it *releases* it — a normally-closed switch. |
+| **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
+
+The button's setting is its **resting** state, not its current one. Runtime
+state is still never saved: opening a project starts every button at rest,
+which is now whatever you chose rather than always released.
+
+Setting a property is an ordinary edit, so `Ctrl+Z` undoes it. Typing a name
+counts as one step from the moment you click into the field; the colour
+picker leaves a step per change while you drag through it.

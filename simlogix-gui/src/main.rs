@@ -7,6 +7,7 @@ mod i18n;
 mod palette;
 mod placed_component;
 mod project;
+mod properties;
 mod symbol;
 mod toolbar;
 

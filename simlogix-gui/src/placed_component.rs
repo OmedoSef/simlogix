@@ -4,11 +4,12 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use egui::{Color32, Id, Painter, Pos2, Rect, Sense, Ui};
+use egui::{Align2, Color32, FontId, Id, Painter, Pos2, Rect, Sense, Ui};
 use simlogix_core::{Circuit, ComponentId, NetId, Signal};
 
 use crate::canvas::{self, Rotation, BOX_SIZE};
 use crate::palette::ComponentKind;
+use crate::properties::{Properties, DEFAULT_LED_COLOR};
 use crate::symbol;
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
@@ -42,9 +43,6 @@ pub struct FrameResult {
     pub pins: Vec<PinHandle>,
 }
 
-/// A lit LED. The one colour that stays fixed: a real LED is red whatever
-/// the editor's theme, and red reads on both backgrounds anyway.
-const ON_COLOR: Color32 = Color32::from_rgb(220, 30, 30);
 /// How far the component box's own drag/click area is inset from its full
 /// symbol rect — half a pin's hit-rect size, so the two never overlap. Pins
 /// sit exactly on the box's edge, so without this a click meant for a pin
@@ -60,200 +58,123 @@ const PIN_HIT_MARGIN: f32 = 7.0;
 /// `TwoInputGate` does the same for every 2-input combinational gate
 /// (`And`/`Or`/`Nand`/`Nor`/`Xor`/`Xnor`); `OneInputGate` for every 1-input
 /// one (`Not`/`Buffer`).
-pub enum PlacedComponent {
+pub struct PlacedComponent {
+    id: ComponentId,
+    center: Pos2,
+    rotation: Rotation,
+    /// What the user has set on this one; absent values mean the behaviour
+    /// this component has always had. See `properties.rs`.
+    properties: Properties,
+    /// What kind of thing it is, and whatever *that* needs to carry.
+    shape: Shape,
+}
+
+/// The part that actually varies between components.
+///
+/// `id`, `center`, `rotation` and `properties` were once repeated in every
+/// variant, which meant adding a property touched all of them. Only what
+/// genuinely differs lives here now.
+enum Shape {
     Button {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
         pressed: Rc<Cell<bool>>,
     },
-    Led {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-    },
-    Transistor {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-        kind: ComponentKind,
-    },
-    Rail {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-        kind: ComponentKind,
-    },
-    Probe {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-    },
-    Clock {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-    },
+    Led,
+    Transistor(ComponentKind),
+    Rail(ComponentKind),
+    Probe,
+    Clock,
     /// Any 2-input, 1-output, stateless combinational gate: two inputs at
-    /// pin indices 0/1, one output at pin index 0. Adding a new gate of this
+    /// pin indices 0/1, one output at pin index 2. Adding a new gate of this
     /// shape needs no new variant here: add the `ComponentKind`, a core
     /// `Component` impl, a `draw_xxx` in `symbol.rs`, and a `place()` arm in
-    /// `app.rs` that calls [`PlacedComponent::two_input_gate`] — this type's
-    /// `draw_and_interact` arm already handles the rest generically.
-    TwoInputGate {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-        kind: ComponentKind,
-    },
-    /// The 1-input mirror of `TwoInputGate`: a single input at pin index 0,
-    /// a single output at pin index 1 (`Not`/`Buffer`). Same extension
-    /// recipe, via [`PlacedComponent::one_input_gate`].
-    OneInputGate {
-        id: ComponentId,
-        center: Pos2,
-        rotation: Rotation,
-        kind: ComponentKind,
-    },
+    /// `app.rs` that calls [`PlacedComponent::two_input_gate`].
+    TwoInputGate(ComponentKind),
+    /// The 1-input mirror of `TwoInputGate` (`Not`/`Buffer`), via
+    /// [`PlacedComponent::one_input_gate`].
+    OneInputGate(ComponentKind),
 }
 
 impl PlacedComponent {
-    pub fn button(id: ComponentId, center: Pos2, pressed: Rc<Cell<bool>>) -> Self {
-        Self::Button {
+    fn new(id: ComponentId, center: Pos2, shape: Shape) -> Self {
+        Self {
             id,
             center,
             rotation: Rotation::default(),
-            pressed,
+            properties: Properties::default(),
+            shape,
         }
+    }
+
+    pub fn button(id: ComponentId, center: Pos2, pressed: Rc<Cell<bool>>) -> Self {
+        Self::new(id, center, Shape::Button { pressed })
     }
 
     pub fn led(id: ComponentId, center: Pos2) -> Self {
-        Self::Led {
-            id,
-            center,
-            rotation: Rotation::default(),
-        }
+        Self::new(id, center, Shape::Led)
     }
 
     pub fn transistor(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
-        Self::Transistor {
-            id,
-            center,
-            rotation: Rotation::default(),
-            kind,
-        }
+        Self::new(id, center, Shape::Transistor(kind))
     }
 
     pub fn rail(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
-        Self::Rail {
-            id,
-            center,
-            rotation: Rotation::default(),
-            kind,
-        }
+        Self::new(id, center, Shape::Rail(kind))
     }
 
     pub fn probe(id: ComponentId, center: Pos2) -> Self {
-        Self::Probe {
-            id,
-            center,
-            rotation: Rotation::default(),
-        }
+        Self::new(id, center, Shape::Probe)
     }
 
     pub fn clock(id: ComponentId, center: Pos2) -> Self {
-        Self::Clock {
-            id,
-            center,
-            rotation: Rotation::default(),
-        }
+        Self::new(id, center, Shape::Clock)
     }
 
     pub fn two_input_gate(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
-        Self::TwoInputGate {
-            id,
-            center,
-            rotation: Rotation::default(),
-            kind,
-        }
+        Self::new(id, center, Shape::TwoInputGate(kind))
     }
 
     pub fn one_input_gate(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
-        Self::OneInputGate {
-            id,
-            center,
-            rotation: Rotation::default(),
-            kind,
-        }
+        Self::new(id, center, Shape::OneInputGate(kind))
     }
 
     pub fn id(&self) -> ComponentId {
-        match self {
-            PlacedComponent::Button { id, .. }
-            | PlacedComponent::Led { id, .. }
-            | PlacedComponent::Transistor { id, .. }
-            | PlacedComponent::Rail { id, .. }
-            | PlacedComponent::Probe { id, .. }
-            | PlacedComponent::Clock { id, .. }
-            | PlacedComponent::TwoInputGate { id, .. }
-            | PlacedComponent::OneInputGate { id, .. } => *id,
-        }
+        self.id
     }
 
     pub fn center(&self) -> Pos2 {
-        match self {
-            PlacedComponent::Button { center, .. }
-            | PlacedComponent::Led { center, .. }
-            | PlacedComponent::Transistor { center, .. }
-            | PlacedComponent::Rail { center, .. }
-            | PlacedComponent::Probe { center, .. }
-            | PlacedComponent::Clock { center, .. }
-            | PlacedComponent::TwoInputGate { center, .. }
-            | PlacedComponent::OneInputGate { center, .. } => *center,
-        }
+        self.center
     }
 
     pub fn rotation(&self) -> Rotation {
-        match self {
-            PlacedComponent::Button { rotation, .. }
-            | PlacedComponent::Led { rotation, .. }
-            | PlacedComponent::Transistor { rotation, .. }
-            | PlacedComponent::Rail { rotation, .. }
-            | PlacedComponent::Probe { rotation, .. }
-            | PlacedComponent::Clock { rotation, .. }
-            | PlacedComponent::TwoInputGate { rotation, .. }
-            | PlacedComponent::OneInputGate { rotation, .. } => *rotation,
-        }
+        self.rotation
+    }
+
+    pub fn properties(&self) -> &Properties {
+        &self.properties
+    }
+
+    pub fn set_properties(&mut self, properties: Properties) {
+        self.properties = properties;
     }
 
     /// Which palette entry would place an identical component — what a
     /// project file needs to reconstruct this on load.
     pub fn kind(&self) -> ComponentKind {
-        match self {
-            PlacedComponent::Button { .. } => ComponentKind::Button,
-            PlacedComponent::Led { .. } => ComponentKind::Led,
-            PlacedComponent::Transistor { kind, .. }
-            | PlacedComponent::Rail { kind, .. }
-            | PlacedComponent::TwoInputGate { kind, .. }
-            | PlacedComponent::OneInputGate { kind, .. } => *kind,
-            PlacedComponent::Probe { .. } => ComponentKind::Probe,
-            PlacedComponent::Clock { .. } => ComponentKind::Clock,
+        match self.shape {
+            Shape::Button { .. } => ComponentKind::Button,
+            Shape::Led => ComponentKind::Led,
+            Shape::Transistor(kind)
+            | Shape::Rail(kind)
+            | Shape::TwoInputGate(kind)
+            | Shape::OneInputGate(kind) => kind,
+            Shape::Probe => ComponentKind::Probe,
+            Shape::Clock => ComponentKind::Clock,
         }
     }
 
     /// Sets this component's rotation directly (used when loading a project).
     pub fn set_rotation(&mut self, new_rotation: Rotation) {
-        let rotation = match self {
-            PlacedComponent::Button { rotation, .. }
-            | PlacedComponent::Led { rotation, .. }
-            | PlacedComponent::Transistor { rotation, .. }
-            | PlacedComponent::Rail { rotation, .. }
-            | PlacedComponent::Probe { rotation, .. }
-            | PlacedComponent::Clock { rotation, .. }
-            | PlacedComponent::TwoInputGate { rotation, .. }
-            | PlacedComponent::OneInputGate { rotation, .. } => rotation,
-        };
-        *rotation = new_rotation;
+        self.rotation = new_rotation;
     }
 
     /// Rotates this component a quarter-turn clockwise.
@@ -279,6 +200,16 @@ impl PlacedComponent {
     ) -> FrameResult {
         let id = self.id();
         let kind = self.kind();
+        // Destructured up front so the borrow of `center`/`rotation` and the
+        // borrow of `shape` are disjoint -- matching on `self` while also
+        // handing `&mut self.center` to `interact_box` wouldn't compile.
+        let PlacedComponent {
+            center,
+            rotation,
+            properties,
+            shape,
+            ..
+        } = self;
         let is_selected = selected == Some(id);
         let rect_id = Id::new(("placed", id));
         let mut input_changed = false;
@@ -290,13 +221,22 @@ impl PlacedComponent {
         let dark_mode = ui.visuals().dark_mode;
         let off_color = ui.visuals().weak_text_color();
 
-        match self {
-            PlacedComponent::Button {
-                center,
-                rotation,
-                pressed,
-                ..
-            } => {
+        // A name the user set is drawn under the symbol — once here rather
+        // than once per arm, since every kind can carry one. This is the
+        // deliberate exception to "symbols carry no text": an annotation you
+        // wrote is not a label the editor generated for you.
+        if let Some(label) = properties.label() {
+            painter.text(
+                Rect::from_center_size(*center, BOX_SIZE).center_bottom() + egui::vec2(0.0, 2.0),
+                Align2::CENTER_TOP,
+                label,
+                FontId::proportional(11.0),
+                symbol_color,
+            );
+        }
+
+        match shape {
+            Shape::Button { pressed } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
@@ -307,9 +247,17 @@ impl PlacedComponent {
                 // Press/release only counts while not dragging, so moving a
                 // button across the canvas never also toggles it.
                 if !response.dragged() {
-                    let is_pressed = response.is_pointer_button_down_on();
-                    if is_pressed != pressed.get() {
-                        pressed.set(is_pressed);
+                    // The property is the state the button *rests* in, and a
+                    // press inverts it — which is exactly what makes a
+                    // "pressed at rest" button one that clicking releases.
+                    // It settles itself too: on the first frame after a load
+                    // nothing is held, so this drives the cell to the resting
+                    // state without a separate initialisation.
+                    let at_rest = properties.pressed.unwrap_or(false);
+                    let held = response.is_pointer_button_down_on();
+                    let wanted = held != at_rest;
+                    if wanted != pressed.get() {
+                        pressed.set(wanted);
                         circuit.schedule_now(id);
                         input_changed = true;
                     }
@@ -326,16 +274,15 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            PlacedComponent::Led {
-                center, rotation, ..
-            } => {
+            Shape::Led => {
                 let signal = circuit
                     .pins(id)
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or(Signal::Unknown);
                 let color = if signal == Signal::High {
-                    ON_COLOR
+                    let [r, g, b] = properties.color.unwrap_or(DEFAULT_LED_COLOR);
+                    Color32::from_rgb(r, g, b)
                 } else {
                     off_color
                 };
@@ -358,9 +305,7 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            PlacedComponent::Transistor {
-                center, rotation, ..
-            } => {
+            Shape::Transistor(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
@@ -403,9 +348,7 @@ impl PlacedComponent {
                     pins: vec![gate, source, drain],
                 }
             }
-            PlacedComponent::Rail {
-                center, rotation, ..
-            } => {
+            Shape::Rail(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
@@ -425,9 +368,7 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            PlacedComponent::Probe {
-                center, rotation, ..
-            } => {
+            Shape::Probe => {
                 let signal = circuit
                     .pins(id)
                     .first()
@@ -463,9 +404,7 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            PlacedComponent::Clock {
-                center, rotation, ..
-            } => {
+            Shape::Clock => {
                 let signal = circuit
                     .pins(id)
                     .first()
@@ -495,9 +434,7 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            PlacedComponent::TwoInputGate {
-                center, rotation, ..
-            } => {
+            Shape::TwoInputGate(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {
@@ -540,9 +477,7 @@ impl PlacedComponent {
                     pins: vec![a, b, out],
                 }
             }
-            PlacedComponent::OneInputGate {
-                center, rotation, ..
-            } => {
+            Shape::OneInputGate(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
                 if is_selected {

@@ -99,6 +99,15 @@ pub struct Strings {
     /// rename anything.
     pub circuit_default_name: &'static str,
 
+    pub properties_heading: &'static str,
+    pub property_name: &'static str,
+    pub property_name_hint: &'static str,
+    pub property_pressed: &'static str,
+    pub property_pressed_hint: &'static str,
+    pub property_color: &'static str,
+    pub property_reset: &'static str,
+    pub properties_none_selected: &'static str,
+
     pub palette_heading: &'static str,
     /// Contains a literal `{}` for the component name — fill it in with
     /// `.replace("{}", name)`, not `format!` (the template isn't a
@@ -227,6 +236,15 @@ static ENGLISH: Strings = Strings {
     circuit_name_taken: "\"{}\" is already taken here.",
     circuit_default_name: "circuit",
 
+    properties_heading: "Properties",
+    property_name: "Name",
+    property_name_hint: "shown under the symbol",
+    property_pressed: "Pressed at rest",
+    property_pressed_hint: "The button rests pressed, so clicking it releases it instead.",
+    property_color: "Colour",
+    property_reset: "Reset",
+    properties_none_selected: "Select a component to see its properties.",
+
     palette_heading: "Palette",
     palette_click_to_place:
         "Click the canvas to place a {} — hold Shift to place several",
@@ -316,6 +334,15 @@ static FRENCH: Strings = Strings {
     circuit_name_taken: "« {} » est déjà utilisé ici.",
     circuit_default_name: "circuit",
 
+    properties_heading: "Propriétés",
+    property_name: "Nom",
+    property_name_hint: "affiché sous le symbole",
+    property_pressed: "Enfoncé au repos",
+    property_pressed_hint: "Le bouton est enfoncé au repos : cliquer le relâche au lieu de l'enfoncer.",
+    property_color: "Couleur",
+    property_reset: "Réinitialiser",
+    properties_none_selected: "Sélectionnez un composant pour voir ses propriétés.",
+
     palette_heading: "Palette",
     palette_click_to_place:
         "Cliquez sur le canevas pour placer : {} — maintenez Maj pour en poser plusieurs",
@@ -404,6 +431,15 @@ static ITALIAN: Strings = Strings {
     circuit_delete_last: "Un progetto deve conservare almeno un circuito.",
     circuit_name_taken: "\"{}\" è già in uso qui.",
     circuit_default_name: "circuito",
+
+    properties_heading: "Proprietà",
+    property_name: "Nome",
+    property_name_hint: "mostrato sotto il simbolo",
+    property_pressed: "Premuto a riposo",
+    property_pressed_hint: "Il pulsante è premuto a riposo: farci clic lo rilascia invece di premerlo.",
+    property_color: "Colore",
+    property_reset: "Reimposta",
+    properties_none_selected: "Seleziona un componente per vederne le proprietà.",
 
     palette_heading: "Tavolozza",
     palette_click_to_place:
