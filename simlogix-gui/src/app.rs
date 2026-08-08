@@ -1722,27 +1722,18 @@ impl eframe::App for SimLogixApp {
                     .default_size(190.0)
                     .size_range(70.0..=420.0)
                     .show(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt("circuit_tree_scroll")
-                            .show(ui, |ui| {
-                                // Same trick the palette needs, in the other
-                                // axis: a resizable panel only keeps the size
-                                // it was given while its content fills it —
-                                // otherwise it snaps back onto the content and
-                                // a project with one circuit gets a panel two
-                                // rows tall, with no room to show a second.
-                                ui.set_min_width(ui.available_width());
-                                ui.set_min_height(ui.available_height());
-                                tree_action = circuit_tree::show(
-                                    ui,
-                                    strings,
-                                    &project_name,
-                                    &self.circuits,
-                                    self.active,
-                                    std::mem::take(&mut self.reveal_active),
-                                    &mut self.renaming,
-                                );
-                            });
+                        // The tree owns its own scrolling: its heading has to
+                        // stay outside the scroll area, so the split belongs
+                        // with the layout rather than here.
+                        tree_action = circuit_tree::show(
+                            ui,
+                            strings,
+                            &project_name,
+                            &self.circuits,
+                            self.active,
+                            std::mem::take(&mut self.reveal_active),
+                            &mut self.renaming,
+                        );
                     });
 
                 // A resizable panel only stays at the width the user drags it
@@ -1800,16 +1791,25 @@ impl eframe::App for SimLogixApp {
 
         egui::CentralPanel::default().show(ui, |ui| {
             // Claim the wheel before `Scene` sees it, so it zooms instead of
-            // panning (the schematic-editor convention). Safe to do here:
-            // panels are laid out before the central one, so the palette's
-            // scroll area has already had its turn at this frame's input.
-            let wheel = ui.ctx().input_mut(|i| {
-                let dy = i.smooth_scroll_delta.y;
-                if dy != 0.0 {
-                    i.smooth_scroll_delta = egui::Vec2::ZERO;
-                }
-                dy
-            });
+            // panning (the schematic-editor convention) — but only while the
+            // pointer is over the canvas.
+            //
+            // Relying on the side panels having consumed it first isn't
+            // enough: a scroll area only takes the wheel over its *list*, so
+            // an event over the circuit tree's heading, or over a list
+            // already scrolled to its end, falls through to here and zooms
+            // the schematic while the user is plainly working somewhere else.
+            let wheel = if ui.rect_contains_pointer(ui.max_rect()) {
+                ui.ctx().input_mut(|i| {
+                    let dy = i.smooth_scroll_delta.y;
+                    if dy != 0.0 {
+                        i.smooth_scroll_delta = egui::Vec2::ZERO;
+                    }
+                    dy
+                })
+            } else {
+                0.0
+            };
 
             let mut zoom_pivot = None;
             // Copied out and written back so the closure can still borrow

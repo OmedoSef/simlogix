@@ -46,6 +46,10 @@ pub fn show(
 ) -> Option<TreeAction> {
     let mut action = None;
 
+    // The heading and the "+" sit *outside* the scroll area: they stay put
+    // while a long list scrolls under them, and egui's scrollbar floats over
+    // its content, so anything clickable at the right edge would end up
+    // underneath it.
     ui.horizontal(|ui| {
         ui.heading(strings.circuits_heading);
         // Pushed to the trailing edge so the heading doesn't jump around as
@@ -56,33 +60,44 @@ pub fn show(
             }
         });
     });
+    ui.separator();
 
-    egui::CollapsingHeader::new(egui::RichText::new(project_name).strong())
-        .id_salt("project_root")
-        .default_open(true)
+    egui::ScrollArea::vertical()
+        .id_salt("circuit_tree_scroll")
         .show(ui, |ui| {
-            for (index, circuit) in circuits.iter().enumerate() {
-                if let Some((renaming_index, buffer)) = renaming.as_mut() {
-                    if *renaming_index == index {
-                        if let Some(rename_action) = rename_row(ui, buffer) {
-                            action = Some(rename_action);
+            // A resizable panel only keeps the size it was given while its
+            // content fills it — otherwise it snaps back onto the content and
+            // a project with one circuit gets a panel two rows tall.
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(ui.available_height());
+
+            egui::CollapsingHeader::new(egui::RichText::new(project_name).strong())
+                .id_salt("project_root")
+                .default_open(true)
+                .show(ui, |ui| {
+                    for (index, circuit) in circuits.iter().enumerate() {
+                        if let Some((renaming_index, buffer)) = renaming.as_mut() {
+                            if *renaming_index == index {
+                                if let Some(rename_action) = rename_row(ui, buffer) {
+                                    action = Some(rename_action);
+                                }
+                                continue;
+                            }
                         }
-                        continue;
+                        let is_active = index == active;
+                        if let Some(row_action) = circuit_row(
+                            ui,
+                            strings,
+                            &circuit.name,
+                            index,
+                            is_active,
+                            reveal_active && is_active,
+                            circuits.len() > 1,
+                        ) {
+                            action = Some(row_action);
+                        }
                     }
-                }
-                let is_active = index == active;
-                if let Some(row_action) = circuit_row(
-                    ui,
-                    strings,
-                    &circuit.name,
-                    index,
-                    is_active,
-                    reveal_active && is_active,
-                    circuits.len() > 1,
-                ) {
-                    action = Some(row_action);
-                }
-            }
+                });
         });
 
     action
