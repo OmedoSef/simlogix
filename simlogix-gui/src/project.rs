@@ -36,7 +36,12 @@ use crate::palette::ComponentKind;
 ///   wire can survive its component being deleted and can begin at a loose
 ///   point (which is what splitting a wire produces).
 /// - `4` — the document became a zip container rather than one JSON file.
-pub const CURRENT_VERSION: u32 = 4;
+/// - `5` — a project carries a `library` name, and components are saved
+///   qualified by library (`simlogix:And`). Both exist so that a circuit
+///   imported from another project can be told apart from a local one of
+///   the same name.
+/// - `6` — circuits can be filed in folders.
+pub const CURRENT_VERSION: u32 = 6;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";
@@ -55,6 +60,10 @@ pub const LEGACY_EXTENSION: &str = "simlogix";
 #[derive(Debug, Serialize, Deserialize)]
 struct Index {
     version: u32,
+    #[serde(default)]
+    library: String,
+    #[serde(default)]
+    folders: Vec<String>,
     circuits: Vec<IndexEntry>,
 }
 
@@ -68,12 +77,42 @@ struct IndexEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedProject {
     pub version: u32,
+    /// The name other projects use to refer to this one's circuits — the
+    /// namespace half of a qualified component name.
+    ///
+    /// Deliberately **not** the file name. A file gets renamed, and two
+    /// machines can easily both hold a `test.slgx` with different contents;
+    /// either would silently repoint or collide every reference made to it.
+    /// Stored once, it survives both, and a clash between two projects is
+    /// something the user can actually fix by editing it.
+    ///
+    /// Empty means "never set" — a project from before v5, or one not yet
+    /// saved anywhere. The GUI fills it in from the file name at that point.
+    #[serde(default)]
+    pub library: String,
+    /// The folders circuits can be filed in, as `/`-separated paths.
+    ///
+    /// Held explicitly, rather than inferred from where the circuits
+    /// actually are, so that a folder you've just made survives a save
+    /// while it's still empty — otherwise the only way to create one would
+    /// be to create a circuit first, which is backwards.
+    #[serde(default)]
+    pub folders: Vec<String>,
     pub circuits: Vec<SavedCircuit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedCircuit {
     pub name: String,
+    /// Which folder this circuit is filed in — a `/`-separated path, empty
+    /// for the top level.
+    ///
+    /// Presentation, not identity: a circuit is referred to as
+    /// `library:name` wherever it sits, so filing it somewhere else never
+    /// invalidates a reference to it. The cost is that names have to be
+    /// unique across the whole project rather than per folder.
+    #[serde(default)]
+    pub folder: String,
     pub components: Vec<SavedComponent>,
     pub wires: Vec<SavedWire>,
 }
@@ -127,29 +166,52 @@ impl SavedProject {
         let mut used = std::collections::HashSet::new();
         let index = Index {
             version: CURRENT_VERSION,
+            library: self.library.clone(),
+            folders: self.folders.clone(),
             circuits: self
                 .circuits
                 .iter()
                 .map(|circuit| IndexEntry {
                     name: circuit.name.clone(),
-                    file: unique_file_name(&circuit.name, &mut used),
+                    file: unique_file_path(&circuit.folder, &circuit.name, &mut used),
                 })
                 .collect(),
         };
 
-        let mut write = |path: &str, json: String| -> Result<(), String> {
+        // A plain function rather than a closure: a closure capturing `zip`
+        // would hold the borrow for the rest of the block, and the directory
+        // entries below need it too.
+        fn write<W: std::io::Write + std::io::Seek>(
+            zip: &mut zip::ZipWriter<W>,
+            options: zip::write::FileOptions<'_, ()>,
+            path: &str,
+            json: String,
+        ) -> Result<(), String> {
             zip.start_file(path, options)
                 .map_err(|err| err.to_string())?;
             zip.write_all(json.as_bytes())
                 .map_err(|err| err.to_string())
-        };
+        }
 
         write(
+            &mut zip,
+            options,
             "project.json",
             serde_json::to_string_pretty(&index).map_err(|err| err.to_string())?,
         )?;
+
+        // A folder holding nothing has no file to imply it, so it gets a
+        // directory entry of its own — browsing the archive should show the
+        // project's folders, all of them, not just the ones that happen to
+        // have something in them.
+        for folder in &self.folders {
+            zip.add_directory(format!("circuits/{}", sanitised_path(folder)), options)
+                .map_err(|err| err.to_string())?;
+        }
         for (circuit, entry) in self.circuits.iter().zip(&index.circuits) {
             write(
+                &mut zip,
+                options,
                 &format!("circuits/{}", entry.file),
                 serde_json::to_string_pretty(circuit).map_err(|err| err.to_string())?,
             )?;
@@ -207,6 +269,8 @@ impl SavedProject {
 
         Ok(Self {
             version: CURRENT_VERSION,
+            library: index.library,
+            folders: index.folders,
             circuits,
         })
     }
@@ -282,6 +346,8 @@ impl SavedProject {
             .into_iter()
             .map(|circuit| SavedCircuit {
                 name: circuit.name,
+                // Folders arrived in v6; everything older is top level.
+                folder: String::new(),
                 components: circuit.components,
                 wires: circuit
                     .wires
@@ -297,22 +363,23 @@ impl SavedProject {
 
         Self {
             version: CURRENT_VERSION,
+            // Pre-v5 documents have no library of their own; the GUI names
+            // them after the file they came from on the way in.
+            library: String::new(),
+            folders: Vec::new(),
             circuits,
         }
     }
 }
 
-/// A file name for a circuit inside the container: its own name where that
-/// works, sanitised where it doesn't, and a numeric suffix when two circuits
-/// come out the same.
+/// One path segment made safe to use as a file name: anything that isn't
+/// alphanumeric, `-` or `_` is replaced.
 ///
-/// The point is only that it be stable and legible — `project.json` is what
-/// actually maps a name to its file, so nothing breaks if a name has to be
-/// mangled beyond recognition. Anything that isn't alphanumeric, `-` or `_`
-/// is replaced, which also means a name containing `/` or `..` can't reach
-/// outside `circuits/`.
-fn unique_file_name(name: &str, used: &mut std::collections::HashSet<String>) -> String {
-    let stem: String = name
+/// That's also what stops a name containing `/` or `..` from reaching
+/// outside `circuits/` — a segment can't become two, and can't become a
+/// parent reference.
+fn sanitised_segment(segment: &str) -> String {
+    let cleaned: String = segment
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' {
@@ -322,16 +389,49 @@ fn unique_file_name(name: &str, used: &mut std::collections::HashSet<String>) ->
             }
         })
         .collect();
-    let stem = if stem.trim_matches('_').is_empty() {
-        "circuit"
+    if cleaned.trim_matches('_').is_empty() {
+        "_".to_string()
     } else {
-        stem.as_str()
+        cleaned
+    }
+}
+
+/// A folder path with every segment made safe, keeping the `/` between them
+/// so the archive mirrors the tree the user sees.
+fn sanitised_path(path: &str) -> String {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(sanitised_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Where a circuit's file goes inside `circuits/`: its folder, mirrored, then
+/// its own name, with a numeric suffix when two land on the same path.
+///
+/// Legibility is the whole point — `project.json` is what actually maps a
+/// name to its file, so nothing breaks if a name has to be mangled beyond
+/// recognition, but a project should be browsable with an ordinary zip tool
+/// and look like what the editor shows.
+fn unique_file_path(
+    folder: &str,
+    name: &str,
+    used: &mut std::collections::HashSet<String>,
+) -> String {
+    let directory = sanitised_path(folder);
+    let stem = sanitised_segment(name);
+    let join = |file: &str| {
+        if directory.is_empty() {
+            file.to_string()
+        } else {
+            format!("{directory}/{file}")
+        }
     };
 
-    let mut candidate = format!("{stem}.json");
+    let mut candidate = join(&format!("{stem}.json"));
     let mut suffix = 2;
     while !used.insert(candidate.clone()) {
-        candidate = format!("{stem}-{suffix}.json");
+        candidate = join(&format!("{stem}-{suffix}.json"));
         suffix += 1;
     }
     candidate
@@ -399,8 +499,11 @@ mod tests {
     fn a_version_3_json_document_still_round_trips() {
         let project = SavedProject {
             version: 3,
+            library: String::new(),
+            folders: Vec::new(),
             circuits: vec![SavedCircuit {
                 name: "main".to_string(),
+                folder: String::new(),
                 components: vec![SavedComponent {
                     kind: ComponentKind::Button,
                     x: 40.0,
@@ -498,6 +601,7 @@ mod tests {
     fn circuit(name: &str) -> SavedCircuit {
         SavedCircuit {
             name: name.to_string(),
+            folder: String::new(),
             components: vec![SavedComponent {
                 kind: ComponentKind::Button,
                 x: 20.0,
@@ -512,6 +616,8 @@ mod tests {
     fn a_container_round_trips_every_circuit_in_order() {
         let project = SavedProject {
             version: CURRENT_VERSION,
+            library: "test".to_string(),
+            folders: Vec::new(),
             circuits: vec![circuit("main"), circuit("adder")],
         };
 
@@ -519,6 +625,7 @@ mod tests {
         let parsed = SavedProject::from_bytes(&bytes).expect("unpacks");
 
         assert_eq!(parsed.version, CURRENT_VERSION);
+        assert_eq!(parsed.library, "test");
         let names: Vec<&str> = parsed
             .circuits
             .iter()
@@ -547,6 +654,9 @@ mod tests {
         assert_eq!(parsed.version, CURRENT_VERSION);
         assert_eq!(parsed.circuits[0].name, "main");
         assert_eq!(parsed.circuits[0].components.len(), 1);
+        // No library of its own: the GUI names it after its file on the way
+        // in, which is the one moment a file name is allowed to decide this.
+        assert!(parsed.library.is_empty());
     }
 
     #[test]
@@ -555,6 +665,8 @@ mod tests {
         // away entirely. All three have to survive the trip.
         let project = SavedProject {
             version: CURRENT_VERSION,
+            library: "test".to_string(),
+            folders: Vec::new(),
             circuits: vec![circuit("a/b"), circuit("a:b"), circuit("///")],
         };
 
@@ -569,10 +681,80 @@ mod tests {
         assert_eq!(names, ["a/b", "a:b", "///"]);
     }
 
+    fn archive_paths(bytes: &[u8]) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("is an archive");
+        (0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|file| file.name().to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn the_archive_mirrors_the_folder_tree() {
+        let mut filed = circuit("adder");
+        filed.folder = "alu/decode".to_string();
+        let project = SavedProject {
+            version: CURRENT_VERSION,
+            library: "cpu".to_string(),
+            // An empty folder has no file to imply it, so it needs an entry
+            // of its own or browsing the archive would under-report.
+            folders: vec![
+                "alu".to_string(),
+                "alu/decode".to_string(),
+                "scratch".to_string(),
+            ],
+            circuits: vec![circuit("main"), filed],
+        };
+
+        let bytes = project.to_container().expect("packs");
+        let paths = archive_paths(&bytes);
+
+        assert!(
+            paths.contains(&"circuits/main.json".to_string()),
+            "got {paths:?}"
+        );
+        assert!(
+            paths.contains(&"circuits/alu/decode/adder.json".to_string()),
+            "got {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.starts_with("circuits/scratch")),
+            "the empty folder should still show: {paths:?}"
+        );
+
+        // And it all comes back, folders included.
+        let parsed = SavedProject::from_bytes(&bytes).expect("unpacks");
+        assert_eq!(parsed.folders, project.folders);
+        assert_eq!(parsed.circuits[1].folder, "alu/decode");
+    }
+
+    #[test]
+    fn a_folder_name_cannot_escape_the_circuits_folder_either() {
+        let mut filed = circuit("adder");
+        filed.folder = "../../etc".to_string();
+        let project = SavedProject {
+            version: CURRENT_VERSION,
+            library: "cpu".to_string(),
+            folders: vec!["../../etc".to_string()],
+            circuits: vec![filed],
+        };
+
+        let bytes = project.to_container().expect("packs");
+        let paths = archive_paths(&bytes);
+
+        assert!(
+            paths.iter().all(|path| !path.contains("..")),
+            "got {paths:?}"
+        );
+    }
+
     #[test]
     fn a_circuit_name_cannot_escape_the_circuits_folder() {
         let project = SavedProject {
             version: CURRENT_VERSION,
+            library: "test".to_string(),
+            folders: Vec::new(),
             circuits: vec![circuit("../../etc/passwd")],
         };
 

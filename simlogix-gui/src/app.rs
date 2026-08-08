@@ -9,7 +9,7 @@ use simlogix_core::{
 };
 
 use crate::canvas::{self, BOX_SIZE};
-use crate::circuit_tree::{self, TreeAction};
+use crate::circuit_tree::{self, RenameTarget, TreeAction};
 use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
@@ -203,6 +203,14 @@ pub struct SimLogixApp {
     /// when the drawing's *connectivity* actually changed — not on every
     /// frame, and not while a waypoint is merely being dragged.
     net_fingerprint: u64,
+    /// What other projects will refer to this one's circuits by — see
+    /// `SavedProject::library`. Empty until the project is first saved or
+    /// opened, at which point it's named after its file *once*, and stops
+    /// following it thereafter.
+    library: String,
+    /// The folders circuits can be filed in — see `SavedProject::folders`.
+    /// Held explicitly so an empty one survives.
+    folders: Vec<String>,
     /// Every circuit in the project, in the order the tree lists them.
     ///
     /// The one being edited is `circuits[active]`, and *its* live state is
@@ -218,10 +226,10 @@ pub struct SimLogixApp {
     /// than the panel leaves the new one below the fold — it *is* open, but
     /// nothing on screen says so.
     reveal_active: bool,
-    /// The circuit being renamed and the name as typed so far, if any. Also
+    /// What is being renamed and the name as typed so far, if any. Also
     /// the flag that keeps the canvas off the keyboard while it's set —
     /// otherwise typing a name would rotate and delete components.
-    renaming: Option<(usize, String)>,
+    renaming: Option<(RenameTarget, String)>,
     /// The region of the circuit currently framed by the canvas, in scene
     /// coordinates — the whole of the zoom/pan state. `egui::Scene` derives
     /// its transform from this and writes back whatever the user pans or
@@ -257,13 +265,16 @@ impl Default for SimLogixApp {
             net_fingerprint: 0,
             running: true,
             unstable_net: None,
+            library: String::new(),
             // A project always has at least one circuit: there has to be
             // something to edit, and the tree has to have something to show.
             circuits: vec![SavedCircuit {
                 name: "main".to_string(),
+                folder: String::new(),
                 components: Vec::new(),
                 wires: Vec::new(),
             }],
+            folders: Vec::new(),
             active: 0,
             reveal_active: false,
             renaming: None,
@@ -569,6 +580,7 @@ impl SimLogixApp {
 
         SavedCircuit {
             name: self.circuits[self.active].name.clone(),
+            folder: self.circuits[self.active].folder.clone(),
             components,
             wires,
         }
@@ -585,6 +597,8 @@ impl SimLogixApp {
 
         SavedProject {
             version: crate::project::CURRENT_VERSION,
+            library: self.library.clone(),
+            folders: self.folders.clone(),
             circuits,
         }
     }
@@ -599,6 +613,8 @@ impl SimLogixApp {
     fn from_project(project: &SavedProject, open: usize) -> Self {
         let mut app = Self::default();
 
+        app.library.clone_from(&project.library);
+        app.folders.clone_from(&project.folders);
         if !project.circuits.is_empty() {
             app.circuits = project.circuits.clone();
             app.active = open.min(app.circuits.len() - 1);
@@ -679,7 +695,35 @@ impl SimLogixApp {
         self.write_project_to(&path)
     }
 
+    /// Names the project after its file, the first time it has one.
+    ///
+    /// The library name has to start as *something*, and the file name is
+    /// both the only thing to hand and what the user already thinks of as
+    /// the project's name. It stops following the file from here on: that's
+    /// the whole point of storing it, so renaming the file doesn't repoint
+    /// every reference another project makes to these circuits.
+    fn name_library_after(&mut self, path: &std::path::Path) {
+        if !self.library.is_empty() {
+            return;
+        }
+        if let Some(stem) = path.file_stem() {
+            self.library = stem.to_string_lossy().into_owned();
+        }
+    }
+
+    /// Renames the project's library. Refuses an empty name — every
+    /// reference to a circuit in this project is qualified by it.
+    fn rename_project(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() || name == self.library {
+            return;
+        }
+        self.record_edit();
+        self.library = name.to_string();
+    }
+
     fn write_project_to(&mut self, path: &std::path::Path) -> bool {
+        self.name_library_after(path);
         let project = self.to_project();
         let result = project
             .to_container()
@@ -721,6 +765,7 @@ impl SimLogixApp {
                 let language = self.language;
                 *self = Self::from_project(&project, 0);
                 self.language = language;
+                self.name_library_after(&path);
                 self.current_path = Some(path);
             }
             Err(message) => {
@@ -1348,20 +1393,187 @@ impl SimLogixApp {
         self.reveal_active = true;
     }
 
-    /// Adds an empty circuit to the project and opens it.
-    fn create_circuit(&mut self) {
+    /// Adds an empty circuit to the project and opens it, filed in
+    /// `in_folder` (empty for the top level).
+    fn create_circuit(&mut self, in_folder: String) {
         self.record_edit();
-        let name = self.unique_name(Strings::for_language(self.language).circuit_default_name);
+        let name = self.unique_name_in(
+            &in_folder,
+            Strings::for_language(self.language).circuit_default_name,
+        );
 
         let mut project = self.to_project();
         project.circuits.push(SavedCircuit {
             name,
+            folder: in_folder,
             components: Vec::new(),
             wires: Vec::new(),
         });
         let open = project.circuits.len() - 1;
         self.reopen(&project, open);
         self.reveal_active = true;
+    }
+
+    /// The path of `path`'s parent folder, empty for a top-level one.
+    fn parent_path(path: &str) -> &str {
+        path.rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("")
+    }
+
+    /// Adds an empty folder inside `parent`.
+    fn create_folder(&mut self, parent: &str) {
+        self.record_edit();
+        let base = Strings::for_language(self.language).folder_default_name;
+        let path = self.unique_folder_path(parent, base);
+        self.folders.push(path);
+    }
+
+    /// Renames a folder's own segment, carrying everything filed under it
+    /// along — sub-folders and circuits alike, since a path is a prefix.
+    fn rename_folder(&mut self, path: &str, leaf: &str) {
+        let leaf = leaf.trim();
+        // A `/` here would silently move the folder somewhere else rather
+        // than rename it, which isn't what the gesture says it does.
+        if leaf.is_empty() || leaf.contains('/') {
+            return;
+        }
+        let parent = Self::parent_path(path);
+        let new_path = if parent.is_empty() {
+            leaf.to_string()
+        } else {
+            format!("{parent}/{leaf}")
+        };
+        if new_path == path {
+            return;
+        }
+        if self.folders.iter().any(|folder| folder == &new_path) {
+            let strings = Strings::for_language(self.language);
+            self.error = Some(strings.circuit_name_taken.replace("{}", leaf));
+            return;
+        }
+
+        self.record_edit();
+        let prefix = format!("{path}/");
+        let repath = |value: &mut String| {
+            if value.as_str() == path {
+                value.clone_from(&new_path);
+            } else if let Some(rest) = value.clone().strip_prefix(&prefix) {
+                *value = format!("{new_path}/{rest}");
+            }
+        };
+        self.folders.iter_mut().for_each(repath);
+        self.circuits
+            .iter_mut()
+            .for_each(|circuit| repath(&mut circuit.folder));
+    }
+
+    /// Removes a folder, moving what was in it up into the folder that held
+    /// it.
+    ///
+    /// Deleting the contents along with it is the other option, and it's the
+    /// one that loses work: filing something away is a presentation choice,
+    /// so undoing that choice must not be able to take circuits with it.
+    fn delete_folder(&mut self, path: &str) {
+        if !self.folders.iter().any(|folder| folder == path) {
+            return;
+        }
+        self.record_edit();
+
+        let parent = Self::parent_path(path).to_string();
+        let prefix = format!("{path}/");
+        let lift = |value: &mut String| {
+            if value.as_str() == path {
+                value.clone_from(&parent);
+            } else if let Some(rest) = value.clone().strip_prefix(&prefix) {
+                *value = if parent.is_empty() {
+                    rest.to_string()
+                } else {
+                    format!("{parent}/{rest}")
+                };
+            }
+        };
+        self.folders.retain(|folder| folder != path);
+        self.folders.iter_mut().for_each(lift);
+        self.circuits
+            .iter_mut()
+            .for_each(|circuit| lift(&mut circuit.folder));
+        self.resolve_name_clashes();
+    }
+
+    /// Gives a free name to any circuit that has just landed in a folder
+    /// where its own name was already taken.
+    ///
+    /// Only lifting can cause that — every other path refuses a clash up
+    /// front. Refusing here instead would let one name collision block the
+    /// deletion of a folder, which is the wrong thing to be stuck on.
+    fn resolve_name_clashes(&mut self) {
+        let mut seen: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        for index in 0..self.circuits.len() {
+            let key = (
+                self.circuits[index].folder.clone(),
+                self.circuits[index].name.clone(),
+            );
+            if seen.insert(key) {
+                continue;
+            }
+            let (folder, base) = (
+                self.circuits[index].folder.clone(),
+                self.circuits[index].name.clone(),
+            );
+            let fresh = self.unique_name_in(&folder, &base);
+            seen.insert((folder, fresh.clone()));
+            self.circuits[index].name = fresh;
+        }
+    }
+
+    /// Files a circuit in a different folder.
+    ///
+    /// Refused if a circuit of the same name is already there: two circuits
+    /// in one folder would be indistinguishable, since a reference is
+    /// `library:folder/name`.
+    fn move_circuit(&mut self, index: usize, folder: String) {
+        let Some(circuit) = self.circuits.get(index) else {
+            return;
+        };
+        if circuit.folder == folder {
+            return;
+        }
+        let name = circuit.name.clone();
+        if self
+            .circuits
+            .iter()
+            .any(|other| other.folder == folder && other.name == name)
+        {
+            let strings = Strings::for_language(self.language);
+            self.error = Some(strings.circuit_name_taken.replace("{}", &name));
+            return;
+        }
+
+        self.record_edit();
+        self.circuits[index].folder = folder;
+    }
+
+    /// A folder path inside `parent` that isn't taken yet.
+    fn unique_folder_path(&self, parent: &str, base: &str) -> String {
+        let join = |leaf: &str| {
+            if parent.is_empty() {
+                leaf.to_string()
+            } else {
+                format!("{parent}/{leaf}")
+            }
+        };
+        let taken = |path: &String| self.folders.contains(path);
+
+        let first = join(base);
+        if !taken(&first) {
+            return first;
+        }
+        (2..=u32::MAX)
+            .map(|n| join(&format!("{base} {n}")))
+            .find(|path| !taken(path))
+            .unwrap_or(first)
     }
 
     /// Removes a circuit from the project. Refused on the last one: there
@@ -1386,9 +1598,10 @@ impl SimLogixApp {
         self.reveal_active = true;
     }
 
-    /// Renames a circuit. An empty name, or one another circuit already has,
-    /// is refused rather than quietly altered — a name is how a circuit will
-    /// be referred to once one can be placed inside another.
+    /// Renames a circuit. An empty name, or one another circuit in the same
+    /// folder already has, is refused rather than quietly altered — the name
+    /// is half of how a circuit will be referred to once one can be placed
+    /// inside another.
     fn rename_circuit(&mut self, index: usize, name: &str) {
         let name = name.trim();
         let Some(current) = self.circuits.get(index) else {
@@ -1397,7 +1610,12 @@ impl SimLogixApp {
         if name.is_empty() || name == current.name {
             return;
         }
-        if self.circuits.iter().any(|circuit| circuit.name == name) {
+        let folder = current.folder.clone();
+        if self
+            .circuits
+            .iter()
+            .any(|circuit| circuit.folder == folder && circuit.name == name)
+        {
             let strings = Strings::for_language(self.language);
             self.error = Some(strings.circuit_name_taken.replace("{}", name));
             return;
@@ -1407,9 +1625,18 @@ impl SimLogixApp {
         self.circuits[index].name = name.to_string();
     }
 
-    /// `base` if no circuit is using it, else `base 2`, `base 3`, and so on.
-    fn unique_name(&self, base: &str) -> String {
-        let taken = |name: &str| self.circuits.iter().any(|circuit| circuit.name == name);
+    /// `base` if no circuit *in `folder`* is using it, else `base 2`,
+    /// `base 3`, and so on.
+    ///
+    /// Names only have to be distinct within their own folder, because a
+    /// circuit is referred to as `library:folder/name` — the folder is part
+    /// of what identifies it.
+    fn unique_name_in(&self, folder: &str, base: &str) -> String {
+        let taken = |name: &str| {
+            self.circuits
+                .iter()
+                .any(|circuit| circuit.folder == folder && circuit.name == name)
+        };
         if !taken(base) {
             return base.to_string();
         }
@@ -1703,14 +1930,19 @@ impl eframe::App for SimLogixApp {
             ui.label(hint.unwrap_or_default());
         });
 
-        // The root of the tree is the project itself, named after its file —
-        // computed out here because the panel closure below borrows `self`.
-        let project_name = self
-            .current_path
-            .as_ref()
-            .and_then(|path| path.file_stem())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| strings.title_untitled.to_string());
+        // The root of the tree is the project itself, labelled with its
+        // library name — the file name only stands in for it before the
+        // project has ever been saved. Computed out here because the panel
+        // closure below borrows `self`.
+        let project_name = if self.library.is_empty() {
+            self.current_path
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| strings.title_untitled.to_string())
+        } else {
+            self.library.clone()
+        };
         let mut tree_action = None;
 
         egui::Panel::left("palette")
@@ -1734,6 +1966,7 @@ impl eframe::App for SimLogixApp {
                             ui,
                             strings,
                             &project_name,
+                            &self.folders,
                             &self.circuits,
                             self.active,
                             std::mem::take(&mut self.reveal_active),
@@ -1766,22 +1999,34 @@ impl eframe::App for SimLogixApp {
         // app from under a borrow of it.
         match tree_action {
             Some(TreeAction::Open(index)) => self.switch_to(index),
-            Some(TreeAction::Create) => self.create_circuit(),
-            Some(TreeAction::BeginRename(index)) => {
-                let name = self
-                    .circuits
-                    .get(index)
-                    .map(|circuit| circuit.name.clone())
-                    .unwrap_or_default();
-                self.renaming = Some((index, name));
+            Some(TreeAction::Create { folder }) => self.create_circuit(folder),
+            Some(TreeAction::CreateFolder { parent }) => self.create_folder(&parent),
+            Some(TreeAction::BeginRename(target)) => {
+                let name = match &target {
+                    RenameTarget::Project => self.library.clone(),
+                    RenameTarget::Circuit(index) => self
+                        .circuits
+                        .get(*index)
+                        .map(|circuit| circuit.name.clone())
+                        .unwrap_or_default(),
+                    // Only the folder's own segment is offered for editing:
+                    // renaming it must not double as moving it.
+                    RenameTarget::Folder(path) => {
+                        path.rsplit('/').next().unwrap_or_default().to_string()
+                    }
+                };
+                self.renaming = Some((target, name));
             }
-            Some(TreeAction::CommitRename) => {
-                if let Some((index, name)) = self.renaming.take() {
-                    self.rename_circuit(index, &name);
-                }
-            }
+            Some(TreeAction::CommitRename) => match self.renaming.take() {
+                Some((RenameTarget::Project, name)) => self.rename_project(&name),
+                Some((RenameTarget::Circuit(index), name)) => self.rename_circuit(index, &name),
+                Some((RenameTarget::Folder(path), leaf)) => self.rename_folder(&path, &leaf),
+                None => {}
+            },
             Some(TreeAction::CancelRename) => self.renaming = None,
             Some(TreeAction::Delete(index)) => self.delete_circuit(index),
+            Some(TreeAction::DeleteFolder(path)) => self.delete_folder(&path),
+            Some(TreeAction::MoveCircuit { circuit, folder }) => self.move_circuit(circuit, folder),
             None => {}
         }
 
@@ -2922,7 +3167,7 @@ mod tests {
         let mut app = SimLogixApp::default();
         app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
 
-        app.create_circuit();
+        app.create_circuit(String::new());
 
         assert_eq!(app.circuits.len(), 2);
         assert_eq!(app.active, 1);
@@ -2936,7 +3181,7 @@ mod tests {
     fn switching_keeps_each_circuit_to_its_own_layout() {
         let mut app = SimLogixApp::default();
         app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
-        app.create_circuit();
+        app.create_circuit(String::new());
         app.place(ComponentKind::Led, egui::pos2(80.0, 80.0));
 
         app.switch_to(0);
@@ -2951,8 +3196,8 @@ mod tests {
     #[test]
     fn a_new_circuit_never_takes_a_name_already_in_use() {
         let mut app = SimLogixApp::default();
-        app.create_circuit();
-        app.create_circuit();
+        app.create_circuit(String::new());
+        app.create_circuit(String::new());
 
         let names: Vec<&str> = app
             .circuits
@@ -2970,8 +3215,8 @@ mod tests {
     #[test]
     fn deleting_the_open_circuit_falls_onto_the_one_taking_its_place() {
         let mut app = SimLogixApp::default();
-        app.create_circuit();
-        app.create_circuit();
+        app.create_circuit(String::new());
+        app.create_circuit(String::new());
         app.switch_to(1);
 
         app.delete_circuit(1);
@@ -2984,7 +3229,7 @@ mod tests {
     #[test]
     fn deleting_a_circuit_before_the_open_one_keeps_the_same_one_open() {
         let mut app = SimLogixApp::default();
-        app.create_circuit();
+        app.create_circuit(String::new());
         app.place(ComponentKind::Led, egui::pos2(80.0, 80.0));
         let open = app.circuits[app.active].name.clone();
 
@@ -3006,7 +3251,7 @@ mod tests {
     fn renaming_onto_a_name_already_in_use_is_refused() {
         let mut app = SimLogixApp::default();
         let taken = app.circuits[0].name.clone();
-        app.create_circuit();
+        app.create_circuit(String::new());
 
         app.rename_circuit(1, &taken);
 
@@ -3018,7 +3263,7 @@ mod tests {
     fn undoing_a_new_circuit_goes_back_to_the_project_before_it() {
         let mut app = SimLogixApp::default();
         app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
-        app.create_circuit();
+        app.create_circuit(String::new());
 
         app.undo();
 
@@ -3027,10 +3272,205 @@ mod tests {
     }
 
     #[test]
+    fn the_library_is_named_after_the_file_once_and_then_stops_following_it() {
+        let mut app = SimLogixApp::default();
+        assert!(app.library.is_empty());
+
+        app.name_library_after(std::path::Path::new("/tmp/cpu.slgx"));
+        assert_eq!(app.library, "cpu");
+
+        // Saved somewhere else, or the file renamed: the library name is
+        // what other projects refer to these circuits by, so it must not
+        // move underneath them.
+        app.name_library_after(std::path::Path::new("/tmp/cpu-backup.slgx"));
+        assert_eq!(app.library, "cpu");
+    }
+
+    #[test]
+    fn the_library_name_survives_undo_of_a_later_edit() {
+        let mut app = SimLogixApp::default();
+        app.name_library_after(std::path::Path::new("/tmp/cpu.slgx"));
+        app.create_circuit(String::new());
+
+        app.undo();
+
+        assert_eq!(app.library, "cpu");
+    }
+
+    #[test]
+    fn renaming_the_project_is_undoable_and_refuses_an_empty_name() {
+        let mut app = SimLogixApp::default();
+        app.name_library_after(std::path::Path::new("/tmp/cpu.slgx"));
+
+        app.rename_project("   ");
+        assert_eq!(app.library, "cpu", "an empty name is not a name");
+
+        app.rename_project("alu");
+        assert_eq!(app.library, "alu");
+        app.undo();
+        assert_eq!(app.library, "cpu");
+    }
+
+    #[test]
+    fn renaming_a_folder_carries_everything_filed_under_it() {
+        let mut app = SimLogixApp {
+            folders: vec![
+                "alu".to_string(),
+                "alu/decode".to_string(),
+                // Shares a prefix with "alu" but is not inside it. This is
+                // the one a naive `starts_with` gets wrong.
+                "alu2".to_string(),
+            ],
+            ..Default::default()
+        };
+        app.circuits[0].folder = "alu/decode".to_string();
+
+        app.rename_folder("alu", "arith");
+
+        assert_eq!(
+            app.folders,
+            vec!["arith", "arith/decode", "alu2"],
+            "only what was inside should move"
+        );
+        assert_eq!(app.circuits[0].folder, "arith/decode");
+    }
+
+    #[test]
+    fn deleting_a_folder_lifts_its_contents_rather_than_taking_them_along() {
+        let mut app = SimLogixApp {
+            folders: vec!["alu".to_string(), "alu/decode".to_string()],
+            ..Default::default()
+        };
+        app.circuits[0].folder = "alu/decode".to_string();
+        app.create_circuit("alu".to_string());
+        let lifted = app.circuits.len() - 1;
+
+        app.delete_folder("alu");
+
+        assert_eq!(app.folders, vec!["decode"]);
+        // Filing something away is a presentation choice; undoing it must
+        // not be able to take circuits with it.
+        assert_eq!(app.circuits[0].folder, "decode");
+        assert_eq!(app.circuits[lifted].folder, "");
+    }
+
+    #[test]
+    fn a_new_folder_never_takes_a_path_already_in_use() {
+        let mut app = SimLogixApp::default();
+        app.create_folder("");
+        app.create_folder("");
+        app.create_folder("");
+
+        let distinct: std::collections::HashSet<&String> = app.folders.iter().collect();
+        assert_eq!(distinct.len(), 3, "got {:?}", app.folders);
+    }
+
+    #[test]
+    fn moving_a_circuit_changes_where_it_is_filed_but_not_its_name() {
+        let mut app = SimLogixApp::default();
+        app.create_folder("");
+        let folder = app.folders[0].clone();
+        let name = app.circuits[0].name.clone();
+
+        app.move_circuit(0, folder.clone());
+
+        assert_eq!(app.circuits[0].folder, folder);
+        // The whole point of folders being presentation: a reference to this
+        // circuit is `library:name`, and filing it hasn't touched that.
+        assert_eq!(app.circuits[0].name, name);
+
+        app.undo();
+        assert_eq!(app.circuits[0].folder, "");
+    }
+
+    #[test]
+    fn a_folder_rename_refuses_a_path_separator() {
+        let mut app = SimLogixApp {
+            folders: vec!["alu".to_string()],
+            ..Default::default()
+        };
+
+        // This would move the folder rather than rename it, which isn't
+        // what the gesture says it does.
+        app.rename_folder("alu", "fpu/inner");
+
+        assert_eq!(app.folders, vec!["alu"]);
+    }
+
+    #[test]
+    fn two_folders_can_each_hold_a_circuit_of_the_same_name() {
+        // What choosing `library:folder/name` as the reference buys: the
+        // folder is part of what identifies a circuit, so the name only has
+        // to be distinct within it.
+        let mut app = SimLogixApp {
+            folders: vec!["alu".to_string(), "fpu".to_string()],
+            ..Default::default()
+        };
+        app.create_circuit("alu".to_string());
+        app.rename_circuit(app.active, "adder");
+        app.create_circuit("fpu".to_string());
+        app.rename_circuit(app.active, "adder");
+
+        let filed: Vec<(&str, &str)> = app
+            .circuits
+            .iter()
+            .map(|circuit| (circuit.folder.as_str(), circuit.name.as_str()))
+            .collect();
+        assert!(filed.contains(&("alu", "adder")), "got {filed:?}");
+        assert!(filed.contains(&("fpu", "adder")), "got {filed:?}");
+    }
+
+    #[test]
+    fn moving_onto_a_name_already_in_that_folder_is_refused() {
+        let mut app = SimLogixApp {
+            folders: vec!["alu".to_string()],
+            ..Default::default()
+        };
+        app.rename_circuit(0, "adder");
+        app.move_circuit(0, "alu".to_string());
+        app.create_circuit(String::new());
+        let second = app.active;
+        app.rename_circuit(second, "adder");
+
+        app.move_circuit(second, "alu".to_string());
+
+        assert_eq!(
+            app.circuits[second].folder, "",
+            "the move should not happen"
+        );
+        assert!(app.error.is_some(), "the clash should be reported");
+    }
+
+    #[test]
+    fn lifting_two_circuits_of_the_same_name_into_one_folder_renames_the_second() {
+        // Deleting a folder must not be blocked by a name collision, so the
+        // one that lands second gets a free name instead.
+        let mut app = SimLogixApp {
+            folders: vec!["alu".to_string()],
+            ..Default::default()
+        };
+        app.rename_circuit(0, "adder");
+        app.create_circuit("alu".to_string());
+        let filed = app.active;
+        app.rename_circuit(filed, "adder");
+
+        app.delete_folder("alu");
+
+        assert!(app.folders.is_empty());
+        let names: Vec<&str> = app
+            .circuits
+            .iter()
+            .map(|circuit| circuit.name.as_str())
+            .collect();
+        let distinct: std::collections::HashSet<&&str> = names.iter().collect();
+        assert_eq!(distinct.len(), names.len(), "got {names:?}");
+    }
+
+    #[test]
     fn saving_carries_every_circuit_not_just_the_open_one() {
         let mut app = SimLogixApp::default();
         app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
-        app.create_circuit();
+        app.create_circuit(String::new());
         app.place(ComponentKind::Led, egui::pos2(80.0, 80.0));
 
         let project = app.to_project();

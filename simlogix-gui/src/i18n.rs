@@ -71,12 +71,27 @@ pub struct Strings {
     pub menu_help_about: &'static str,
 
     pub circuits_heading: &'static str,
+    /// Hover text on the tree's root: what the project's library name is
+    /// for, and how to change it.
+    pub project_library_hint: &'static str,
     pub circuit_new: &'static str,
+    pub circuit_new_here: &'static str,
+    pub circuit_move_to: &'static str,
+    pub folder_new: &'static str,
+    pub folder_new_here: &'static str,
+    pub folder_delete: &'static str,
+    /// What happens to a deleted folder's contents, on hover.
+    pub folder_delete_hint: &'static str,
+    pub folder_top_level: &'static str,
+    /// Base name for a freshly created folder — see `circuit_default_name`.
+    pub folder_default_name: &'static str,
     pub circuit_rename: &'static str,
     pub circuit_delete: &'static str,
     /// Why deleting is refused on the last remaining circuit.
     pub circuit_delete_last: &'static str,
-    /// Contains a literal `{}` for the name that was already taken.
+    /// Contains a literal `{}` for the name that was already taken. Used
+    /// wherever a name has to be distinct — a circuit within its folder, a
+    /// folder within its parent.
     pub circuit_name_taken: &'static str,
     /// Base name for a freshly created circuit — a number is appended when
     /// that name is already in use. Saved into the project file as typed,
@@ -196,11 +211,20 @@ static ENGLISH: Strings = Strings {
     menu_help_about: "About",
 
     circuits_heading: "Circuits",
+    project_library_hint: "The name other projects use to refer to this one's circuits. Double-click to change it.",
     circuit_new: "New circuit",
+    circuit_new_here: "New circuit here",
+    circuit_move_to: "Move to",
+    folder_new: "New folder",
+    folder_new_here: "New folder here",
+    folder_delete: "Delete folder",
+    folder_delete_hint: "What is inside moves up to the folder above.",
+    folder_top_level: "Top level",
+    folder_default_name: "folder",
     circuit_rename: "Rename",
     circuit_delete: "Delete",
     circuit_delete_last: "A project has to keep at least one circuit.",
-    circuit_name_taken: "This project already has a circuit named \"{}\".",
+    circuit_name_taken: "\"{}\" is already taken here.",
     circuit_default_name: "circuit",
 
     palette_heading: "Palette",
@@ -276,11 +300,20 @@ static FRENCH: Strings = Strings {
     menu_help_about: "À propos",
 
     circuits_heading: "Circuits",
+    project_library_hint: "Le nom que les autres projets utilisent pour désigner les circuits de celui-ci. Double-cliquez pour le changer.",
     circuit_new: "Nouveau circuit",
+    circuit_new_here: "Nouveau circuit ici",
+    circuit_move_to: "Déplacer vers",
+    folder_new: "Nouveau dossier",
+    folder_new_here: "Nouveau dossier ici",
+    folder_delete: "Supprimer le dossier",
+    folder_delete_hint: "Son contenu remonte dans le dossier parent.",
+    folder_top_level: "Racine",
+    folder_default_name: "dossier",
     circuit_rename: "Renommer",
     circuit_delete: "Supprimer",
     circuit_delete_last: "Un projet doit conserver au moins un circuit.",
-    circuit_name_taken: "Ce projet contient déjà un circuit nommé « {} ».",
+    circuit_name_taken: "« {} » est déjà utilisé ici.",
     circuit_default_name: "circuit",
 
     palette_heading: "Palette",
@@ -356,11 +389,20 @@ static ITALIAN: Strings = Strings {
     menu_help_about: "Informazioni",
 
     circuits_heading: "Circuiti",
+    project_library_hint: "Il nome che gli altri progetti usano per riferirsi ai circuiti di questo. Fai doppio clic per cambiarlo.",
     circuit_new: "Nuovo circuito",
+    circuit_new_here: "Nuovo circuito qui",
+    circuit_move_to: "Sposta in",
+    folder_new: "Nuova cartella",
+    folder_new_here: "Nuova cartella qui",
+    folder_delete: "Elimina la cartella",
+    folder_delete_hint: "Il contenuto risale alla cartella superiore.",
+    folder_top_level: "Livello principale",
+    folder_default_name: "cartella",
     circuit_rename: "Rinomina",
     circuit_delete: "Elimina",
     circuit_delete_last: "Un progetto deve conservare almeno un circuito.",
-    circuit_name_taken: "Questo progetto ha già un circuito chiamato \"{}\".",
+    circuit_name_taken: "\"{}\" è già in uso qui.",
     circuit_default_name: "circuito",
 
     palette_heading: "Tavolozza",

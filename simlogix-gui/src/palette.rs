@@ -8,12 +8,26 @@ use crate::i18n::Strings;
 use crate::symbol;
 use crate::toolbar::Tool;
 
+/// The library the built-in components belong to, and the namespace they're
+/// saved under: `simlogix:And`, `simlogix:Button`.
+///
+/// Named after the application rather than its file extension. The
+/// extension has already changed once (`.simlogix` → `.slgx`), and this
+/// string is written into every project file for good — a namespace named
+/// after a since-retired extension would be a small permanent puzzle.
+pub const BUILTIN_LIBRARY: &str = "simlogix";
+
 /// Which kind of component the palette currently has queued for placement.
 /// Also the tag saved in a project file (see `project.rs`) to say which
-/// concrete component a saved entry should become on load — that's the Rust
-/// enum variant name, via `derive(Serialize)`, independent of whatever
-/// display label `Strings::component_kind_label` returns for it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// concrete component a saved entry should become on load.
+///
+/// Saved **qualified** by library, so that a circuit imported from another
+/// project can name its own components without ever colliding with a
+/// built-in — a user circuit called `And` has to be able to coexist with
+/// the gate. Nothing produces a non-builtin kind yet; the format speaks the
+/// qualified form ahead of that so it won't have to change again when it
+/// does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComponentKind {
     Button,
     Led,
@@ -31,6 +45,74 @@ pub enum ComponentKind {
     Xnor,
     Not,
     Buffer,
+}
+
+impl ComponentKind {
+    /// Every kind paired with the name it's saved under, unqualified.
+    ///
+    /// One table read in both directions, rather than a match per
+    /// direction: a kind added to the writer and forgotten in the reader
+    /// would be a project that saves and then won't open.
+    const SAVED_NAMES: [(ComponentKind, &'static str); 16] = [
+        (ComponentKind::Button, "Button"),
+        (ComponentKind::Led, "Led"),
+        (ComponentKind::NTransistor, "NTransistor"),
+        (ComponentKind::PTransistor, "PTransistor"),
+        (ComponentKind::Ground, "Ground"),
+        (ComponentKind::Power, "Power"),
+        (ComponentKind::Probe, "Probe"),
+        (ComponentKind::Clock, "Clock"),
+        (ComponentKind::And, "And"),
+        (ComponentKind::Or, "Or"),
+        (ComponentKind::Nand, "Nand"),
+        (ComponentKind::Nor, "Nor"),
+        (ComponentKind::Xor, "Xor"),
+        (ComponentKind::Xnor, "Xnor"),
+        (ComponentKind::Not, "Not"),
+        (ComponentKind::Buffer, "Buffer"),
+    ];
+
+    fn saved_name(self) -> &'static str {
+        Self::SAVED_NAMES
+            .iter()
+            .find(|(kind, _)| *kind == self)
+            .map(|(_, name)| *name)
+            // Unreachable while the table lists every variant, which is what
+            // the round-trip test below is there to hold to.
+            .unwrap_or("Button")
+    }
+
+    fn from_saved_name(name: &str) -> Option<Self> {
+        Self::SAVED_NAMES
+            .iter()
+            .find(|(_, saved)| *saved == name)
+            .map(|(kind, _)| *kind)
+    }
+}
+
+impl Serialize for ComponentKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&format_args!("{BUILTIN_LIBRARY}:{}", self.saved_name()))
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        // Projects written before the qualified form carry a bare variant
+        // name. Those were all built-ins, because nothing else existed.
+        let (library, name) = text
+            .split_once(':')
+            .unwrap_or((BUILTIN_LIBRARY, text.as_str()));
+
+        if library != BUILTIN_LIBRARY {
+            return Err(serde::de::Error::custom(format!(
+                "unknown component library `{library}`: circuits from another project can't be placed yet"
+            )));
+        }
+        Self::from_saved_name(name)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown component `{text}`")))
+    }
 }
 
 /// The clickable icon size within each palette row.
@@ -168,4 +250,51 @@ fn palette_row(ui: &mut Ui, kind: Option<ComponentKind>, name: &str, is_active: 
     }
 
     response.clicked()
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards the one thing `SAVED_NAMES` can get wrong: a variant added to
+    /// the enum and left out of the table. Such a kind would save as some
+    /// *other* component and silently change on the next load.
+    #[test]
+    fn every_kind_in_the_table_round_trips_through_its_saved_form() {
+        for (kind, name) in ComponentKind::SAVED_NAMES {
+            let json = serde_json::to_string(&kind).expect("serializes");
+            assert_eq!(json, format!("\"{BUILTIN_LIBRARY}:{name}\""));
+
+            let parsed: ComponentKind = serde_json::from_str(&json).expect("parses");
+            assert_eq!(parsed, kind);
+        }
+    }
+
+    #[test]
+    fn the_table_covers_every_variant() {
+        // Every entry distinct, and as many as the enum has variants -- the
+        // count is the half a duplicated entry wouldn't catch.
+        let kinds: std::collections::HashSet<ComponentKind> = ComponentKind::SAVED_NAMES
+            .iter()
+            .map(|(kind, _)| *kind)
+            .collect();
+        assert_eq!(kinds.len(), ComponentKind::SAVED_NAMES.len());
+    }
+
+    #[test]
+    fn a_bare_name_from_an_older_project_still_reads_as_a_builtin() {
+        let parsed: ComponentKind = serde_json::from_str("\"Xnor\"").expect("parses");
+        assert_eq!(parsed, ComponentKind::Xnor);
+    }
+
+    #[test]
+    fn a_component_from_an_unknown_library_is_refused_rather_than_guessed_at() {
+        let error = serde_json::from_str::<ComponentKind>("\"othercpu:adder\"")
+            .expect_err("should not resolve");
+        assert!(error.to_string().contains("othercpu"), "got {error}");
+    }
 }
