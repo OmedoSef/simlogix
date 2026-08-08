@@ -80,6 +80,7 @@ to do anything, and is written back as `.slgx` next time you save.
 | 5 | Projects carry a library name; components are saved qualified by it. |
 | 6 | Circuits can be filed in folders. |
 | 7 | Components can carry properties. |
+| 8 | Wires can carry a colour. |
 
 ## Circuits
 

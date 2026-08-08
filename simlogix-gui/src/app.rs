@@ -90,6 +90,14 @@ struct Wire {
     from: WireEndpoint,
     to: WireEndpoint,
     waypoints: Vec<egui::Pos2>,
+    /// A colour of the user's own, drawn as a casing around the signal
+    /// colour so that a wire stays recognisable where it crosses another.
+    ///
+    /// Held per wire even though it *means* per net, because a `NetId` is
+    /// only valid within one frame — see `rebuild_nets`. Setting it writes
+    /// it to every wire in the net, and `inherit_wire_colors` gives it to a
+    /// wire newly joined to one, so the distinction stays invisible.
+    color: Option<[u8; 3]>,
 }
 
 /// A wire being placed click by click: the pin and net it started from, the
@@ -478,6 +486,9 @@ impl SimLogixApp {
             from,
             to,
             waypoints,
+            // Left unset: a wire joined to a coloured net picks the colour
+            // up on the next rebuild (`inherit_wire_colors`).
+            color: None,
         });
         id
     }
@@ -571,6 +582,7 @@ impl SimLogixApp {
                     WireEndpoint::Free(pos) => Some(SavedEndpoint::Free(pos.x, pos.y)),
                 };
                 Some(SavedWire {
+                    color: wire.color,
                     from: save(wire.from)?,
                     to: save(wire.to)?,
                     waypoints: wire.waypoints.iter().map(|p| (p.x, p.y)).collect(),
@@ -662,7 +674,11 @@ impl SimLogixApp {
                 .iter()
                 .map(|&(x, y)| egui::pos2(x, y))
                 .collect();
-            wire_ids.push(app.add_wire(from, to, waypoints));
+            let id = app.add_wire(from, to, waypoints);
+            if let Some(wire) = app.wires.iter_mut().find(|wire| wire.id == id) {
+                wire.color = saved.color;
+            }
+            wire_ids.push(id);
         }
 
         // The wires are the record of what's connected; the nets come from
@@ -1273,6 +1289,67 @@ impl SimLogixApp {
             .filter(|group| group.len() > 1)
             .collect();
         self.circuit.rewire(&groups);
+
+        let mut wire_groups: HashMap<Node, Vec<u64>> = HashMap::new();
+        for wire in &self.wires {
+            let root = find(&mut parent, Node::Wire(wire.id));
+            wire_groups.entry(root).or_default().push(wire.id);
+        }
+        self.inherit_wire_colors(wire_groups.into_values());
+    }
+
+    /// Gives a wire the colour of the net it has just joined.
+    ///
+    /// Only when the group agrees on one: joining two differently coloured
+    /// nets leaves both colours in place rather than picking a winner. A
+    /// two-tone net is visible and can be re-coloured, whereas a silent
+    /// choice is neither.
+    fn inherit_wire_colors(&mut self, groups: impl Iterator<Item = Vec<u64>>) {
+        for group in groups {
+            let mut colors = group
+                .iter()
+                .filter_map(|id| self.wires.iter().find(|wire| wire.id == *id))
+                .filter_map(|wire| wire.color);
+            let Some(first) = colors.next() else {
+                continue;
+            };
+            if colors.any(|color| color != first) {
+                continue;
+            }
+            for id in group {
+                if let Some(wire) = self.wires.iter_mut().find(|wire| wire.id == id) {
+                    wire.color = Some(first);
+                }
+            }
+        }
+    }
+
+    /// Paints every wire of one net, which is what "colour a wire" means:
+    /// the wires of a net are one conductor, so they get one colour.
+    fn color_net(&mut self, wire_id: u64, color: Option<[u8; 3]>) {
+        let Some(net) = self
+            .wires
+            .iter()
+            .find(|wire| wire.id == wire_id)
+            .and_then(|wire| self.wire_net(wire))
+        else {
+            // A wire with both ends loose carries no net; it's still a wire
+            // on screen, so it takes the colour on its own.
+            if let Some(wire) = self.wires.iter_mut().find(|wire| wire.id == wire_id) {
+                wire.color = color;
+            }
+            return;
+        };
+
+        let members: Vec<u64> = self
+            .wires
+            .iter()
+            .filter(|wire| self.wire_net(wire) == Some(net))
+            .map(|wire| wire.id)
+            .collect();
+        for wire in self.wires.iter_mut().filter(|w| members.contains(&w.id)) {
+            wire.color = color;
+        }
     }
 
     /// A hash of the connectivity alone: which components exist, and what
@@ -2042,6 +2119,7 @@ impl eframe::App for SimLogixApp {
         // borrowed by the panel. So the edit is carried back out and applied
         // below, snapshot first.
         let mut pending_properties: Option<(ComponentId, Properties, bool)> = None;
+        let mut pending_wire_color: Option<(u64, Option<[u8; 3]>)> = None;
         egui::Panel::right("properties")
             .resizable(true)
             .default_size(220.0)
@@ -2051,6 +2129,16 @@ impl eframe::App for SimLogixApp {
                     .id_salt("properties_scroll")
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
+                        let selected_wire = self
+                            .selected_wire
+                            .and_then(|id| self.wires.iter().find(|wire| wire.id == id));
+                        if let Some(wire) = selected_wire {
+                            if let Some(color) = properties::show_wire(ui, strings, wire.color) {
+                                pending_wire_color = Some((wire.id, color));
+                            }
+                            return;
+                        }
+
                         let selected = self
                             .selected
                             .and_then(|id| self.placed.iter().find(|placed| placed.id() == id));
@@ -2069,6 +2157,11 @@ impl eframe::App for SimLogixApp {
                         }
                     });
             });
+
+        if let Some((wire_id, color)) = pending_wire_color {
+            self.record_edit();
+            self.color_net(wire_id, color);
+        }
 
         if let Some((id, edited, started)) = pending_properties {
             // Only the frame an editing session begins, so a typed-in name
@@ -2352,8 +2445,31 @@ impl eframe::App for SimLogixApp {
                     // would leave this loop indexing past the end.
                     let mut wires_to_join: Option<(u64, bool, u64, bool, egui::Pos2)> = None;
 
+                    // Which net the pointer is over, worked out before any
+                    // wire is drawn. Hovering has to light up the *whole*
+                    // net: following one conductor across a crossing is the
+                    // difficulty, and highlighting the single segment under
+                    // the cursor doesn't help with it at all.
+                    let hovered_net =
+                        hover_pos
+                            .filter(|_| self.wiring_from.is_none())
+                            .and_then(|pos| {
+                                self.wires.iter().find_map(|wire| {
+                                    let route = resolved.get(&wire.id)?;
+                                    let mut path = vec![route.from];
+                                    path.extend(route.waypoints.iter().copied());
+                                    path.push(route.to);
+                                    if canvas::distance_to_path(pos, &path) < WIRE_HIT_RADIUS {
+                                        self.wire_net(wire)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            });
+
                     for i in 0..self.wires.len() {
                         let wire_id = self.wires[i].id;
+                        let wire_color = self.wires[i].color;
                         // `None` while both ends are loose: the wire is drawing,
                         // not yet a connection. Still very much on screen.
                         let net = self.wire_net(&self.wires[i]);
@@ -2381,9 +2497,16 @@ impl eframe::App for SimLogixApp {
                         // click is about to select out of several crossing ones.
                         // Wires are polylines, so this is a distance test rather
                         // than an `ui.interact` rect like the widgets use.
+                        // On the same net as whatever is under the pointer —
+                        // or, for a wire that reaches no pin and so has no
+                        // net, under the pointer itself.
                         let is_hovered = self.wiring_from.is_none()
-                            && hover_pos
-                                .is_some_and(|pos| canvas::distance_to_path(pos, &path) < 6.0);
+                            && match (net, hovered_net) {
+                                (Some(net), Some(hovered)) => net == hovered,
+                                _ => hover_pos.is_some_and(|pos| {
+                                    canvas::distance_to_path(pos, &path) < WIRE_HIT_RADIUS
+                                }),
+                            };
                         if is_hovered {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
@@ -2397,6 +2520,20 @@ impl eframe::App for SimLogixApp {
                             egui::Stroke::new(2.0, color)
                         };
 
+                        // The user's colour goes *underneath*, as a casing:
+                        // the signal colour keeps the full width of the core,
+                        // so the thing that changes during simulation stays
+                        // the thing the eye reads first.
+                        if let Some([r, g, b]) = wire_color {
+                            canvas::draw_path(
+                                &painter,
+                                &path,
+                                egui::Stroke::new(
+                                    stroke.width + 4.0,
+                                    egui::Color32::from_rgb(r, g, b),
+                                ),
+                            );
+                        }
                         canvas::draw_path(&painter, &path, stroke);
                         for &point in &waypoints {
                             painter.circle_filled(point, 3.5, stroke.color);
@@ -3550,6 +3687,117 @@ mod tests {
         // The whole point of every property being optional: a project that
         // never touched them looks exactly as it did before they existed.
         assert!(!json.contains("properties"), "got {json}");
+    }
+
+    /// Two wires end to end, so they share a net: colouring one has to
+    /// colour both, because a net is one conductor.
+    fn two_wires_one_net() -> (SimLogixApp, u64, u64) {
+        let mut app = SimLogixApp::default();
+        let button = app.place(ComponentKind::Button, egui::pos2(0.0, 0.0));
+        let led = app.place(ComponentKind::Led, egui::pos2(200.0, 0.0));
+
+        let first = app.add_wire(
+            WireEndpoint::Pin(button, 0),
+            WireEndpoint::Junction {
+                wire: 0,
+                waypoint: 0,
+            },
+            vec![egui::pos2(100.0, 0.0)],
+        );
+        let second = app.add_wire(
+            WireEndpoint::Junction {
+                wire: first,
+                waypoint: 0,
+            },
+            WireEndpoint::Pin(led, 0),
+            Vec::new(),
+        );
+        // The first wire's junction was a placeholder until the second one
+        // existed; point it at a real host now.
+        if let Some(wire) = app.wires.iter_mut().find(|wire| wire.id == first) {
+            wire.from = WireEndpoint::Pin(button, 0);
+        }
+        app.rebuild_nets();
+        (app, first, second)
+    }
+
+    #[test]
+    fn colouring_one_wire_colours_the_whole_net() {
+        let (mut app, first, second) = two_wires_one_net();
+
+        app.color_net(first, Some([10, 20, 30]));
+
+        let color_of = |app: &SimLogixApp, id: u64| {
+            app.wires
+                .iter()
+                .find(|wire| wire.id == id)
+                .and_then(|wire| wire.color)
+        };
+        assert_eq!(color_of(&app, first), Some([10, 20, 30]));
+        assert_eq!(
+            color_of(&app, second),
+            Some([10, 20, 30]),
+            "the net is one conductor, so it is one colour"
+        );
+    }
+
+    #[test]
+    fn a_wire_joining_a_coloured_net_inherits_its_colour() {
+        let (mut app, first, second) = two_wires_one_net();
+        app.color_net(first, Some([10, 20, 30]));
+
+        // A fresh wire onto the same net -- it starts with no colour of its
+        // own, and picking it up is what keeps "the net is coloured" true.
+        let added = app.add_wire(
+            WireEndpoint::Junction {
+                wire: second,
+                waypoint: 0,
+            },
+            WireEndpoint::Free(egui::pos2(300.0, 40.0)),
+            Vec::new(),
+        );
+        app.rebuild_nets();
+
+        let added_color = app
+            .wires
+            .iter()
+            .find(|wire| wire.id == added)
+            .and_then(|wire| wire.color);
+        assert_eq!(added_color, Some([10, 20, 30]));
+    }
+
+    #[test]
+    fn joining_two_differently_coloured_nets_keeps_both_colours() {
+        let (mut app, first, second) = two_wires_one_net();
+        // Force a disagreement, which is what happens when two coloured nets
+        // are joined: no winner is picked, because a silent choice is worse
+        // than a visibly two-tone net the user can re-colour.
+        if let Some(wire) = app.wires.iter_mut().find(|wire| wire.id == first) {
+            wire.color = Some([1, 1, 1]);
+        }
+        if let Some(wire) = app.wires.iter_mut().find(|wire| wire.id == second) {
+            wire.color = Some([2, 2, 2]);
+        }
+
+        app.rebuild_nets();
+
+        let colors: Vec<Option<[u8; 3]>> = app.wires.iter().map(|wire| wire.color).collect();
+        assert!(colors.contains(&Some([1, 1, 1])), "got {colors:?}");
+        assert!(colors.contains(&Some([2, 2, 2])), "got {colors:?}");
+    }
+
+    #[test]
+    fn a_wire_colour_survives_a_save_and_load() {
+        let (mut app, first, _) = two_wires_one_net();
+        app.color_net(first, Some([7, 8, 9]));
+
+        let project = app.to_project();
+        let reloaded = SimLogixApp::from_project(&project, 0);
+
+        assert!(reloaded
+            .wires
+            .iter()
+            .all(|wire| wire.color == Some([7, 8, 9])));
     }
 
     #[test]

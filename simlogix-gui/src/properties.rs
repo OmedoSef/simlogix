@@ -135,6 +135,44 @@ pub fn show(
     edit_started
 }
 
+/// Draws the panel for the selected wire. Returns the colour it should now
+/// have, when that changed this frame — `Some(None)` is a reset.
+///
+/// A wire's colour is really the *net's*: every wire of a net gets it, so
+/// a conductor is one colour end to end. The caller does that spreading,
+/// since only it knows what's connected to what.
+pub fn show_wire(
+    ui: &mut Ui,
+    strings: &Strings,
+    color: Option<[u8; 3]>,
+) -> Option<Option<[u8; 3]>> {
+    let mut edited = None;
+
+    ui.heading(strings.properties_heading);
+    ui.add_space(4.0);
+    ui.label(strings.property_wire);
+    ui.add_space(8.0);
+
+    ui.label(strings.property_color);
+    ui.horizontal(|ui| {
+        let mut picked = color.unwrap_or(DEFAULT_WIRE_COLOR);
+        if ui.color_edit_button_srgb(&mut picked).changed() {
+            edited = Some(Some(picked));
+        }
+        if color.is_some() && ui.button(strings.property_reset).clicked() {
+            edited = Some(None);
+        }
+    });
+    ui.add_space(4.0);
+    ui.label(strings.property_wire_color_hint);
+
+    edited
+}
+
+/// What the colour picker starts from for a wire that has none. Only a
+/// starting point for the picker — an unset wire draws no casing at all.
+pub const DEFAULT_WIRE_COLOR: [u8; 3] = [90, 127, 214];
+
 /// What a LED glows when nothing says otherwise — a real one is red, which
 /// is why this one colour doesn't follow the editor's theme.
 pub const DEFAULT_LED_COLOR: [u8; 3] = [220, 30, 30];

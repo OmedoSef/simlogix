@@ -79,3 +79,26 @@ That includes the awkward cases. Draw **two entirely separate wires**
 between the same two components and cut one: they stay connected, because
 the other one plainly still joins them. There's nothing to remember or
 undo — the drawing is re-read, and it still says the same thing.
+
+## Telling wires apart
+
+Two problems make a crossing hard to read: every wire at the same logic
+level is the same colour, and the wire you want continues on the far side
+of the one it crosses.
+
+**Hover a wire** and the whole net lights up — every wire connected to it,
+not just the segment under the pointer. That is usually enough to follow a
+conductor across a crossing, and it costs nothing when you're not doing it.
+
+**Give a net a colour** for something you keep coming back to. Select a
+wire and pick a colour in the properties panel on the right; *Reset* takes
+it off again. The colour is drawn as a casing *around* the wire, so the
+signal colour keeps the middle — what's changing during simulation stays
+what you read first.
+
+The colour belongs to the whole net, not to one wire: a net is a single
+conductor, so colouring any of its wires colours all of them, and a wire
+you draw onto a coloured net picks the colour up. Join two nets that have
+*different* colours and both are kept — the result is visibly two-tone, so
+you can see it happened and re-colour it, rather than one colour silently
+winning.

@@ -105,6 +105,8 @@ pub struct Strings {
     pub property_pressed: &'static str,
     pub property_pressed_hint: &'static str,
     pub property_color: &'static str,
+    pub property_wire: &'static str,
+    pub property_wire_color_hint: &'static str,
     pub property_reset: &'static str,
     pub properties_none_selected: &'static str,
 
@@ -242,6 +244,8 @@ static ENGLISH: Strings = Strings {
     property_pressed: "Pressed at rest",
     property_pressed_hint: "The button rests pressed, so clicking it releases it instead.",
     property_color: "Colour",
+    property_wire: "Wire",
+    property_wire_color_hint: "Applies to the whole net, as a casing around the signal colour.",
     property_reset: "Reset",
     properties_none_selected: "Select a component to see its properties.",
 
@@ -340,6 +344,8 @@ static FRENCH: Strings = Strings {
     property_pressed: "Enfoncé au repos",
     property_pressed_hint: "Le bouton est enfoncé au repos : cliquer le relâche au lieu de l'enfoncer.",
     property_color: "Couleur",
+    property_wire: "Fil",
+    property_wire_color_hint: "S'applique à tout le net, en gaine autour de la couleur de signal.",
     property_reset: "Réinitialiser",
     properties_none_selected: "Sélectionnez un composant pour voir ses propriétés.",
 
@@ -438,6 +444,8 @@ static ITALIAN: Strings = Strings {
     property_pressed: "Premuto a riposo",
     property_pressed_hint: "Il pulsante è premuto a riposo: farci clic lo rilascia invece di premerlo.",
     property_color: "Colore",
+    property_wire: "Filo",
+    property_wire_color_hint: "Si applica all'intera rete, come guaina attorno al colore del segnale.",
     property_reset: "Reimposta",
     properties_none_selected: "Seleziona un componente per vederne le proprietà.",
 

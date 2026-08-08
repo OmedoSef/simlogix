@@ -45,7 +45,8 @@ use crate::properties::Properties;
 /// - `7` — a component can carry properties (a name, and per-kind settings
 ///   such as a button's resting state or a LED's colour). Absent means the
 ///   behaviour that was there before, so nothing needed migrating.
-pub const CURRENT_VERSION: u32 = 7;
+/// - `8` — a wire can carry a colour of its own.
+pub const CURRENT_VERSION: u32 = 8;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";
@@ -141,6 +142,11 @@ pub struct SavedWire {
     pub from: SavedEndpoint,
     pub to: SavedEndpoint,
     pub waypoints: Vec<(f32, f32)>,
+    /// The user's own colour for this wire, if set. Every wire of a net
+    /// carries the same one — the net is what's being coloured, but a
+    /// `NetId` doesn't survive an edit, so the wires hold it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -364,6 +370,8 @@ impl SavedProject {
                         from: SavedEndpoint::Pin(wire.from.0, wire.from.1),
                         to: wire.to,
                         waypoints: wire.waypoints,
+                        // Wire colours arrived in v8; older wires have none.
+                        color: None,
                     })
                     .collect(),
             })
@@ -520,6 +528,7 @@ mod tests {
                     properties: Properties::default(),
                 }],
                 wires: vec![SavedWire {
+                    color: None,
                     from: SavedEndpoint::Pin(0, 0),
                     to: SavedEndpoint::Junction {
                         wire: 0,
