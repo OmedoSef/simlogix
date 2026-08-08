@@ -46,6 +46,14 @@ pub fn draw(
         ComponentKind::Power => draw_power(painter, rect, rotation, stroke, color),
         ComponentKind::Probe => draw_probe(painter, rect, rotation, stroke, color, label),
         ComponentKind::Clock => draw_clock(painter, rect, rotation, stroke),
+        ComponentKind::And => draw_and_gate(painter, rect, rotation, stroke, false),
+        ComponentKind::Nand => draw_and_gate(painter, rect, rotation, stroke, true),
+        ComponentKind::Or => draw_or_gate(painter, rect, rotation, stroke, false, false),
+        ComponentKind::Nor => draw_or_gate(painter, rect, rotation, stroke, false, true),
+        ComponentKind::Xor => draw_or_gate(painter, rect, rotation, stroke, true, false),
+        ComponentKind::Xnor => draw_or_gate(painter, rect, rotation, stroke, true, true),
+        ComponentKind::Buffer => draw_triangle_gate(painter, rect, rotation, stroke, false),
+        ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
     }
 }
 
@@ -69,6 +77,62 @@ fn rotate(point: Pos2, center: Pos2, rotation: Rotation) -> Pos2 {
 
 fn draw_pin(painter: &Painter, point: Pos2, color: Color32) {
     painter.circle_filled(point, PIN_RADIUS, color);
+}
+
+/// How many segments a sampled curve (Bézier or arc) is broken into — plenty
+/// for a smooth look at this icon size without costing anything real.
+const CURVE_STEPS: usize = 12;
+
+/// Samples `CURVE_STEPS + 1` points along the quadratic Bézier curve from
+/// `p0` through control point `ctrl` to `p1` — used by every curved gate
+/// outline (Or/Nor/Xor/Xnor) instead of a straight-line approximation, which
+/// reads as jagged rather than rounded at this size.
+fn quadratic_bezier(p0: Pos2, ctrl: Pos2, p1: Pos2) -> Vec<Pos2> {
+    (0..=CURVE_STEPS)
+        .map(|i| {
+            let t = i as f32 / CURVE_STEPS as f32;
+            let mt = 1.0 - t;
+            pos2(
+                mt * mt * p0.x + 2.0 * mt * t * ctrl.x + t * t * p1.x,
+                mt * mt * p0.y + 2.0 * mt * t * ctrl.y + t * t * p1.y,
+            )
+        })
+        .collect()
+}
+
+/// Samples `CURVE_STEPS + 1` points along the circular arc of `radius`
+/// around `center`, sweeping from `start_angle` to `end_angle` (radians).
+fn arc_around(center: Pos2, radius: f32, start_angle: f32, end_angle: f32) -> Vec<Pos2> {
+    (0..=CURVE_STEPS)
+        .map(|i| {
+            let t = i as f32 / CURVE_STEPS as f32;
+            let angle = start_angle + t * (end_angle - start_angle);
+            pos2(
+                center.x + radius * angle.cos(),
+                center.y + radius * angle.sin(),
+            )
+        })
+        .collect()
+}
+
+/// Inversion bubble radius, used by every inverted gate (NAND/NOR/XNOR/NOT).
+const BUBBLE_RADIUS: f32 = 3.5;
+
+/// Draws a small inversion "bubble" just past `tip` along +x — canonical,
+/// pre-rotation space, same as every other point in a `draw_xxx` function;
+/// `rotate_fn` is that function's own `r` closure, used here only to place
+/// the bubble draw call in screen space. Returns where the lead past the
+/// bubble continues from, still in canonical space, for the caller to route
+/// the rest of its (still-unrotated) lead through `r` as usual.
+fn bubble_end(
+    painter: &Painter,
+    tip: Pos2,
+    rotate_fn: impl Fn(Pos2) -> Pos2,
+    stroke: Stroke,
+) -> Pos2 {
+    let bubble_center = pos2(tip.x + BUBBLE_RADIUS, tip.y);
+    painter.circle_stroke(rotate_fn(bubble_center), BUBBLE_RADIUS, stroke);
+    pos2(tip.x + BUBBLE_RADIUS * 2.0, tip.y)
 }
 
 /// A pushbutton: a round cap with a single lead reaching its output pin.
@@ -322,5 +386,192 @@ fn draw_clock(painter: &Painter, rect: Rect, rotation: Rotation, stroke: Stroke)
     PinPositions {
         inputs: vec![],
         outputs: vec![r(pin)],
+    }
+}
+
+/// The classic AND-gate "D" shape: a flat back (where the two inputs enter)
+/// and a semicircular front (where the output leaves). Both inputs sit at the
+/// box's own top-left/bottom-left corners — same trick used for the
+/// transistor's source/drain: two grid-aligned pins on one edge without an
+/// arbitrary fractional offset. `invert` (NAND) adds the small inversion
+/// bubble at the tip.
+fn draw_and_gate(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    invert: bool,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    let color = stroke.color;
+
+    let half_h = rect.height() / 2.0;
+    let radius = half_h;
+    let back_x = rect.left() + rect.width() * 0.1;
+    let arc_center_x = back_x + rect.width() * 0.35;
+    let tip = pos2(arc_center_x + radius, c.y);
+
+    let pin_a = pos2(rect.left(), rect.top());
+    let pin_b = pos2(rect.left(), rect.bottom());
+    let pin_out = pos2(rect.right(), c.y);
+
+    painter.line_segment([r(pin_a), r(pos2(back_x, c.y - half_h))], stroke);
+    painter.line_segment([r(pin_b), r(pos2(back_x, c.y + half_h))], stroke);
+
+    let lead_start = if invert {
+        bubble_end(painter, tip, r, stroke)
+    } else {
+        tip
+    };
+    painter.line_segment([r(lead_start), r(pin_out)], stroke);
+
+    let mut outline = vec![pos2(back_x, c.y - half_h)];
+    outline.extend(arc_around(
+        pos2(arc_center_x, c.y),
+        radius,
+        -std::f32::consts::FRAC_PI_2,
+        std::f32::consts::FRAC_PI_2,
+    ));
+    outline.push(pos2(back_x, c.y + half_h));
+    outline.push(pos2(back_x, c.y - half_h));
+    painter.line(outline.into_iter().map(r).collect(), stroke);
+
+    draw_pin(painter, r(pin_a), color);
+    draw_pin(painter, r(pin_b), color);
+    draw_pin(painter, r(pin_out), color);
+
+    PinPositions {
+        inputs: vec![r(pin_a), r(pin_b)],
+        outputs: vec![r(pin_out)],
+    }
+}
+
+/// The classic OR-gate "shield" shape: a concave back (bulging toward the
+/// output) tapering to a point at the front. `xor` adds the extra curved
+/// line just behind the back edge that marks XOR/XNOR (the input leads cross
+/// it, same as a real XOR symbol); `invert` (NOR/XNOR) adds the small
+/// inversion bubble at the tip. Inputs sit at the box's own
+/// top-left/bottom-left corners, same trick as `draw_and_gate`.
+fn draw_or_gate(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    xor: bool,
+    invert: bool,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    let color = stroke.color;
+
+    let half_h = rect.height() / 2.0;
+    let back_x = rect.left() + rect.width() * 0.12;
+    let bow = rect.width() * 0.14;
+    let span = rect.width() * 0.45;
+    let tip = pos2(back_x + span, c.y);
+
+    let pin_a = pos2(rect.left(), rect.top());
+    let pin_b = pos2(rect.left(), rect.bottom());
+    let pin_out = pos2(rect.right(), c.y);
+    let back_top = pos2(back_x, c.y - half_h);
+    let back_bottom = pos2(back_x, c.y + half_h);
+
+    painter.line_segment([r(pin_a), r(back_top)], stroke);
+    painter.line_segment([r(pin_b), r(back_bottom)], stroke);
+
+    let lead_start = if invert {
+        bubble_end(painter, tip, r, stroke)
+    } else {
+        tip
+    };
+    painter.line_segment([r(lead_start), r(pin_out)], stroke);
+
+    // Top/bottom tapers: a real curve (not a straight line) from each back
+    // corner out to a genuine point at the tip — an OR gate's tip is a
+    // point, not a rounded cap, so unlike `draw_and_gate`'s semicircle this
+    // deliberately doesn't try to meet tangent-smooth there.
+    let top_ctrl = pos2(
+        back_top.x + (tip.x - back_top.x) * 0.55,
+        back_top.y + (tip.y - back_top.y) * 0.1,
+    );
+    let bottom_ctrl = pos2(
+        back_bottom.x + (tip.x - back_bottom.x) * 0.55,
+        back_bottom.y + (tip.y - back_bottom.y) * 0.1,
+    );
+    let mut outline = quadratic_bezier(back_top, top_ctrl, tip);
+    outline.extend(quadratic_bezier(tip, bottom_ctrl, back_bottom));
+    outline.extend(quadratic_bezier(
+        back_bottom,
+        pos2(back_x + bow, c.y),
+        back_top,
+    ));
+    painter.line(outline.into_iter().map(r).collect(), stroke);
+
+    if xor {
+        let extra_x = back_x - rect.width() * 0.1;
+        let extra = quadratic_bezier(
+            pos2(extra_x, c.y - half_h),
+            pos2(extra_x + bow, c.y),
+            pos2(extra_x, c.y + half_h),
+        );
+        painter.line(extra.into_iter().map(r).collect(), stroke);
+    }
+
+    draw_pin(painter, r(pin_a), color);
+    draw_pin(painter, r(pin_b), color);
+    draw_pin(painter, r(pin_out), color);
+
+    PinPositions {
+        inputs: vec![r(pin_a), r(pin_b)],
+        outputs: vec![r(pin_out)],
+    }
+}
+
+/// A triangle gate: `Buffer`'s plain pass-through, or `Not`'s inverter with a
+/// bubble at the tip. Single input at the box's own left-center (matching
+/// `Led`/`Probe`'s single-pin convention), single output at the tip (or past
+/// the bubble, for `Not`).
+fn draw_triangle_gate(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    invert: bool,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    let color = stroke.color;
+
+    let half_h = rect.height() * 0.4;
+    let back_x = rect.left() + rect.width() * 0.12;
+    let tip = pos2(back_x + rect.width() * 0.5, c.y);
+
+    let pin_in = pos2(rect.left(), c.y);
+    let pin_out = pos2(rect.right(), c.y);
+
+    painter.line_segment([r(pin_in), r(pos2(back_x, c.y))], stroke);
+
+    let lead_start = if invert {
+        bubble_end(painter, tip, r, stroke)
+    } else {
+        tip
+    };
+    painter.line_segment([r(lead_start), r(pin_out)], stroke);
+
+    let triangle = vec![
+        pos2(back_x, c.y - half_h),
+        pos2(back_x, c.y + half_h),
+        tip,
+        pos2(back_x, c.y - half_h),
+    ];
+    painter.line(triangle.into_iter().map(r).collect(), stroke);
+
+    draw_pin(painter, r(pin_in), color);
+    draw_pin(painter, r(pin_out), color);
+
+    PinPositions {
+        inputs: vec![r(pin_in)],
+        outputs: vec![r(pin_out)],
     }
 }

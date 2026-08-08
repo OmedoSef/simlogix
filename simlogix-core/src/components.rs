@@ -1,6 +1,14 @@
+pub mod and;
+pub mod buffer;
 pub mod button;
 pub mod clock;
 pub mod led;
+pub mod nand;
+pub mod nor;
+pub mod not;
+pub mod or;
 pub mod probe;
 pub mod rail;
 pub mod transistor;
+pub mod xnor;
+pub mod xor;

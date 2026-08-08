@@ -22,6 +22,14 @@ pub enum ComponentKind {
     Power,
     Probe,
     Clock,
+    And,
+    Or,
+    Nand,
+    Nor,
+    Xor,
+    Xnor,
+    Not,
+    Buffer,
 }
 
 /// The clickable icon size within each palette row.
@@ -36,7 +44,7 @@ pub fn show(ui: &mut Ui, strings: &Strings) -> Option<ComponentKind> {
 
     let mut clicked = None;
 
-    let categories: [(&str, &[ComponentKind]); 3] = [
+    let categories: [(&str, &[ComponentKind]); 4] = [
         (
             strings.category_sources,
             &[
@@ -53,6 +61,19 @@ pub fn show(ui: &mut Ui, strings: &Strings) -> Option<ComponentKind> {
         (
             strings.category_transistors,
             &[ComponentKind::NTransistor, ComponentKind::PTransistor],
+        ),
+        (
+            strings.category_gates,
+            &[
+                ComponentKind::And,
+                ComponentKind::Or,
+                ComponentKind::Nand,
+                ComponentKind::Nor,
+                ComponentKind::Xor,
+                ComponentKind::Xnor,
+                ComponentKind::Not,
+                ComponentKind::Buffer,
+            ],
         ),
     ];
 

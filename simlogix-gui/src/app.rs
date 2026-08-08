@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use simlogix_core::{
-    Button, Circuit, Clock, ComponentId, Led, NetId, Pin, PinDirection, Probe, Rail, Signal,
-    Transistor,
+    And, Buffer, Button, Circuit, Clock, Component, ComponentId, Led, Nand, NetId, Nor, Not, Or,
+    Pin, PinDirection, Probe, Rail, Signal, Transistor, Xnor, Xor,
 };
 
 use crate::canvas;
@@ -175,6 +175,74 @@ impl SimLogixApp {
                 // per-frame advance() call in `ui()` then processes over time.
                 self.circuit.schedule_periodic(id, CLOCK_PERIOD_TICKS);
                 PlacedComponent::clock(id, center)
+            }
+            // Every 2-input combinational gate shares this shape (see
+            // `PlacedComponent::TwoInputGate`'s doc comment).
+            ComponentKind::And
+            | ComponentKind::Or
+            | ComponentKind::Nand
+            | ComponentKind::Nor
+            | ComponentKind::Xor
+            | ComponentKind::Xnor => {
+                let a = self.circuit.add_net();
+                let b = self.circuit.add_net();
+                let out = self.circuit.add_net();
+                let component: Box<dyn Component> = if kind == ComponentKind::And {
+                    Box::new(And)
+                } else if kind == ComponentKind::Or {
+                    Box::new(Or)
+                } else if kind == ComponentKind::Nand {
+                    Box::new(Nand)
+                } else if kind == ComponentKind::Nor {
+                    Box::new(Nor)
+                } else if kind == ComponentKind::Xor {
+                    Box::new(Xor)
+                } else {
+                    Box::new(Xnor)
+                };
+                let id = self.circuit.add_component(
+                    component,
+                    vec![
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: a,
+                        },
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: b,
+                        },
+                        Pin {
+                            direction: PinDirection::Output,
+                            net: out,
+                        },
+                    ],
+                );
+                PlacedComponent::two_input_gate(id, center, kind)
+            }
+            // The 1-input mirror of the above (see
+            // `PlacedComponent::OneInputGate`'s doc comment).
+            ComponentKind::Not | ComponentKind::Buffer => {
+                let input = self.circuit.add_net();
+                let output = self.circuit.add_net();
+                let component: Box<dyn Component> = if kind == ComponentKind::Not {
+                    Box::new(Not)
+                } else {
+                    Box::new(Buffer)
+                };
+                let id = self.circuit.add_component(
+                    component,
+                    vec![
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: input,
+                        },
+                        Pin {
+                            direction: PinDirection::Output,
+                            net: output,
+                        },
+                    ],
+                );
+                PlacedComponent::one_input_gate(id, center, kind)
             }
         };
         // Process just this component's own initial schedule (if any) --

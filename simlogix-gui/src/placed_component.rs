@@ -43,6 +43,9 @@ const OFF_COLOR: Color32 = Color32::from_gray(180);
 /// their pin is on. `Transistor`/`Rail` carry which specific `ComponentKind`
 /// they are (N/P-type, Ground/Power) since `Circuit` only stores the opaque
 /// `Component` trait object and can't tell them apart from the outside.
+/// `TwoInputGate` does the same for every 2-input combinational gate
+/// (`And`/`Or`/`Nand`/`Nor`/`Xor`/`Xnor`); `OneInputGate` for every 1-input
+/// one (`Not`/`Buffer`).
 pub enum PlacedComponent {
     Button {
         id: ComponentId,
@@ -76,6 +79,27 @@ pub enum PlacedComponent {
         id: ComponentId,
         center: Pos2,
         rotation: Rotation,
+    },
+    /// Any 2-input, 1-output, stateless combinational gate: two inputs at
+    /// pin indices 0/1, one output at pin index 0. Adding a new gate of this
+    /// shape needs no new variant here: add the `ComponentKind`, a core
+    /// `Component` impl, a `draw_xxx` in `symbol.rs`, and a `place()` arm in
+    /// `app.rs` that calls [`PlacedComponent::two_input_gate`] — this type's
+    /// `draw_and_interact` arm already handles the rest generically.
+    TwoInputGate {
+        id: ComponentId,
+        center: Pos2,
+        rotation: Rotation,
+        kind: ComponentKind,
+    },
+    /// The 1-input mirror of `TwoInputGate`: a single input at pin index 0,
+    /// a single output at pin index 1 (`Not`/`Buffer`). Same extension
+    /// recipe, via [`PlacedComponent::one_input_gate`].
+    OneInputGate {
+        id: ComponentId,
+        center: Pos2,
+        rotation: Rotation,
+        kind: ComponentKind,
     },
 }
 
@@ -131,6 +155,24 @@ impl PlacedComponent {
         }
     }
 
+    pub fn two_input_gate(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
+        Self::TwoInputGate {
+            id,
+            center,
+            rotation: Rotation::default(),
+            kind,
+        }
+    }
+
+    pub fn one_input_gate(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
+        Self::OneInputGate {
+            id,
+            center,
+            rotation: Rotation::default(),
+            kind,
+        }
+    }
+
     pub fn id(&self) -> ComponentId {
         match self {
             PlacedComponent::Button { id, .. }
@@ -138,7 +180,9 @@ impl PlacedComponent {
             | PlacedComponent::Transistor { id, .. }
             | PlacedComponent::Rail { id, .. }
             | PlacedComponent::Probe { id, .. }
-            | PlacedComponent::Clock { id, .. } => *id,
+            | PlacedComponent::Clock { id, .. }
+            | PlacedComponent::TwoInputGate { id, .. }
+            | PlacedComponent::OneInputGate { id, .. } => *id,
         }
     }
 
@@ -149,7 +193,9 @@ impl PlacedComponent {
             | PlacedComponent::Transistor { center, .. }
             | PlacedComponent::Rail { center, .. }
             | PlacedComponent::Probe { center, .. }
-            | PlacedComponent::Clock { center, .. } => *center,
+            | PlacedComponent::Clock { center, .. }
+            | PlacedComponent::TwoInputGate { center, .. }
+            | PlacedComponent::OneInputGate { center, .. } => *center,
         }
     }
 
@@ -160,7 +206,9 @@ impl PlacedComponent {
             | PlacedComponent::Transistor { rotation, .. }
             | PlacedComponent::Rail { rotation, .. }
             | PlacedComponent::Probe { rotation, .. }
-            | PlacedComponent::Clock { rotation, .. } => *rotation,
+            | PlacedComponent::Clock { rotation, .. }
+            | PlacedComponent::TwoInputGate { rotation, .. }
+            | PlacedComponent::OneInputGate { rotation, .. } => *rotation,
         }
     }
 
@@ -170,7 +218,10 @@ impl PlacedComponent {
         match self {
             PlacedComponent::Button { .. } => ComponentKind::Button,
             PlacedComponent::Led { .. } => ComponentKind::Led,
-            PlacedComponent::Transistor { kind, .. } | PlacedComponent::Rail { kind, .. } => *kind,
+            PlacedComponent::Transistor { kind, .. }
+            | PlacedComponent::Rail { kind, .. }
+            | PlacedComponent::TwoInputGate { kind, .. }
+            | PlacedComponent::OneInputGate { kind, .. } => *kind,
             PlacedComponent::Probe { .. } => ComponentKind::Probe,
             PlacedComponent::Clock { .. } => ComponentKind::Clock,
         }
@@ -184,7 +235,9 @@ impl PlacedComponent {
             | PlacedComponent::Transistor { rotation, .. }
             | PlacedComponent::Rail { rotation, .. }
             | PlacedComponent::Probe { rotation, .. }
-            | PlacedComponent::Clock { rotation, .. } => rotation,
+            | PlacedComponent::Clock { rotation, .. }
+            | PlacedComponent::TwoInputGate { rotation, .. }
+            | PlacedComponent::OneInputGate { rotation, .. } => rotation,
         };
         *rotation = new_rotation;
     }
@@ -415,6 +468,59 @@ impl PlacedComponent {
                 FrameResult {
                     clicked: response.clicked().then_some(id),
                     pins: vec![pin],
+                }
+            }
+            PlacedComponent::TwoInputGate {
+                center, rotation, ..
+            } => {
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect);
+                }
+
+                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                if response.dragged() {
+                    *center += response.drag_delta();
+                }
+                if response.drag_stopped() {
+                    *center = canvas::snap_to_grid(*center);
+                }
+
+                let circuit_pins = circuit.pins(id);
+                let a = pin_handle(ui, id, 0, pin_positions.inputs[0], circuit_pins[0].net);
+                let b = pin_handle(ui, id, 1, pin_positions.inputs[1], circuit_pins[1].net);
+                let out = pin_handle(ui, id, 2, pin_positions.outputs[0], circuit_pins[2].net);
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    pins: vec![a, b, out],
+                }
+            }
+            PlacedComponent::OneInputGate {
+                center, rotation, ..
+            } => {
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, SYMBOL_COLOR, "");
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect);
+                }
+
+                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                if response.dragged() {
+                    *center += response.drag_delta();
+                }
+                if response.drag_stopped() {
+                    *center = canvas::snap_to_grid(*center);
+                }
+
+                let circuit_pins = circuit.pins(id);
+                let input = pin_handle(ui, id, 0, pin_positions.inputs[0], circuit_pins[0].net);
+                let output = pin_handle(ui, id, 1, pin_positions.outputs[0], circuit_pins[1].net);
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    pins: vec![input, output],
                 }
             }
         }
