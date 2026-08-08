@@ -5,9 +5,9 @@
 //! pressed state, a net's current signal). Loading a project starts it cold,
 //! like opening a fresh Logisim circuit.
 //!
-//! A project can eventually hold several circuits (for a sub-circuit
-//! hierarchy, not built yet) — the format already supports that, even though
-//! today's editor only ever produces/reads one, named `"main"`.
+//! A project holds one or more named circuits. They're independent for now:
+//! one can't yet be placed inside another as a component, which is what
+//! would make the list a genuine hierarchy.
 //!
 //! This is also what an undo step is made of (see `SimLogixApp::record_edit`):
 //! a snapshot is just a `SavedProject`, so undo and save/load share one

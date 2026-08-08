@@ -47,6 +47,37 @@ open, so projects saved by earlier builds keep working:
 | 2 | Wires became explicit, each with its own route and junctions. |
 | 3 | A wire's *start* became a full endpoint too, so it can begin loose. |
 
-A project can hold several named circuits. Only one (`"main"`) is used
-today — the format is ready for sub-circuit hierarchy, which isn't built
-yet.
+A project file holds **every** circuit in the project, not just the one
+open at the time — see [Circuits](#circuits) below. Saving, undo and redo
+all work on the project as a whole.
+
+## Circuits
+
+A project holds one or more circuits, listed in the tree at the top left
+with the project itself at the root. The circuit shown in bold is the one
+on the canvas.
+
+| Action | How |
+|---|---|
+| Open a circuit | Click its name. |
+| Add one | The **+** button beside the *Circuits* heading. |
+| Rename one | Double-click its name, or right-click → *Rename*. |
+| Delete one | Right-click → *Delete*. |
+
+Names have to be unique, and a project always keeps at least one circuit —
+renaming onto a name already in use is refused rather than silently
+altered, and *Delete* is greyed out on the last one.
+
+Creating, renaming and deleting a circuit are ordinary edits, so `Ctrl+Z`
+undoes them like anything else.
+
+Two things worth knowing:
+
+- **Circuits are independent.** You can't yet place one inside another as a
+  component; that's the next step, and it's what will turn this list into a
+  real hierarchy.
+- **Only the open circuit runs.** Switching away rebuilds the circuit you
+  arrive at from scratch, so it starts cold — a clock in a circuit you left
+  is stopped, and begins again from its first tick when you come back. This
+  is the same trade undo makes: runtime state was never part of the saved
+  document.

@@ -9,6 +9,7 @@ use simlogix_core::{
 };
 
 use crate::canvas::{self, BOX_SIZE};
+use crate::circuit_tree::{self, TreeAction};
 use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
@@ -202,6 +203,20 @@ pub struct SimLogixApp {
     /// when the drawing's *connectivity* actually changed — not on every
     /// frame, and not while a waypoint is merely being dragged.
     net_fingerprint: u64,
+    /// Every circuit in the project, in the order the tree lists them.
+    ///
+    /// The one being edited is `circuits[active]`, and *its* live state is
+    /// the flat fields above (`circuit`, `placed`, `wires`, ...) — the entry
+    /// here is only refreshed on the way out, by `to_project`. The others
+    /// are held purely in their saved form: they aren't simulated and have
+    /// no engine of their own until they're opened.
+    circuits: Vec<SavedCircuit>,
+    /// Which of `circuits` is open. Always a valid index.
+    active: usize,
+    /// The circuit being renamed and the name as typed so far, if any. Also
+    /// the flag that keeps the canvas off the keyboard while it's set —
+    /// otherwise typing a name would rotate and delete components.
+    renaming: Option<(usize, String)>,
     /// The region of the circuit currently framed by the canvas, in scene
     /// coordinates — the whole of the zoom/pan state. `egui::Scene` derives
     /// its transform from this and writes back whatever the user pans or
@@ -237,6 +252,15 @@ impl Default for SimLogixApp {
             net_fingerprint: 0,
             running: true,
             unstable_net: None,
+            // A project always has at least one circuit: there has to be
+            // something to edit, and the tree has to have something to show.
+            circuits: vec![SavedCircuit {
+                name: "main".to_string(),
+                components: Vec::new(),
+                wires: Vec::new(),
+            }],
+            active: 0,
+            renaming: None,
             // A plain starting window onto the circuit; `Scene` re-fits this
             // if it ever ends up degenerate.
             scene_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)),
@@ -479,11 +503,10 @@ impl SimLogixApp {
         }
     }
 
-    /// Snapshots the current layout and wiring into a saveable project —
-    /// both what gets written to disk and what an undo step is made of.
-    /// Runtime state (button presses, signal values) is deliberately left
-    /// out; see `project.rs`.
-    fn to_project(&self) -> SavedProject {
+    /// Snapshots the open circuit's layout and wiring. Runtime state
+    /// (button presses, signal values) is deliberately left out; see
+    /// `project.rs`.
+    fn active_circuit(&self) -> SavedCircuit {
         let components = self
             .placed
             .iter()
@@ -538,24 +561,43 @@ impl SimLogixApp {
             })
             .collect();
 
-        SavedProject {
-            version: crate::project::CURRENT_VERSION,
-            circuits: vec![SavedCircuit {
-                name: "main".to_string(),
-                components,
-                wires,
-            }],
+        SavedCircuit {
+            name: self.circuits[self.active].name.clone(),
+            components,
+            wires,
         }
     }
 
-    /// Rebuilds a fresh app from a saved project: re-registers every
-    /// component, then replays each saved wire — merging the nets it joins
-    /// and restoring its route. Only the first circuit is loaded — there's
-    /// no multi-circuit editing yet.
-    fn from_project(project: &SavedProject) -> Self {
+    /// The whole project as it stands: every circuit, with the open one
+    /// refreshed from its live state. This is both what gets written to
+    /// disk and what an undo step is made of — the closed circuits ride
+    /// along in their saved form, so an edit to one circuit never quietly
+    /// drops the others from the file or from the history.
+    fn to_project(&self) -> SavedProject {
+        let mut circuits = self.circuits.clone();
+        circuits[self.active] = self.active_circuit();
+
+        SavedProject {
+            version: crate::project::CURRENT_VERSION,
+            circuits,
+        }
+    }
+
+    /// Rebuilds a fresh app from a saved project, opening `open` for
+    /// editing: re-registers each of that circuit's components, then
+    /// replays its wires and their routes. The rest of the project is kept
+    /// in saved form, ready to be opened in turn.
+    ///
+    /// `open` is clamped rather than trusted — it can come from a snapshot
+    /// taken when the project had more circuits in it.
+    fn from_project(project: &SavedProject, open: usize) -> Self {
         let mut app = Self::default();
 
-        let Some(circuit) = project.circuits.first() else {
+        if !project.circuits.is_empty() {
+            app.circuits = project.circuits.clone();
+            app.active = open.min(app.circuits.len() - 1);
+        }
+        let Some(circuit) = project.circuits.get(app.active) else {
             return app;
         };
 
@@ -666,7 +708,7 @@ impl SimLogixApp {
                 // Loading a project resets everything else, but the
                 // language is a UI preference, not part of the circuit.
                 let language = self.language;
-                *self = Self::from_project(&project);
+                *self = Self::from_project(&project, 0);
                 self.language = language;
                 self.current_path = Some(path);
             }
@@ -1232,17 +1274,37 @@ impl SimLogixApp {
         self.restore(&next);
     }
 
-    /// Rebuilds the circuit from a snapshot, keeping everything that isn't
-    /// part of the document itself: which file this is, the undo history,
+    /// Rebuilds the circuit from a snapshot. Which circuit stays open is
+    /// matched by *name*, not index: the edit being undone may itself have
+    /// added or removed a circuit, which shifts every index after it.
+    fn restore(&mut self, project: &SavedProject) {
+        let open_name = self.circuits.get(self.active).map(|c| c.name.clone());
+        let open = open_name
+            .and_then(|name| project.circuits.iter().position(|c| c.name == name))
+            .unwrap_or(self.active);
+        self.reopen(project, open);
+
+        // Deliberately coarse: stepping back to whatever was last saved
+        // still counts as dirty. Over-reporting only ever costs a redundant
+        // save prompt, whereas under-reporting loses work.
+        self.dirty = true;
+    }
+
+    /// Rebuilds from `project` with `open` as the circuit being edited,
+    /// keeping everything that isn't part of the document itself: which file
+    /// this is, whether it has unsaved edits, the undo history, the camera,
     /// and UI preferences.
     ///
     /// **Known cost**: this goes through [`Self::from_project`], so it
     /// rebuilds the `Circuit` from scratch and runtime state starts cold —
     /// a held button releases, a clock's phase resets. Accepted because it
     /// keeps undo defined by exactly one thing (the saved document) instead
-    /// of needing every `Circuit` mutation to be individually invertible.
-    fn restore(&mut self, project: &SavedProject) {
+    /// of needing every `Circuit` mutation to be individually invertible;
+    /// switching circuits inherits the same trade, so a clock in a circuit
+    /// you leave stops, and restarts from phase zero when you come back.
+    fn reopen(&mut self, project: &SavedProject, open: usize) {
         let language = self.language;
+        let dirty = self.dirty;
         let current_path = self.current_path.take();
         let undo_stack = std::mem::take(&mut self.undo_stack);
         let redo_stack = std::mem::take(&mut self.redo_stack);
@@ -1251,18 +1313,96 @@ impl SimLogixApp {
         // shouldn't also throw away where you were looking.
         let scene_rect = self.scene_rect;
 
-        *self = Self::from_project(project);
+        *self = Self::from_project(project, open);
         self.scene_rect = scene_rect;
+        self.dirty = dirty;
 
         self.language = language;
         self.current_path = current_path;
         self.undo_stack = undo_stack;
         self.redo_stack = redo_stack;
         self.window_title = window_title;
-        // Deliberately coarse: stepping back to whatever was last saved
-        // still counts as dirty. Over-reporting only ever costs a redundant
-        // save prompt, whereas under-reporting loses work.
-        self.dirty = true;
+    }
+
+    /// Opens a different circuit for editing. The one being left is folded
+    /// back into `circuits` first (that's what `to_project` does), so its
+    /// layout survives the switch. Not an edit: nothing about the document
+    /// changes, only which part of it is on screen.
+    fn switch_to(&mut self, index: usize) {
+        if index == self.active || index >= self.circuits.len() {
+            return;
+        }
+        let project = self.to_project();
+        self.reopen(&project, index);
+    }
+
+    /// Adds an empty circuit to the project and opens it.
+    fn create_circuit(&mut self) {
+        self.record_edit();
+        let name = self.unique_name(Strings::for_language(self.language).circuit_default_name);
+
+        let mut project = self.to_project();
+        project.circuits.push(SavedCircuit {
+            name,
+            components: Vec::new(),
+            wires: Vec::new(),
+        });
+        let open = project.circuits.len() - 1;
+        self.reopen(&project, open);
+    }
+
+    /// Removes a circuit from the project. Refused on the last one: there
+    /// has to be something left to edit.
+    fn delete_circuit(&mut self, index: usize) {
+        if index >= self.circuits.len() || self.circuits.len() <= 1 {
+            return;
+        }
+        self.record_edit();
+
+        let mut project = self.to_project();
+        project.circuits.remove(index);
+        // Stay on the same circuit when it wasn't the one deleted — its
+        // index shifts down if it sat after the gap. Deleting the open one
+        // falls onto whichever circuit takes its place.
+        let open = if self.active > index {
+            self.active - 1
+        } else {
+            self.active.min(project.circuits.len() - 1)
+        };
+        self.reopen(&project, open);
+    }
+
+    /// Renames a circuit. An empty name, or one another circuit already has,
+    /// is refused rather than quietly altered — a name is how a circuit will
+    /// be referred to once one can be placed inside another.
+    fn rename_circuit(&mut self, index: usize, name: &str) {
+        let name = name.trim();
+        let Some(current) = self.circuits.get(index) else {
+            return;
+        };
+        if name.is_empty() || name == current.name {
+            return;
+        }
+        if self.circuits.iter().any(|circuit| circuit.name == name) {
+            let strings = Strings::for_language(self.language);
+            self.error = Some(strings.circuit_name_taken.replace("{}", name));
+            return;
+        }
+
+        self.record_edit();
+        self.circuits[index].name = name.to_string();
+    }
+
+    /// `base` if no circuit is using it, else `base 2`, `base 3`, and so on.
+    fn unique_name(&self, base: &str) -> String {
+        let taken = |name: &str| self.circuits.iter().any(|circuit| circuit.name == name);
+        if !taken(base) {
+            return base.to_string();
+        }
+        (2..=u32::MAX)
+            .map(|n| format!("{base} {n}"))
+            .find(|name| !taken(name))
+            .unwrap_or_else(|| base.to_string())
     }
 
     /// Runs a destructive action, but only after the user has had a chance
@@ -1369,12 +1509,17 @@ impl eframe::App for SimLogixApp {
             self.save_project();
         }
 
-        if ui.ctx().input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                egui::Modifiers::NONE,
-                egui::Key::Space,
-            ))
-        }) {
+        // Guarded — and short-circuited before `consume_shortcut`, so the
+        // keystroke reaches the field instead of being eaten — because a
+        // circuit name can perfectly well contain a space.
+        if self.renaming.is_none()
+            && ui.ctx().input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::NONE,
+                    egui::Key::Space,
+                ))
+            })
+        {
             self.toggle_running();
         }
 
@@ -1544,11 +1689,45 @@ impl eframe::App for SimLogixApp {
             ui.label(hint.unwrap_or_default());
         });
 
+        // The root of the tree is the project itself, named after its file —
+        // computed out here because the panel closure below borrows `self`.
+        let project_name = self
+            .current_path
+            .as_ref()
+            .and_then(|path| path.file_stem())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| strings.title_untitled.to_string());
+        let mut tree_action = None;
+
         egui::Panel::left("palette")
             .resizable(true)
             .default_size(220.0)
             .size_range(160.0..=400.0)
             .show(ui, |ui| {
+                // The circuit tree and the palette share the left column:
+                // one is what you're editing, the other is what you put in
+                // it. Nested as its own resizable panel so a project with
+                // many circuits can't push the palette off the bottom.
+                egui::Panel::top("circuit_tree")
+                    .resizable(true)
+                    .default_size(150.0)
+                    .size_range(70.0..=420.0)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("circuit_tree_scroll")
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                tree_action = circuit_tree::show(
+                                    ui,
+                                    strings,
+                                    &project_name,
+                                    &self.circuits,
+                                    self.active,
+                                    &mut self.renaming,
+                                );
+                            });
+                    });
+
                 // A resizable panel only stays at the width the user drags it
                 // to if its content actually fills that width — otherwise it
                 // re-shrinks to fit content on the next layout (e.g. right
@@ -1569,6 +1748,29 @@ impl eframe::App for SimLogixApp {
                     }
                 });
             });
+
+        // Acted on after the panel closes, so nothing here is rebuilding the
+        // app from under a borrow of it.
+        match tree_action {
+            Some(TreeAction::Open(index)) => self.switch_to(index),
+            Some(TreeAction::Create) => self.create_circuit(),
+            Some(TreeAction::BeginRename(index)) => {
+                let name = self
+                    .circuits
+                    .get(index)
+                    .map(|circuit| circuit.name.clone())
+                    .unwrap_or_default();
+                self.renaming = Some((index, name));
+            }
+            Some(TreeAction::CommitRename) => {
+                if let Some((index, name)) = self.renaming.take() {
+                    self.rename_circuit(index, &name);
+                }
+            }
+            Some(TreeAction::CancelRename) => self.renaming = None,
+            Some(TreeAction::Delete(index)) => self.delete_circuit(index),
+            None => {}
+        }
 
         // Declared after the palette so it spans only the canvas, not the
         // whole window: panels claim their space in declaration order, and
@@ -1631,7 +1833,8 @@ impl eframe::App for SimLogixApp {
                     );
 
                     if let Some(selected) = self.selected {
-                        if ui.ctx().input(|i| i.key_pressed(egui::Key::R))
+                        if self.renaming.is_none()
+                            && ui.ctx().input(|i| i.key_pressed(egui::Key::R))
                             && self.placed.iter().any(|p| p.id() == selected)
                         {
                             self.record_edit();
@@ -2310,9 +2513,10 @@ impl eframe::App for SimLogixApp {
                         self.split_wire(wire_id, segment, &path);
                     }
 
-                    let delete_pressed = ui.ctx().input(|i| {
-                        i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
-                    });
+                    let delete_pressed = self.renaming.is_none()
+                        && ui.ctx().input(|i| {
+                            i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
+                        });
                     if delete_pressed {
                         if let Some(wire_id) = self.selected_wire {
                             self.record_edit();
@@ -2485,6 +2689,7 @@ impl eframe::App for SimLogixApp {
                     // something, which defeats drawing one ahead of what it will
                     // connect to.
                     if self.wiring_from.is_some()
+                        && self.renaming.is_none()
                         && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter))
                     {
                         if let Some(in_progress) = self.wiring_from.take() {
@@ -2509,6 +2714,7 @@ impl eframe::App for SimLogixApp {
                     // thing to back out of, so it goes first; only once there's no
                     // wire being drawn does the same gesture clear the selection.
                     if !consumed_secondary
+                        && self.renaming.is_none()
                         && ui.ctx().input(|i| {
                             i.key_pressed(egui::Key::Escape) || i.pointer.secondary_clicked()
                         })
@@ -2678,5 +2884,137 @@ impl eframe::App for SimLogixApp {
         if !error_open {
             self.error = None;
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creating_a_circuit_opens_it_without_disturbing_the_others() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
+
+        app.create_circuit();
+
+        assert_eq!(app.circuits.len(), 2);
+        assert_eq!(app.active, 1);
+        // The new circuit starts empty...
+        assert!(app.placed.is_empty());
+        // ...and the one left behind kept what was drawn in it.
+        assert_eq!(app.circuits[0].components.len(), 1);
+    }
+
+    #[test]
+    fn switching_keeps_each_circuit_to_its_own_layout() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
+        app.create_circuit();
+        app.place(ComponentKind::Led, egui::pos2(80.0, 80.0));
+
+        app.switch_to(0);
+        assert_eq!(app.placed.len(), 1);
+        assert_eq!(app.placed[0].kind(), ComponentKind::Button);
+
+        app.switch_to(1);
+        assert_eq!(app.placed.len(), 1);
+        assert_eq!(app.placed[0].kind(), ComponentKind::Led);
+    }
+
+    #[test]
+    fn a_new_circuit_never_takes_a_name_already_in_use() {
+        let mut app = SimLogixApp::default();
+        app.create_circuit();
+        app.create_circuit();
+
+        let names: Vec<&str> = app
+            .circuits
+            .iter()
+            .map(|circuit| circuit.name.as_str())
+            .collect();
+        let distinct: std::collections::HashSet<&&str> = names.iter().collect();
+        assert_eq!(
+            names.len(),
+            distinct.len(),
+            "duplicate name among {names:?}"
+        );
+    }
+
+    #[test]
+    fn deleting_the_open_circuit_falls_onto_the_one_taking_its_place() {
+        let mut app = SimLogixApp::default();
+        app.create_circuit();
+        app.create_circuit();
+        app.switch_to(1);
+
+        app.delete_circuit(1);
+
+        assert_eq!(app.circuits.len(), 2);
+        // Index 1 now holds what used to sit at 2.
+        assert_eq!(app.active, 1);
+    }
+
+    #[test]
+    fn deleting_a_circuit_before_the_open_one_keeps_the_same_one_open() {
+        let mut app = SimLogixApp::default();
+        app.create_circuit();
+        app.place(ComponentKind::Led, egui::pos2(80.0, 80.0));
+        let open = app.circuits[app.active].name.clone();
+
+        app.delete_circuit(0);
+
+        assert_eq!(app.active, 0);
+        assert_eq!(app.circuits[0].name, open);
+        assert_eq!(app.placed.len(), 1);
+    }
+
+    #[test]
+    fn the_last_circuit_cannot_be_deleted() {
+        let mut app = SimLogixApp::default();
+        app.delete_circuit(0);
+        assert_eq!(app.circuits.len(), 1);
+    }
+
+    #[test]
+    fn renaming_onto_a_name_already_in_use_is_refused() {
+        let mut app = SimLogixApp::default();
+        let taken = app.circuits[0].name.clone();
+        app.create_circuit();
+
+        app.rename_circuit(1, &taken);
+
+        assert_ne!(app.circuits[1].name, taken);
+        assert!(app.error.is_some(), "the clash should be reported");
+    }
+
+    #[test]
+    fn undoing_a_new_circuit_goes_back_to_the_project_before_it() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
+        app.create_circuit();
+
+        app.undo();
+
+        assert_eq!(app.circuits.len(), 1);
+        assert_eq!(app.placed.len(), 1);
+    }
+
+    #[test]
+    fn saving_carries_every_circuit_not_just_the_open_one() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
+        app.create_circuit();
+        app.place(ComponentKind::Led, egui::pos2(80.0, 80.0));
+
+        let project = app.to_project();
+
+        assert_eq!(project.circuits.len(), 2);
+        assert_eq!(project.circuits[0].components.len(), 1);
+        assert_eq!(project.circuits[1].components.len(), 1);
     }
 }

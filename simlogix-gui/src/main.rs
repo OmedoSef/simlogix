@@ -2,6 +2,7 @@
 
 mod app;
 mod canvas;
+mod circuit_tree;
 mod i18n;
 mod palette;
 mod placed_component;

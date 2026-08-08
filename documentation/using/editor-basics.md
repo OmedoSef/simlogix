@@ -1,7 +1,8 @@
 # Editor basics
 
-The window is split into a menu bar, a toolbar above the canvas, a component
-palette on the left, the canvas itself, and a status bar along the bottom.
+The window is split into a menu bar, a toolbar above the canvas, the circuit
+tree and component palette down the left side, the canvas itself, and a
+status bar along the bottom.
 
 The **status bar is worth watching**: it always describes what the current
 selection or mode lets you do, so most of what follows can be discovered

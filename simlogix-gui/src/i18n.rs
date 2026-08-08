@@ -70,6 +70,20 @@ pub struct Strings {
     pub menu_help: &'static str,
     pub menu_help_about: &'static str,
 
+    pub circuits_heading: &'static str,
+    pub circuit_new: &'static str,
+    pub circuit_rename: &'static str,
+    pub circuit_delete: &'static str,
+    /// Why deleting is refused on the last remaining circuit.
+    pub circuit_delete_last: &'static str,
+    /// Contains a literal `{}` for the name that was already taken.
+    pub circuit_name_taken: &'static str,
+    /// Base name for a freshly created circuit — a number is appended when
+    /// that name is already in use. Saved into the project file as typed,
+    /// like any other name, so switching the UI language later doesn't
+    /// rename anything.
+    pub circuit_default_name: &'static str,
+
     pub palette_heading: &'static str,
     /// Contains a literal `{}` for the component name — fill it in with
     /// `.replace("{}", name)`, not `format!` (the template isn't a
@@ -181,6 +195,14 @@ static ENGLISH: Strings = Strings {
     menu_help: "?",
     menu_help_about: "About",
 
+    circuits_heading: "Circuits",
+    circuit_new: "New circuit",
+    circuit_rename: "Rename",
+    circuit_delete: "Delete",
+    circuit_delete_last: "A project has to keep at least one circuit.",
+    circuit_name_taken: "This project already has a circuit named \"{}\".",
+    circuit_default_name: "circuit",
+
     palette_heading: "Palette",
     palette_click_to_place:
         "Click the canvas to place a {} — hold Shift to place several",
@@ -253,6 +275,14 @@ static FRENCH: Strings = Strings {
     menu_help: "?",
     menu_help_about: "À propos",
 
+    circuits_heading: "Circuits",
+    circuit_new: "Nouveau circuit",
+    circuit_rename: "Renommer",
+    circuit_delete: "Supprimer",
+    circuit_delete_last: "Un projet doit conserver au moins un circuit.",
+    circuit_name_taken: "Ce projet contient déjà un circuit nommé « {} ».",
+    circuit_default_name: "circuit",
+
     palette_heading: "Palette",
     palette_click_to_place:
         "Cliquez sur le canevas pour placer : {} — maintenez Maj pour en poser plusieurs",
@@ -324,6 +354,14 @@ static ITALIAN: Strings = Strings {
     menu_settings_language: "Lingua",
     menu_help: "?",
     menu_help_about: "Informazioni",
+
+    circuits_heading: "Circuiti",
+    circuit_new: "Nuovo circuito",
+    circuit_rename: "Rinomina",
+    circuit_delete: "Elimina",
+    circuit_delete_last: "Un progetto deve conservare almeno un circuito.",
+    circuit_name_taken: "Questo progetto ha già un circuito chiamato \"{}\".",
+    circuit_default_name: "circuito",
 
     palette_heading: "Tavolozza",
     palette_click_to_place:
