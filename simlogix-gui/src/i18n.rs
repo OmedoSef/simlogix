@@ -92,6 +92,7 @@ pub struct Strings {
 
     pub hint_rotate_delete_component: &'static str,
     pub hint_delete_wire: &'static str,
+    pub hint_wiring: &'static str,
 
     pub about_title: &'static str,
     pub about_body: &'static str,
@@ -175,8 +176,10 @@ static ENGLISH: Strings = Strings {
     component_not: "NOT",
     component_buffer: "Buffer",
 
-    hint_rotate_delete_component: "Press R to rotate, Delete to remove the selected component",
-    hint_delete_wire: "Press Delete to remove the selected wire",
+    hint_rotate_delete_component:
+        "R to rotate, Delete to remove the selected component, Esc to deselect",
+    hint_delete_wire: "Delete to remove the selected wire, Esc to deselect",
+    hint_wiring: "Click to add a point, click a pin to finish, Esc to cancel",
 
     about_title: "About SimLogix",
     about_body: "SimLogix — a cross-platform logic simulator.",
@@ -223,8 +226,10 @@ static FRENCH: Strings = Strings {
     component_not: "NON",
     component_buffer: "Tampon",
 
-    hint_rotate_delete_component: "R pour tourner, Suppr pour supprimer le composant sélectionné",
-    hint_delete_wire: "Suppr pour supprimer le fil sélectionné",
+    hint_rotate_delete_component:
+        "R pour tourner, Suppr pour supprimer le composant sélectionné, Échap pour désélectionner",
+    hint_delete_wire: "Suppr pour supprimer le fil sélectionné, Échap pour désélectionner",
+    hint_wiring: "Cliquez pour ajouter un point, cliquez une pin pour finir, Échap pour annuler",
 
     about_title: "À propos de SimLogix",
     about_body: "SimLogix — un simulateur logique multiplateforme.",
@@ -271,8 +276,10 @@ static ITALIAN: Strings = Strings {
     component_not: "NOT",
     component_buffer: "Buffer",
 
-    hint_rotate_delete_component: "R per ruotare, Canc per eliminare il componente selezionato",
-    hint_delete_wire: "Canc per eliminare il filo selezionato",
+    hint_rotate_delete_component:
+        "R per ruotare, Canc per eliminare il componente selezionato, Esc per deselezionare",
+    hint_delete_wire: "Canc per eliminare il filo selezionato, Esc per deselezionare",
+    hint_wiring: "Clicca per aggiungere un punto, clicca un pin per finire, Esc per annullare",
 
     about_title: "Informazioni su SimLogix",
     about_body: "SimLogix — un simulatore logico multipiattaforma.",

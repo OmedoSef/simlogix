@@ -29,23 +29,72 @@ const CLOCK_PERIOD_TICKS: u64 = 60;
 /// propagate in one go.
 pub(crate) const SETTLE_TICKS: u64 = 32;
 
+/// One end of a [`Wire`] that isn't a component pin: a tap into another
+/// wire's waypoint (a junction/contact point), created by finishing a new
+/// wire on top of an existing one's waypoint instead of a pin. Tracked by
+/// the host wire's id and which of its waypoints — resolved fresh every
+/// frame (see `ui()`'s pre-pass) — so moving that point (even dragging the
+/// host's own implicit default-route point, which materializes into a real
+/// waypoint the moment it's first dragged) drags this tap along with it,
+/// same as any other point on the host would. A wire can only tap into an
+/// *earlier* one (you can only tap something that already exists), which is
+/// what makes that pre-pass a single forward sweep instead of needing to
+/// handle cycles.
+#[derive(Clone, Copy, PartialEq)]
+enum WireEndpoint {
+    Pin(ComponentId, usize),
+    Junction { wire: u64, waypoint: usize },
+}
+
+/// A single user-drawn wire: two endpoints (`from` is always a pin — every
+/// wire is drawn starting from one — `to` may be a pin or a junction tap on
+/// another wire) plus every waypoint between them, grid-snapped, in order.
+/// Replaces inferring wire topology from net membership (a "star" from an
+/// arbitrary anchor pin to every other pin sharing a net): that model had no
+/// way to represent a wire ending on a point that isn't a pin at all, which
+/// is exactly what a junction is.
+struct Wire {
+    id: u64,
+    net: NetId,
+    from: (ComponentId, usize),
+    to: WireEndpoint,
+    waypoints: Vec<egui::Pos2>,
+}
+
+/// A wire being placed click by click: the pin and net it started from, the
+/// screen position of that pin, and every waypoint confirmed so far
+/// (grid-snapped, in order) — the segment from the last of these to the
+/// current pointer position is drawn as a live preview until the wire is
+/// finished or cancelled.
+struct WireInProgress {
+    from: (ComponentId, usize),
+    net: NetId,
+    anchor: egui::Pos2,
+    waypoints: Vec<egui::Pos2>,
+}
+
 /// Pick a kind from the palette, click the canvas to drop it (snapped to the
-/// grid), then drag from one pin to another to wire them together — that
-/// merges their nets in `circuit` (see `Circuit::merge_nets`).
+/// grid), then click one pin to start a wire, click the canvas as many times
+/// as you like to lay down grid-snapped waypoints, and click a pin — or an
+/// existing wire's waypoint, to tap into it as a junction — to finish it.
+/// That merges their nets in `circuit` (see `Circuit::merge_nets`). Escape
+/// cancels a wire in progress.
 pub struct SimLogixApp {
     show_about: bool,
     circuit: Circuit,
     placed: Vec<PlacedComponent>,
     pending_placement: Option<ComponentKind>,
     selected: Option<ComponentId>,
-    /// The net and screen anchor a wire-drag started from, if one is in progress.
-    wiring_from: Option<(NetId, egui::Pos2)>,
-    /// The currently selected wire: a net, and the index (within that net's
-    /// group of pins sharing it) of the "far" endpoint — see the drawing loop.
-    selected_wire: Option<(NetId, usize)>,
-    /// A user-dragged override for a wire's bend x-position, keyed the same
-    /// way as `selected_wire`. Absent means "use the automatic midpoint".
-    wire_bends: HashMap<(NetId, usize), f32>,
+    /// A wire currently being placed click by click, if one is in progress.
+    wiring_from: Option<WireInProgress>,
+    /// Every wire the user has drawn (or that was reconstructed on project
+    /// load) — the source of truth for both rendering and editing.
+    wires: Vec<Wire>,
+    /// Monotonically increasing, so each `Wire` gets a stable id independent
+    /// of its position in `wires` (which changes on deletion).
+    next_wire_id: u64,
+    /// The currently selected wire's id, if any.
+    selected_wire: Option<u64>,
     /// The last save/load failure, if any, shown in a dismissible window.
     error: Option<String>,
     /// Fractional logical ticks owed to `circuit` from real elapsed time,
@@ -64,8 +113,9 @@ impl Default for SimLogixApp {
             pending_placement: None,
             selected: None,
             wiring_from: None,
+            wires: Vec::new(),
+            next_wire_id: 0,
             selected_wire: None,
-            wire_bends: HashMap::new(),
             error: None,
             tick_budget: 0.0,
             // Everything else defaults trivially; only the language needs a
@@ -255,9 +305,32 @@ impl SimLogixApp {
         id
     }
 
+    /// Registers a new `Wire` and returns its id.
+    fn add_wire(
+        &mut self,
+        net: NetId,
+        from: (ComponentId, usize),
+        to: WireEndpoint,
+        waypoints: Vec<egui::Pos2>,
+    ) -> u64 {
+        let id = self.next_wire_id;
+        self.next_wire_id += 1;
+        self.wires.push(Wire {
+            id,
+            net,
+            from,
+            to,
+            waypoints,
+        });
+        id
+    }
+
     /// Snapshots the current layout and wiring into a saveable project.
     /// Runtime state (button presses, signal values) is deliberately left out
-    /// — see `project.rs`.
+    /// — see `project.rs`. Wire shape (waypoints, junctions) isn't saved
+    /// either — only which pins share a net, same as before this file's
+    /// `Wire` rewrite; a reloaded project's wires are just resynthesized as a
+    /// plain star (see `from_project`).
     fn to_project(&self) -> SavedProject {
         let components = self
             .placed
@@ -300,8 +373,11 @@ impl SimLogixApp {
     }
 
     /// Rebuilds a fresh app from a saved project, re-registering every
-    /// component and re-merging every saved wire group. Only the first
-    /// circuit is loaded — there's no multi-circuit editing yet.
+    /// component, re-merging every saved wire group, and resynthesizing a
+    /// `Wire` (a plain star from the group's first pin to every other, no
+    /// waypoints) for each group so the reloaded circuit still renders as
+    /// connected. Only the first circuit is loaded — there's no
+    /// multi-circuit editing yet.
     fn from_project(project: &SavedProject) -> Self {
         let mut app = Self::default();
 
@@ -331,6 +407,17 @@ impl SimLogixApp {
             if let Some((&first_net, rest)) = endpoint_nets.split_first() {
                 for &net in rest {
                     app.circuit.merge_nets(net, first_net);
+                }
+            }
+            if let Some((&(anchor_ci, anchor_pi), rest)) = group.split_first() {
+                for &(ci, pi) in rest {
+                    let net = app.circuit.pins(ids[ci])[pi].net;
+                    app.add_wire(
+                        net,
+                        (ids[anchor_ci], anchor_pi),
+                        WireEndpoint::Pin(ids[ci], pi),
+                        Vec::new(),
+                    );
                 }
             }
         }
@@ -451,7 +538,9 @@ impl eframe::App for SimLogixApp {
         });
 
         egui::Panel::bottom("status_bar").show(ui, |ui| {
-            let hint = if let Some(kind) = self.pending_placement {
+            let hint = if self.wiring_from.is_some() {
+                Some(strings.hint_wiring.to_string())
+            } else if let Some(kind) = self.pending_placement {
                 let label = strings.component_kind_label(kind);
                 Some(strings.palette_click_to_place.replace("{}", label))
             } else if self.selected_wire.is_some() {
@@ -498,25 +587,37 @@ impl eframe::App for SimLogixApp {
                 }
             }
 
+            // Whether this frame's click landed on something selectable (a
+            // component, a wire, a waypoint, a pin). A click that lands on
+            // nothing is a click on empty canvas, which clears the selection
+            // -- see the end of this closure.
+            let mut click_consumed = false;
+
             let mut pin_handles = Vec::new();
             for placed in &mut self.placed {
                 let frame =
                     placed.draw_and_interact(ui, &painter, &mut self.circuit, self.selected);
                 if let Some(id) = frame.clicked {
+                    // A component and a wire are never selected at once:
+                    // Delete checks the wire first, so leaving a stale wire
+                    // selected would delete that instead of the component
+                    // just clicked.
                     self.selected = Some(id);
+                    self.selected_wire = None;
+                    click_consumed = true;
                 }
                 pin_handles.extend(frame.pins);
             }
-
-            // Persistent wires: any two (or more) pins already sharing a net,
-            // colored like the demo LED — red while `High`, gray otherwise.
-            // Drawn as a star from the first pin in the group to every other
-            // one, so each line is a distinct, selectable "wire".
-            let mut handles_by_net: HashMap<NetId, Vec<&crate::placed_component::PinHandle>> =
-                HashMap::new();
-            for handle in &pin_handles {
-                handles_by_net.entry(handle.net).or_default().push(handle);
-            }
+            // A pin's current on-canvas position this frame, resolved by
+            // identity -- every `Wire` endpoint that's a pin looks itself up
+            // here rather than storing a position directly, so it tracks a
+            // moved component automatically.
+            let pin_position = |component: ComponentId, pin_index: usize| -> Option<egui::Pos2> {
+                pin_handles
+                    .iter()
+                    .find(|h| h.component == component && h.pin_index == pin_index)
+                    .map(|h| h.position)
+            };
 
             let click_pos = ui.ctx().input(|i| {
                 i.pointer
@@ -524,67 +625,169 @@ impl eframe::App for SimLogixApp {
                     .then(|| i.pointer.interact_pos())
                     .flatten()
             });
+            // Double-clicking along an existing wire inserts a new waypoint
+            // right there, so a wire can be reshaped in more places than
+            // just its existing points.
+            let double_click_pos = ui.ctx().input(|i| {
+                i.pointer
+                    .button_double_clicked(egui::PointerButton::Primary)
+                    .then(|| i.pointer.interact_pos())
+                    .flatten()
+            });
 
-            for (&net, handles) in &handles_by_net {
-                if handles.len() < 2 {
-                    continue;
-                }
+            // Every wire's endpoints and (possibly-defaulted) waypoint list,
+            // resolved once per frame in creation order: a junction can only
+            // tap into an already-existing (so already-resolved) earlier
+            // wire, so a single forward pass is always enough -- no need to
+            // handle cycles or iterate to a fixed point.
+            struct Resolved {
+                from: egui::Pos2,
+                to: egui::Pos2,
+                waypoints: Vec<egui::Pos2>,
+            }
+            let mut resolved: HashMap<u64, Resolved> = HashMap::new();
+            for wire in &self.wires {
+                let Some(from_pos) = pin_position(wire.from.0, wire.from.1) else {
+                    continue; // Stale: its component is gone.
+                };
+                let to_pos = match wire.to {
+                    WireEndpoint::Pin(component, pin_index) => {
+                        match pin_position(component, pin_index) {
+                            Some(pos) => pos,
+                            None => continue, // Stale: its component is gone.
+                        }
+                    }
+                    WireEndpoint::Junction {
+                        wire: host,
+                        waypoint,
+                    } => {
+                        match resolved.get(&host).and_then(|r| r.waypoints.get(waypoint)) {
+                            Some(&pos) => pos,
+                            None => continue, // Host gone, or that point no longer exists.
+                        }
+                    }
+                };
+                // No user-placed route yet: the automatic single-bend Z
+                // route, grid-aligned at the midpoint so a fresh connection
+                // never starts off-grid -- expressed as two waypoints
+                // forming that same vertical bend, so dragging either one
+                // (below) seamlessly turns this default into a real route.
+                let waypoints = if wire.waypoints.is_empty() {
+                    let bend_x = canvas::snap_coord_to_grid((from_pos.x + to_pos.x) / 2.0);
+                    vec![egui::pos2(bend_x, from_pos.y), egui::pos2(bend_x, to_pos.y)]
+                } else {
+                    wire.waypoints.clone()
+                };
+                resolved.insert(
+                    wire.id,
+                    Resolved {
+                        from: from_pos,
+                        to: to_pos,
+                        waypoints,
+                    },
+                );
+            }
+
+            // Finishing a new wire on top of another wire's waypoint (a
+            // junction tap) is decided inside the loop below but applied
+            // after it, to keep `self.wires` stable (an unchanging length,
+            // no reallocation) for the whole iteration.
+            let mut junction_finish: Option<(NetId, u64, usize)> = None;
+
+            for i in 0..self.wires.len() {
+                let wire_id = self.wires[i].id;
+                let net = self.wires[i].net;
+                let Some(Resolved {
+                    from: from_pos,
+                    to: to_pos,
+                    waypoints,
+                }) = resolved.remove(&wire_id)
+                else {
+                    continue; // Stale, already skipped above.
+                };
+
                 let color = if self.circuit.signal_at(net) == Signal::High {
                     egui::Color32::from_rgb(220, 30, 30)
                 } else {
                     egui::Color32::from_gray(120)
                 };
-                let anchor = handles[0].position;
-                for (index, endpoint) in handles.iter().enumerate().skip(1) {
-                    let is_selected_wire = self.selected_wire == Some((net, index));
-                    let stroke = if is_selected_wire {
-                        egui::Stroke::new(3.0, egui::Color32::from_rgb(90, 160, 255))
-                    } else {
-                        egui::Stroke::new(2.0, color)
-                    };
+                let is_selected_wire = self.selected_wire == Some(wire_id);
+                let stroke = if is_selected_wire {
+                    egui::Stroke::new(3.0, egui::Color32::from_rgb(90, 160, 255))
+                } else {
+                    egui::Stroke::new(2.0, color)
+                };
 
-                    // Grid-align the default midpoint too, not just a
-                    // manually-dragged bend — otherwise a freshly drawn wire
-                    // starts off-grid until the user drags its bend once.
-                    let default_bend_x =
-                        canvas::snap_coord_to_grid((anchor.x + endpoint.position.x) / 2.0);
-                    let bend_x = self
-                        .wire_bends
-                        .get(&(net, index))
-                        .copied()
-                        .unwrap_or(default_bend_x);
-                    let path = canvas::orthogonal_path_with_bend(anchor, endpoint.position, bend_x);
-                    canvas::draw_path(&painter, &path, stroke);
+                let mut path = vec![from_pos];
+                path.extend(waypoints.iter().copied());
+                path.push(to_pos);
+                canvas::draw_path(&painter, &path, stroke);
+                for &point in &waypoints {
+                    painter.circle_filled(point, 3.5, stroke.color);
+                }
 
+                // Only select an existing wire by clicking on it, or reshape
+                // it by dragging a waypoint, while not actively placing a
+                // new one -- otherwise a click meant to add a waypoint to
+                // the new wire would hijack this one instead.
+                if self.wiring_from.is_none() {
                     if let Some(click_pos) = click_pos {
                         if canvas::distance_to_path(click_pos, &path) < 6.0 {
-                            self.selected_wire = Some((net, index));
+                            self.selected_wire = Some(wire_id);
+                            self.selected = None;
+                            click_consumed = true;
                         }
                     }
 
-                    // The middle (vertical) segment is draggable, to move the bend.
-                    let bend_top = path[1].y.min(path[2].y) - 5.0;
-                    let bend_bottom = path[1].y.max(path[2].y) + 5.0;
-                    let bend_rect = egui::Rect::from_min_max(
-                        egui::pos2(bend_x - 5.0, bend_top),
-                        egui::pos2(bend_x + 5.0, bend_bottom),
-                    );
-                    let bend_response = ui.interact(
-                        bend_rect,
-                        egui::Id::new(("wire_bend", net, index)),
-                        egui::Sense::click_and_drag(),
-                    );
-                    if bend_response.dragged() {
-                        self.wire_bends
-                            .insert((net, index), bend_x + bend_response.drag_delta().x);
-                    }
-                    if bend_response.drag_stopped() {
-                        if let Some(bend_x) = self.wire_bends.get_mut(&(net, index)) {
-                            *bend_x = canvas::snap_coord_to_grid(*bend_x);
+                    if let Some(dbl_pos) = double_click_pos {
+                        if let Some((segment, distance)) = canvas::closest_segment(&path, dbl_pos) {
+                            if distance < 6.0 {
+                                if self.wires[i].waypoints.is_empty() {
+                                    self.wires[i].waypoints = waypoints.clone();
+                                }
+                                self.wires[i]
+                                    .waypoints
+                                    .insert(segment, canvas::snap_to_grid(dbl_pos));
+                                self.selected_wire = Some(wire_id);
+                                self.selected = None;
+                                click_consumed = true;
+                            }
                         }
                     }
-                    if bend_response.clicked() {
-                        self.selected_wire = Some((net, index));
+                }
+
+                for (waypoint_index, &point) in waypoints.iter().enumerate() {
+                    let handle_rect = egui::Rect::from_center_size(point, egui::vec2(10.0, 10.0));
+                    let response = ui.interact(
+                        handle_rect,
+                        egui::Id::new(("wire_point", wire_id, waypoint_index)),
+                        egui::Sense::click_and_drag(),
+                    );
+
+                    if let Some(in_progress) = &self.wiring_from {
+                        // A wire is being drawn: clicking another wire's
+                        // waypoint taps into it as a junction, finishing the
+                        // new wire here instead of on a pin.
+                        if response.clicked() && net != in_progress.net {
+                            junction_finish = Some((net, wire_id, waypoint_index));
+                        }
+                    } else {
+                        if response.dragged() {
+                            if self.wires[i].waypoints.is_empty() {
+                                self.wires[i].waypoints = waypoints.clone();
+                            }
+                            self.wires[i].waypoints[waypoint_index] += response.drag_delta();
+                        }
+                        if response.drag_stopped() {
+                            if let Some(p) = self.wires[i].waypoints.get_mut(waypoint_index) {
+                                *p = canvas::snap_to_grid(*p);
+                            }
+                        }
+                        if response.clicked() {
+                            self.selected_wire = Some(wire_id);
+                            self.selected = None;
+                            click_consumed = true;
+                        }
                     }
                 }
             }
@@ -593,48 +796,181 @@ impl eframe::App for SimLogixApp {
                 .ctx()
                 .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
             if delete_pressed {
-                if let Some((net, index)) = self.selected_wire {
-                    // A wire is selected: delete it, not the component.
-                    if let Some(endpoint) = handles_by_net.get(&net).and_then(|h| h.get(index)) {
-                        self.circuit
-                            .disconnect_pin(endpoint.component, endpoint.pin_index);
-                        let _ = self.circuit.advance(SETTLE_TICKS);
+                if let Some(wire_id) = self.selected_wire {
+                    // Deleting a wire that other wires are junction-tapped
+                    // onto would otherwise orphan them (their host id no
+                    // longer resolves, so they'd silently stop rendering and
+                    // become impossible to select) -- cascade the delete to
+                    // them too, and to anything tapped onto *those*, and so
+                    // on.
+                    let mut to_remove = vec![wire_id];
+                    let mut i = 0;
+                    while i < to_remove.len() {
+                        let host = to_remove[i];
+                        for wire in &self.wires {
+                            if let WireEndpoint::Junction { wire: w, .. } = wire.to {
+                                if w == host && !to_remove.contains(&wire.id) {
+                                    to_remove.push(wire.id);
+                                }
+                            }
+                        }
+                        i += 1;
                     }
-                    self.wire_bends.remove(&(net, index));
+                    for id in to_remove {
+                        if let Some(pos) = self.wires.iter().position(|w| w.id == id) {
+                            let wire = self.wires.remove(pos);
+                            // Disconnect whichever endpoint is a real pin
+                            // that's uniquely this wire's own (a junction has
+                            // none, so fall back to `from`, which every wire
+                            // has).
+                            let (component, pin_index) = match wire.to {
+                                WireEndpoint::Pin(component, pin_index) => (component, pin_index),
+                                WireEndpoint::Junction { .. } => wire.from,
+                            };
+                            self.circuit.disconnect_pin(component, pin_index);
+                            let _ = self.circuit.advance(SETTLE_TICKS);
+                        }
+                    }
                     self.selected_wire = None;
                 } else if let Some(selected) = self.selected {
                     self.circuit.remove_component(selected);
                     self.placed.retain(|placed| placed.id() != selected);
+
+                    // Same cascade as deleting a wire directly (see above):
+                    // removing every wire touching this component would
+                    // otherwise orphan anything junction-tapped onto them.
+                    let mut to_remove: Vec<u64> = self
+                        .wires
+                        .iter()
+                        .filter(|w| {
+                            w.from.0 == selected
+                                || matches!(w.to, WireEndpoint::Pin(c, _) if c == selected)
+                        })
+                        .map(|w| w.id)
+                        .collect();
+                    let mut i = 0;
+                    while i < to_remove.len() {
+                        let host = to_remove[i];
+                        for wire in &self.wires {
+                            if let WireEndpoint::Junction { wire: w, .. } = wire.to {
+                                if w == host && !to_remove.contains(&wire.id) {
+                                    to_remove.push(wire.id);
+                                }
+                            }
+                        }
+                        i += 1;
+                    }
+                    self.wires.retain(|w| !to_remove.contains(&w.id));
                     self.selected = None;
                 }
             }
 
-            // A wire being dragged into existence: start it at the pin where the
-            // drag began, follow the pointer, and complete it on release if the
-            // pointer lands on a different pin.
-            for handle in &pin_handles {
-                if handle.drag_started {
-                    self.wiring_from = Some((handle.net, handle.position));
+            // A wire being placed click by click: clicking a pin starts one
+            // (or finishes it, if one's already in progress and this pin is
+            // on a different net); clicking empty canvas along the way adds
+            // a grid-snapped waypoint; Escape cancels it.
+            let clicked_pin = pin_handles
+                .iter()
+                .find(|handle| handle.clicked)
+                .map(|handle| {
+                    (
+                        handle.component,
+                        handle.pin_index,
+                        handle.net,
+                        handle.position,
+                    )
+                });
+
+            if let Some((component, pin_index, net, position)) = clicked_pin {
+                click_consumed = true;
+                if let Some(in_progress) = self.wiring_from.take() {
+                    if net != in_progress.net {
+                        self.circuit.merge_nets(in_progress.net, net);
+                        let _ = self.circuit.advance(SETTLE_TICKS);
+                        self.add_wire(
+                            net,
+                            in_progress.from,
+                            WireEndpoint::Pin(component, pin_index),
+                            in_progress.waypoints,
+                        );
+                    } else {
+                        // Clicked back onto the same net (e.g. the wire's
+                        // own start pin) -- not a valid finish, keep going.
+                        self.wiring_from = Some(in_progress);
+                    }
+                } else {
+                    self.wiring_from = Some(WireInProgress {
+                        from: (component, pin_index),
+                        net,
+                        anchor: position,
+                        waypoints: Vec::new(),
+                    });
+                }
+            } else if let Some((target_net, host_wire, host_waypoint)) = junction_finish {
+                if let Some(in_progress) = self.wiring_from.take() {
+                    self.circuit.merge_nets(in_progress.net, target_net);
+                    let _ = self.circuit.advance(SETTLE_TICKS);
+                    self.add_wire(
+                        target_net,
+                        in_progress.from,
+                        WireEndpoint::Junction {
+                            wire: host_wire,
+                            waypoint: host_waypoint,
+                        },
+                        in_progress.waypoints,
+                    );
+                }
+            } else if let Some(pos) = click_pos {
+                if let Some(in_progress) = &mut self.wiring_from {
+                    in_progress.waypoints.push(canvas::snap_to_grid(pos));
                 }
             }
-            if let Some((from_net, anchor)) = self.wiring_from {
-                let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(anchor);
-                let path = canvas::orthogonal_path(anchor, pointer_pos);
+
+            // Right-click is the common "let go of what I'm doing" gesture in
+            // most editors, so it backs out the same as Escape -- left-click
+            // can't double as either, since it's already how a waypoint gets
+            // added. One step at a time: a wire in progress is the innermost
+            // thing to back out of, so it goes first; only once there's no
+            // wire being drawn does the same gesture clear the selection.
+            if ui
+                .ctx()
+                .input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.secondary_clicked())
+            {
+                if self.wiring_from.is_some() {
+                    self.wiring_from = None;
+                } else {
+                    self.selected = None;
+                    self.selected_wire = None;
+                    self.pending_placement = None;
+                }
+            }
+
+            // A click that hit nothing selectable is a click on empty
+            // canvas: clear the selection, the way every schematic/drawing
+            // editor does. Skipped while a wire is being drawn (that click
+            // was a waypoint) or a placement is queued (it's about to drop a
+            // component there).
+            if click_pos.is_some()
+                && !click_consumed
+                && self.wiring_from.is_none()
+                && self.pending_placement.is_none()
+            {
+                self.selected = None;
+                self.selected_wire = None;
+            }
+
+            if let Some(in_progress) = &self.wiring_from {
+                let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(in_progress.anchor);
+                let mut preview = vec![in_progress.anchor];
+                preview.extend(in_progress.waypoints.iter().copied());
+                preview.push(pointer_pos);
                 canvas::draw_path(
                     &painter,
-                    &path,
+                    &preview,
                     egui::Stroke::new(2.0, egui::Color32::from_gray(200)),
                 );
-
-                if ui.ctx().input(|i| i.pointer.primary_released()) {
-                    let target = pin_handles.iter().find(|handle| {
-                        handle.net != from_net && handle.position.distance(pointer_pos) < 10.0
-                    });
-                    if let Some(target) = target {
-                        self.circuit.merge_nets(from_net, target.net);
-                        let _ = self.circuit.advance(SETTLE_TICKS);
-                    }
-                    self.wiring_from = None;
+                for &waypoint in &in_progress.waypoints {
+                    painter.circle_filled(waypoint, 3.0, egui::Color32::from_gray(200));
                 }
             }
 

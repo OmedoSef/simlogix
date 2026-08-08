@@ -59,20 +59,6 @@ pub fn distance_to_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {
     (point - projection).length()
 }
 
-/// A 3-segment "Z" orthogonal route between two points, with the vertical
-/// segment (the "bend") at `bend_x`: out horizontally to `bend_x`, then
-/// vertically, then the rest of the way horizontally. Degenerates to a
-/// single straight segment when `a` and `b` already share a y-coordinate.
-pub fn orthogonal_path_with_bend(a: Pos2, b: Pos2, bend_x: f32) -> Vec<Pos2> {
-    vec![a, pos2(bend_x, a.y), pos2(bend_x, b.y), b]
-}
-
-/// [`orthogonal_path_with_bend`] with the bend at the horizontal midpoint —
-/// the default route before the user drags it anywhere else.
-pub fn orthogonal_path(a: Pos2, b: Pos2) -> Vec<Pos2> {
-    orthogonal_path_with_bend(a, b, (a.x + b.x) / 2.0)
-}
-
 /// Draws a polyline through every point of `path` in order.
 pub fn draw_path(painter: &Painter, path: &[Pos2], stroke: Stroke) {
     for pair in path.windows(2) {
@@ -86,6 +72,18 @@ pub fn distance_to_path(point: Pos2, path: &[Pos2]) -> f32 {
     path.windows(2)
         .map(|pair| distance_to_segment(point, pair[0], pair[1]))
         .fold(f32::INFINITY, f32::min)
+}
+
+/// The index `i` of the segment `path[i]`-`path[i+1]` closest to `point`,
+/// and that distance — used to figure out where a new waypoint should be
+/// inserted when double-clicking along an already-drawn wire (the new point
+/// goes at that same index in the wire's waypoint list, since `path[0]` is
+/// the wire's anchor and isn't itself a waypoint).
+pub fn closest_segment(path: &[Pos2], point: Pos2) -> Option<(usize, f32)> {
+    path.windows(2)
+        .enumerate()
+        .map(|(i, pair)| (i, distance_to_segment(point, pair[0], pair[1])))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
 /// Draws a dot grid filling `rect`.

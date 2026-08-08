@@ -12,13 +12,14 @@ use crate::palette::ComponentKind;
 use crate::symbol;
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
-/// it is, which net it's on, and whether a wire-drag just started there.
+/// it is, which net it's on, and whether it was clicked this frame (starts
+/// or finishes a click-by-click wire — see `SimLogixApp::wiring_from`).
 pub struct PinHandle {
     pub component: ComponentId,
     pub pin_index: usize,
     pub position: Pos2,
     pub net: NetId,
-    pub drag_started: bool,
+    pub clicked: bool,
 }
 
 /// What happened while drawing and interacting with a placed component this frame.
@@ -37,6 +38,12 @@ const ON_COLOR: Color32 = Color32::from_rgb(220, 30, 30);
 /// Symbol color for a Low signal — bright enough to stay visible against the
 /// dark canvas now that there's no box behind it to contrast against.
 const OFF_COLOR: Color32 = Color32::from_gray(180);
+/// How far the component box's own drag/click area is inset from its full
+/// symbol rect — half a pin's hit-rect size, so the two never overlap. Pins
+/// sit exactly on the box's edge, so without this a click meant for a pin
+/// could just as easily be claimed by the box underneath it and move the
+/// component instead of starting a wire.
+const PIN_HIT_MARGIN: f32 = 7.0;
 
 /// A `Button` needs its pressed handle to react to clicks; a `Led` and a
 /// `Probe` need nothing extra — their state is read straight from the net
@@ -252,7 +259,7 @@ impl PlacedComponent {
     /// (snapped to the grid), while a plain press/release on a `Button`
     /// re-schedules and re-runs `circuit` so the change is visible the same
     /// frame. Each pin also gets its own small hit target, returned so the
-    /// caller can turn a drag between two pins into a wire. The canvas shows
+    /// caller can turn clicks on two pins into a wire. The canvas shows
     /// only the component's symbol (`symbol::draw`) — no text label except
     /// `Probe`'s own state readout, which is its whole purpose. The palette
     /// is where every other component's name shows up.
@@ -281,7 +288,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 } else {
@@ -323,7 +334,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -348,7 +363,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -375,7 +394,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -419,7 +442,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -454,7 +481,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -479,7 +510,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -506,7 +541,11 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect);
                 }
 
-                let response = ui.interact(rect, rect_id, Sense::click_and_drag());
+                let response = ui.interact(
+                    rect.shrink(PIN_HIT_MARGIN),
+                    rect_id,
+                    Sense::click_and_drag(),
+                );
                 if response.dragged() {
                     *center += response.drag_delta();
                 }
@@ -540,13 +579,13 @@ fn pin_handle(
     let response = ui.interact(
         hit_rect,
         Id::new(("pin", component, pin_index)),
-        Sense::click_and_drag(),
+        Sense::click(),
     );
     PinHandle {
         component,
         pin_index,
         position,
         net,
-        drag_started: response.drag_started(),
+        clicked: response.clicked(),
     }
 }
