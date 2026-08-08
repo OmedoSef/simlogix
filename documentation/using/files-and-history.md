@@ -20,7 +20,7 @@ The window title shows which file you're editing and an asterisk while it
 has unsaved changes:
 
 ```
-SimLogix — half-adder.simlogix*
+SimLogix — half-adder.slgx*
 ```
 
 Anything that would discard unsaved work — New, Open, or closing the window
@@ -38,18 +38,40 @@ opening a project starts it cold, like opening a fresh circuit.
 The current view (zoom and pan) isn't saved either; it's how you were
 looking at the circuit, not part of it.
 
-The format carries a version number, and older files are migrated forward on
-open, so projects saved by earlier builds keep working:
+A project file holds **every** circuit in the project, not just the one
+open at the time — see [Circuits](#circuits) below. Saving, undo and redo
+all work on the project as a whole.
+
+## The file itself
+
+A project is a single `.slgx` file — one file to copy onto a USB stick or
+sync to another machine, not a folder to keep together.
+
+Inside, it's a zip archive laid out like this:
+
+```
+project.json        the format version and the circuits, in order
+circuits/main.json  one file per circuit
+circuits/adder.json
+```
+
+You can open it with any zip tool and read the JSON inside; nothing is
+compressed. Splitting the circuits into separate files isn't for speed —
+the whole project is read at once either way. It's so the format has
+somewhere to put things that aren't JSON later on, such as component
+symbols you've drawn yourself.
+
+Older files still open. The format is recognised from the file's contents
+rather than its name, so a project saved by an earlier build — including
+the previous `.simlogix` single-document format — opens without you having
+to do anything, and is written back as `.slgx` next time you save.
 
 | Version | Change |
 |---|---|
 | 1 | Wires were just groups of pins sharing a net, with no shape. |
 | 2 | Wires became explicit, each with its own route and junctions. |
 | 3 | A wire's *start* became a full endpoint too, so it can begin loose. |
-
-A project file holds **every** circuit in the project, not just the one
-open at the time — see [Circuits](#circuits) below. Saving, undo and redo
-all work on the project as a whole.
+| 4 | The document became a zip container, one file per circuit. |
 
 ## Circuits
 

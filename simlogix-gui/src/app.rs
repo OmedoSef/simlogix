@@ -13,7 +13,7 @@ use crate::circuit_tree::{self, TreeAction};
 use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
 use crate::placed_component::PlacedComponent;
-use crate::project::{SavedCircuit, SavedComponent, SavedEndpoint, SavedProject, SavedWire};
+use crate::project::{self, SavedCircuit, SavedComponent, SavedEndpoint, SavedProject, SavedWire};
 use crate::toolbar::{self, Tool};
 
 /// Logical ticks the circuit advances per real second — the resolution the
@@ -670,8 +670,8 @@ impl SimLogixApp {
 
     fn save_project_as(&mut self) -> bool {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("SimLogix project", &["simlogix"])
-            .set_file_name("circuit.simlogix")
+            .add_filter("SimLogix project", &[project::PROJECT_EXTENSION])
+            .set_file_name(format!("circuit.{}", project::PROJECT_EXTENSION))
             .save_file()
         else {
             return false;
@@ -681,9 +681,9 @@ impl SimLogixApp {
 
     fn write_project_to(&mut self, path: &std::path::Path) -> bool {
         let project = self.to_project();
-        let result = serde_json::to_string_pretty(&project)
-            .map_err(|err| err.to_string())
-            .and_then(|json| std::fs::write(path, json).map_err(|err| err.to_string()));
+        let result = project
+            .to_container()
+            .and_then(|bytes| std::fs::write(path, bytes).map_err(|err| err.to_string()));
         match result {
             Ok(()) => {
                 self.current_path = Some(path.to_path_buf());
@@ -700,15 +700,20 @@ impl SimLogixApp {
 
     fn open_project(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("SimLogix project", &["simlogix"])
+            // Projects written before the container format are still offered:
+            // they open fine, since the format is read from the bytes.
+            .add_filter(
+                "SimLogix project",
+                &[project::PROJECT_EXTENSION, project::LEGACY_EXTENSION],
+            )
             .pick_file()
         else {
             return;
         };
 
-        let result = std::fs::read_to_string(&path)
+        let result = std::fs::read(&path)
             .map_err(|err| err.to_string())
-            .and_then(|json| SavedProject::from_json(&json));
+            .and_then(|bytes| SavedProject::from_bytes(&bytes));
         match result {
             Ok(project) => {
                 // Loading a project resets everything else, but the
