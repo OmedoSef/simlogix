@@ -5,9 +5,14 @@ This folder holds the documentation for users and contributors. It's a work in p
 - **Getting started**
   - [Installation](getting-started/installation.md) — prerequisites and opening the devcontainer.
   - [Building and running](getting-started/building-and-running.md) — building, testing, and running each crate.
+- **Using SimLogix**
+  - [Editor basics](using/editor-basics.md) — tools, placing components, selecting, moving, the view, settings, keyboard reference.
+  - [Wiring](using/wiring.md) — drawing and reshaping wires, loose ends, junctions.
+  - [Running a circuit](using/simulation.md) — run/pause, signal colours, unstable circuits.
+  - [Projects, saving and undo](using/files-and-history.md) — undo/redo, save/load, the file format.
 - **Architecture**
   - [Overview](architecture/overview.md) — workspace layout, crate responsibilities, GUI toolkit choice.
-  - [Simulation engine](architecture/simulation-engine.md) — discrete-event model, signal states, feedback-loop handling *(planned, not yet implemented)*.
+  - [Simulation engine](architecture/simulation-engine.md) — discrete-event model, signal states, feedback-loop handling.
 - **Contributing**
   - [Code conventions](contributing/code-conventions.md) — language, error handling, panics, formatting, tests, module layout.
   - [Commit conventions](contributing/commit-conventions.md) — Conventional Commits format, types, scopes, enforcement hook.

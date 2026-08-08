@@ -22,19 +22,28 @@ It's also natively cross-platform, with a WASM export path available later if a 
 
 ## Simulation engine
 
-See [simulation-engine.md](simulation-engine.md) for the discrete-event model that handles feedback loops — this is the direct answer to the "circuits with feedback lock up the simulator" problem from Logisim. **Implemented** in `Circuit`; not yet wired to the GUI or exercised by concrete components.
+See [simulation-engine.md](simulation-engine.md) for the discrete-event model that handles feedback loops — this is the direct answer to the "circuits with feedback lock up the simulator" problem from Logisim. Implemented in `Circuit` and driven by the GUI's frame loop, with an unstable circuit pausing the simulation and reporting the offending net rather than hanging.
 
 ## Current status
 
-As of now, the working code is:
+**`simlogix-core`** — `Signal` (`High`/`Low`/`Unknown`/`Error`/`HighZ`), `NetId`, `PinDirection` (`Input`/`Output`/`InOut`), `Pin`, the `Component` trait, and `Circuit`: a discrete-event engine (`schedule_now`, `schedule_periodic`, `advance`, `run`, logical clock, `UnstableCircuit` detection) plus structural editing after the fact — `merge_nets` (connect), `disconnect_pin` (detach one pin without disturbing others on its net), `remove_component`. Sixteen concrete components:
 
-- The Cargo workspace scaffold (`simlogix-core`, `simlogix-gui`).
-- In `simlogix-core`: `Signal` (`High`/`Low`/`Unknown`/`Error`/`HighZ`), `NetId`, `PinDirection` (`Input`/`Output`/`InOut`), `Pin`, the `Component` trait, `Circuit` — a real discrete-event engine (`schedule_now`, `schedule_periodic`, `advance`, `run`, logical clock, `UnstableCircuit` instability detection) plus structural editing after the fact: `merge_nets` (connect), `disconnect_pin` (disconnect one pin without disturbing others on the same net), `remove_component` (delete). Six concrete components: `Button`, `Led`, `Transistor` (NMOS/PMOS, gate-controlled `Source -> Drain` pass, `HighZ` when not conducting), `Rail` (fixed `Ground`/`Power` sources), `Probe` (reads a net's full signal state as text), and `Clock` (a periodic source — see below). Each piece is unit-tested, including a self-looped inverter correctly caught as unstable.
-- In `simlogix-gui`: a menu bar (`File` → New/Open Project…/Save Project…/Quit, `?` → About), a left palette (all six component kinds), and a dot-grid canvas. Placed components can be selected (click, blue outline), moved (drag freely, snap to grid on release), rotated (`R` — the box stays axis-aligned, only which edge carries inputs vs. outputs rotates), wired together (drag from one pin's hit target to another — draws a wire colored by the net's signal), and deleted (`Delete`/`Backspace`, for either a selected component or a selected wire).
-- Save/load: `simlogix-gui/src/project.rs` defines a versioned **project** file format (ready for multiple named circuits later, though only one — `"main"` — exists today) capturing component kind/position/rotation and which pins are wired together. Loading starts cold (no button-pressed state, no signal values carried over). File I/O goes through a native dialog (`rfd`, default `xdg-portal` backend) — the devcontainer bind-mounts the host's D-Bus session socket so this reaches the host's real desktop portal.
+- sources — `Button`, `Clock` (periodic), `Rail` (fixed `Ground`/`Power`);
+- outputs — `Led`, `Probe`;
+- `Transistor` (NMOS/PMOS, gate-controlled `Source -> Drain` pass, `HighZ` when not conducting);
+- gates — `And`, `Or`, `Nand`, `Nor`, `Xor`, `Xnor`, `Not`, `Buffer`, all combinational, resolving uncertain inputs by dominance (a definite `Low` forces an AND's output `Low` whatever the other input is; `Xor`/`Xnor` have no dominant input, so both must be definite).
 
-Wires route as a 3-segment orthogonal "Z" path between the two pins (`canvas::orthogonal_path`) instead of a direct diagonal line, and the route's vertical "bend" segment can be dragged to reposition it — a per-wire override stored in `SimLogixApp.wire_bends`, scoped to one movable bend rather than a full arbitrary-waypoint chain. Multi-pin edges (e.g. a `Transistor`'s `G`/`S`) place each pin a whole `GRID_SPACING` step from the box's center, so every pin lands on a grid dot.
+All unit-tested, including a self-looped inverter correctly reported as unstable.
 
-A placed `Clock` genuinely runs in real time: `SimLogixApp` advances the circuit every frame by elapsed wall-clock time (60 logical ticks/second) and keeps the window continuously repainting, rather than only settling on explicit interaction like everything else did before. This is the project's first real use of "real-time simulation wired into the UI loop" as more than a settle-once trick.
+**`simlogix-gui`** — modules mirror the concepts: `app.rs` (state and the `eframe` loop), `canvas.rs` (grid, hit-testing, theme colours), `symbol.rs` (a hand-drawn vector symbol per component kind), `placed_component.rs` (one placed instance), `palette.rs`, `toolbar.rs`, `i18n.rs`, `project.rs`.
 
-Not implemented yet: multiple waypoints per wire, logic gates, sub-circuit hierarchy (multiple circuits per project, used as components inside each other).
+What it does today:
+
+- **Editing** — a categorised palette, a Select/Wire toolbar, placement with a live preview (Shift to place several), selection, drag-to-move with grid snapping, rotation, deletion.
+- **Wiring** — wires are explicit objects (`Wire`) with two endpoints and a route. An endpoint is a pin, a junction onto another wire, or a loose point; wires are drawn click by click with as many waypoints as wanted, can be split, rejoined, tapped, and reattached by dragging an end. Deleting a component keeps its wires, cut loose where the pin was.
+- **View** — zoom and pan via `egui::Scene`; everything is stored in scene coordinates, so nothing else has to know about the transform.
+- **Simulation** — advanced every frame by elapsed wall-clock time (60 logical ticks/second) so a `Clock` runs in real time; run/pause, and an unstable circuit pauses with the offending net named in the status bar.
+- **History and files** — undo/redo over a stack of document snapshots, a versioned project format (v3, with migrations from v1 and v2), Save vs Save As, an unsaved-changes guard on New/Open/Quit, and a window title showing the file and its modified state.
+- **Presentation** — light/dark theme following the OS, English/French/Italian following the locale, and signal colours defined once per theme so they stay legible on both backgrounds.
+
+Not implemented yet: multi-select, copy/paste, a custom symbol editor, and sub-circuit hierarchy (multiple circuits per project, used as components inside each other). Connectivity is also tracked by merging nets as wires are drawn rather than recomputed from the drawing, which has one visible consequence — see the limitation noted in [Wiring](../using/wiring.md).
