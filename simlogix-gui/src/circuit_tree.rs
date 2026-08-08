@@ -31,12 +31,17 @@ pub enum TreeAction {
 /// "Untitled" before the project has ever been saved), `active` is the
 /// circuit currently being edited, and `renaming` holds the row being
 /// renamed and the name as typed so far, if any.
+///
+/// `reveal_active` scrolls the open circuit into view — set the frame it
+/// changes, so adding a circuit to a list longer than the panel doesn't
+/// silently leave the new one below the fold.
 pub fn show(
     ui: &mut Ui,
     strings: &Strings,
     project_name: &str,
     circuits: &[SavedCircuit],
     active: usize,
+    reveal_active: bool,
     renaming: &mut Option<(usize, String)>,
 ) -> Option<TreeAction> {
     let mut action = None;
@@ -65,12 +70,14 @@ pub fn show(
                         continue;
                     }
                 }
+                let is_active = index == active;
                 if let Some(row_action) = circuit_row(
                     ui,
                     strings,
                     &circuit.name,
                     index,
-                    index == active,
+                    is_active,
+                    reveal_active && is_active,
                     circuits.len() > 1,
                 ) {
                     action = Some(row_action);
@@ -88,11 +95,23 @@ fn circuit_row(
     name: &str,
     index: usize,
     is_active: bool,
+    reveal: bool,
     can_delete: bool,
 ) -> Option<TreeAction> {
     let mut action = None;
 
-    let response = ui.selectable_label(is_active, name);
+    // Bold as well as highlighted: the selectable background alone is faint
+    // enough to miss, and "which circuit am I editing?" has to be readable
+    // at a glance.
+    let label = if is_active {
+        egui::RichText::new(name).strong()
+    } else {
+        egui::RichText::new(name)
+    };
+    let response = ui.selectable_label(is_active, label);
+    if reveal {
+        response.scroll_to_me(Some(egui::Align::Center));
+    }
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }

@@ -213,6 +213,11 @@ pub struct SimLogixApp {
     circuits: Vec<SavedCircuit>,
     /// Which of `circuits` is open. Always a valid index.
     active: usize,
+    /// Set for the one frame after the open circuit changes, so the tree
+    /// scrolls it into view. Without it, adding a circuit to a list longer
+    /// than the panel leaves the new one below the fold — it *is* open, but
+    /// nothing on screen says so.
+    reveal_active: bool,
     /// The circuit being renamed and the name as typed so far, if any. Also
     /// the flag that keeps the canvas off the keyboard while it's set —
     /// otherwise typing a name would rotate and delete components.
@@ -260,6 +265,7 @@ impl Default for SimLogixApp {
                 wires: Vec::new(),
             }],
             active: 0,
+            reveal_active: false,
             renaming: None,
             // A plain starting window onto the circuit; `Scene` re-fits this
             // if it ever ends up degenerate.
@@ -1334,6 +1340,7 @@ impl SimLogixApp {
         }
         let project = self.to_project();
         self.reopen(&project, index);
+        self.reveal_active = true;
     }
 
     /// Adds an empty circuit to the project and opens it.
@@ -1349,6 +1356,7 @@ impl SimLogixApp {
         });
         let open = project.circuits.len() - 1;
         self.reopen(&project, open);
+        self.reveal_active = true;
     }
 
     /// Removes a circuit from the project. Refused on the last one: there
@@ -1370,6 +1378,7 @@ impl SimLogixApp {
             self.active.min(project.circuits.len() - 1)
         };
         self.reopen(&project, open);
+        self.reveal_active = true;
     }
 
     /// Renames a circuit. An empty name, or one another circuit already has,
@@ -1710,19 +1719,27 @@ impl eframe::App for SimLogixApp {
                 // many circuits can't push the palette off the bottom.
                 egui::Panel::top("circuit_tree")
                     .resizable(true)
-                    .default_size(150.0)
+                    .default_size(190.0)
                     .size_range(70.0..=420.0)
                     .show(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .id_salt("circuit_tree_scroll")
                             .show(ui, |ui| {
+                                // Same trick the palette needs, in the other
+                                // axis: a resizable panel only keeps the size
+                                // it was given while its content fills it —
+                                // otherwise it snaps back onto the content and
+                                // a project with one circuit gets a panel two
+                                // rows tall, with no room to show a second.
                                 ui.set_min_width(ui.available_width());
+                                ui.set_min_height(ui.available_height());
                                 tree_action = circuit_tree::show(
                                     ui,
                                     strings,
                                     &project_name,
                                     &self.circuits,
                                     self.active,
+                                    std::mem::take(&mut self.reveal_active),
                                     &mut self.renaming,
                                 );
                             });
