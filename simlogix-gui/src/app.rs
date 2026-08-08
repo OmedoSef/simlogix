@@ -1,6 +1,7 @@
 //! The SimLogix application: state and the `eframe::App` loop.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use simlogix_core::{
     And, Buffer, Button, Circuit, Clock, Component, ComponentId, Led, Nand, NetId, Nor, Not, Or,
@@ -137,7 +138,8 @@ enum PendingAction {
 /// grid), then click one pin to start a wire, click the canvas as many times
 /// as you like to lay down grid-snapped waypoints, and click a pin — or an
 /// existing wire's waypoint, to tap into it as a junction — to finish it.
-/// That merges their nets in `circuit` (see `Circuit::merge_nets`). Escape
+/// The wires are the record of what's connected; the nets in `circuit` are
+/// recomputed from them after every edit (see `rebuild_nets`). Escape
 /// cancels a wire in progress.
 pub struct SimLogixApp {
     show_about: bool,
@@ -196,6 +198,10 @@ pub struct SimLogixApp {
     /// alongside `running = false`: a fault pauses rather than crashing or
     /// silently looping, and stays on screen until the user resumes.
     unstable_net: Option<NetId>,
+    /// A hash of what is connected to what, so the nets are only recomputed
+    /// when the drawing's *connectivity* actually changed — not on every
+    /// frame, and not while a waypoint is merely being dragged.
+    net_fingerprint: u64,
     /// The region of the circuit currently framed by the canvas, in scene
     /// coordinates — the whole of the zoom/pan state. `egui::Scene` derives
     /// its transform from this and writes back whatever the user pans or
@@ -228,6 +234,7 @@ impl Default for SimLogixApp {
             // real default, detected once from the OS locale at startup.
             language: Language::detect_from_os(),
             pending_attach: None,
+            net_fingerprint: 0,
             running: true,
             unstable_net: None,
             // A plain starting window onto the circuit; `Scene` re-fits this
@@ -436,10 +443,10 @@ impl SimLogixApp {
     }
 
     /// The net a wire currently carries, read back from its endpoints rather
-    /// than cached on the wire. `merge_nets` rewrites pins, so any stored
-    /// copy goes stale the moment some *other* wire merges this one's net
-    /// into a different one — which showed up as wires drawn in the wrong
-    /// signal colour.
+    /// than cached on the wire. `rebuild_nets` reallocates every net from
+    /// scratch after each edit, so any stored copy would go stale as soon as
+    /// something elsewhere in the drawing changed — which is exactly how
+    /// wires ended up drawn in the wrong signal colour before.
     ///
     /// Either end may be the one that reaches a pin (a wire can be left
     /// dangling at the other), so both are tried. `None` means neither does:
@@ -470,16 +477,6 @@ impl SimLogixApp {
             }
             WireEndpoint::Free(_) => None,
         }
-    }
-
-    /// Whichever end of a wire is a real pin, preferring `to` — what
-    /// `Circuit::disconnect_pin` needs when the wire is torn down. `None`
-    /// for a wire dangling at both ends, which is holding nothing together.
-    fn wire_pin(wire: &Wire) -> Option<(ComponentId, usize)> {
-        [wire.to, wire.from].into_iter().find_map(|end| match end {
-            WireEndpoint::Pin(component, pin_index) => Some((component, pin_index)),
-            _ => None,
-        })
     }
 
     /// Snapshots the current layout and wiring into a saveable project —
@@ -595,17 +592,6 @@ impl SimLogixApp {
                 continue;
             };
 
-            // Both ends land on the same net: that's what makes the wire a
-            // connection rather than just a drawn line. An end that reaches
-            // no pin (a loose one) has no net to contribute.
-            let from_net = app.endpoint_net(from, &mut Vec::new());
-            let to_net = app.endpoint_net(to, &mut Vec::new());
-            if let (Some(from_net), Some(to_net)) = (from_net, to_net) {
-                if from_net != to_net {
-                    app.circuit.merge_nets(from_net, to_net);
-                }
-            }
-
             let waypoints = saved
                 .waypoints
                 .iter()
@@ -613,6 +599,11 @@ impl SimLogixApp {
                 .collect();
             wire_ids.push(app.add_wire(from, to, waypoints));
         }
+
+        // The wires are the record of what's connected; the nets come from
+        // them, exactly as they do after any edit.
+        app.rebuild_nets();
+        app.net_fingerprint = app.connectivity_fingerprint();
         let _ = app.circuit.advance(SETTLE_TICKS);
 
         app
@@ -721,15 +712,9 @@ impl SimLogixApp {
             }
         }
 
-        for id in roots {
-            if let Some(pos) = self.wires.iter().position(|w| w.id == id) {
-                let wire = self.wires.remove(pos);
-                if let Some((component, pin_index)) = Self::wire_pin(&wire) {
-                    self.circuit.disconnect_pin(component, pin_index);
-                    self.advance_circuit(SETTLE_TICKS);
-                }
-            }
-        }
+        // Nothing to disconnect by hand: dropping the wire from the drawing
+        // is the edit, and the nets are recomputed from what's left.
+        self.wires.retain(|wire| !roots.contains(&wire.id));
     }
 
     /// Shifts every junction tapped onto `host` at or past `from` by
@@ -864,20 +849,8 @@ impl SimLogixApp {
         });
 
         if let Some((other_id, other_is_from)) = touching {
-            let nets = [wire_id, other_id].map(|id| {
-                self.wires
-                    .iter()
-                    .find(|w| w.id == id)
-                    .and_then(|w| self.wire_net(w))
-            });
             self.join_wires(wire_id, is_from, other_id, other_is_from, at);
             self.dedupe_waypoints(wire_id);
-            if let [Some(kept), Some(absorbed)] = nets {
-                if kept != absorbed {
-                    self.circuit.merge_nets(absorbed, kept);
-                    self.advance_circuit(SETTLE_TICKS);
-                }
-            }
         }
     }
 
@@ -903,10 +876,7 @@ impl SimLogixApp {
         }
         self.record_edit();
 
-        let (from, to) = {
-            let wire = &self.wires[index];
-            (wire.from, wire.to)
-        };
+        let to = self.wires[index].to;
         let waypoints = &path[1..path.len() - 1];
         let last = waypoints.len();
 
@@ -1021,22 +991,6 @@ impl SimLogixApp {
         if let Some(tail) = tail_id {
             self.join_touching_loose_end(tail, true);
         }
-
-        // Only now is it clear whether the cut actually separated anything.
-        // A wire tapping the cut point from both sides bridges the two
-        // pieces, and the joins above will have made them one wire again —
-        // in which case the ends are still connected and disconnecting the
-        // far pin would break a link that plainly still exists on screen.
-        let rejoined = self
-            .wires
-            .iter()
-            .any(|wire| wire.from == from && wire.to == to);
-        if !rejoined {
-            if let WireEndpoint::Pin(component, pin_index) = to {
-                self.circuit.disconnect_pin(component, pin_index);
-                self.advance_circuit(SETTLE_TICKS);
-            }
-        }
     }
 
     /// Flips a wire end for end. Only its own geometry changes — what it
@@ -1123,6 +1077,129 @@ impl SimLogixApp {
                 }
             }
         }
+    }
+
+    /// Rebuilds every net from the wires as they are currently drawn.
+    ///
+    /// This is the whole point of the geometric model: connectivity is
+    /// *derived* from the drawing rather than accumulated as wires come and
+    /// go, so nothing has to work out what a deletion should undo. Two
+    /// parallel wires between the same pins, one removed, simply produce the
+    /// same grouping again.
+    ///
+    /// The grouping is a union-find over three kinds of node: a component
+    /// pin, a wire, and nothing at all (a loose end joins nothing). Each
+    /// wire unions itself with whatever its two ends touch, so a junction —
+    /// which unions with its *host wire* — transitively picks up everything
+    /// that wire reaches, however deep the chain goes and in whatever order
+    /// they were drawn.
+    fn rebuild_nets(&mut self) {
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+        enum Node {
+            Pin(ComponentId, usize),
+            Wire(u64),
+        }
+
+        let mut parent: HashMap<Node, Node> = HashMap::new();
+        fn find(parent: &mut HashMap<Node, Node>, node: Node) -> Node {
+            let mut root = node;
+            while let Some(&next) = parent.get(&root) {
+                if next == root {
+                    break;
+                }
+                root = next;
+            }
+            // Path compression, so a long chain of taps stays cheap.
+            let mut walk = node;
+            while let Some(&next) = parent.get(&walk) {
+                if next == root {
+                    break;
+                }
+                parent.insert(walk, root);
+                walk = next;
+            }
+            parent.entry(node).or_insert(root);
+            root
+        }
+        fn union(parent: &mut HashMap<Node, Node>, a: Node, b: Node) {
+            let (a, b) = (find(parent, a), find(parent, b));
+            if a != b {
+                parent.insert(a, b);
+            }
+        }
+
+        for placed in &self.placed {
+            let pin_count = self
+                .circuit
+                .try_pins(placed.id())
+                .map(|pins| pins.len())
+                .unwrap_or(0);
+            for index in 0..pin_count {
+                let node = Node::Pin(placed.id(), index);
+                parent.entry(node).or_insert(node);
+            }
+        }
+
+        for wire in &self.wires {
+            let self_node = Node::Wire(wire.id);
+            parent.entry(self_node).or_insert(self_node);
+            for end in [wire.from, wire.to] {
+                match end {
+                    WireEndpoint::Pin(component, index) => {
+                        union(&mut parent, self_node, Node::Pin(component, index));
+                    }
+                    WireEndpoint::Junction { wire: host, .. } => {
+                        union(&mut parent, self_node, Node::Wire(host));
+                    }
+                    // A loose end connects nothing, so it contributes no
+                    // union at all.
+                    WireEndpoint::Free(_) => {}
+                }
+            }
+        }
+
+        let mut groups: HashMap<Node, Vec<(ComponentId, usize)>> = HashMap::new();
+        let nodes: Vec<Node> = parent.keys().copied().collect();
+        for node in nodes {
+            if let Node::Pin(component, index) = node {
+                let root = find(&mut parent, node);
+                groups.entry(root).or_default().push((component, index));
+            }
+        }
+
+        // A lone pin is its own net anyway, which `rewire` already does for
+        // anything it isn't told about.
+        let groups: Vec<Vec<(ComponentId, usize)>> = groups
+            .into_values()
+            .filter(|group| group.len() > 1)
+            .collect();
+        self.circuit.rewire(&groups);
+    }
+
+    /// A hash of the connectivity alone: which components exist, and what
+    /// each wire's two ends attach to. Deliberately blind to positions and
+    /// waypoint indices — dragging a corner point doesn't change what is
+    /// connected to what, and shouldn't cost a rebuild.
+    fn connectivity_fingerprint(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for placed in &self.placed {
+            placed.id().hash(&mut hasher);
+        }
+        for wire in &self.wires {
+            wire.id.hash(&mut hasher);
+            for end in [wire.from, wire.to] {
+                match end {
+                    WireEndpoint::Pin(component, index) => {
+                        (0u8, component, index).hash(&mut hasher)
+                    }
+                    // Which waypoint is tapped doesn't matter: any of them
+                    // reaches the same wire.
+                    WireEndpoint::Junction { wire, .. } => (1u8, wire).hash(&mut hasher),
+                    WireEndpoint::Free(_) => 2u8.hash(&mut hasher),
+                }
+            }
+        }
+        hasher.finish()
     }
 
     /// Snapshots the document so the edit about to happen can be undone.
@@ -1736,7 +1813,7 @@ impl eframe::App for SimLogixApp {
                     // junction tap) is decided inside the loop below but applied
                     // after it, to keep `self.wires` stable (an unchanging length,
                     // no reallocation) for the whole iteration.
-                    let mut junction_finish: Option<(Option<NetId>, JunctionTarget)> = None;
+                    let mut junction_finish: Option<JunctionTarget> = None;
                     // The mirror of the above for the *start* of a wire: with the
                     // wire tool, clicking an existing wire begins a new one tapped
                     // onto it rather than merely selecting it.
@@ -1886,14 +1963,11 @@ impl eframe::App for SimLogixApp {
                                     if distance < WIRE_HIT_RADIUS {
                                         let mut inserted = waypoints.clone();
                                         inserted.insert(segment, canvas::snap_to_grid(click));
-                                        junction_finish = Some((
-                                            net,
-                                            JunctionTarget::Insert {
-                                                wire: wire_id,
-                                                waypoint: segment,
-                                                waypoints: inserted,
-                                            },
-                                        ));
+                                        junction_finish = Some(JunctionTarget::Insert {
+                                            wire: wire_id,
+                                            waypoint: segment,
+                                            waypoints: inserted,
+                                        });
                                     }
                                 }
                             }
@@ -2065,11 +2139,6 @@ impl eframe::App for SimLogixApp {
                                         self.wires[host_index].waypoints.insert(segment, dropped);
                                         self.shift_junctions(host, segment, 1);
                                         self.dedupe_waypoints(host);
-                                        let host_net = self
-                                            .wires
-                                            .iter()
-                                            .find(|w| w.id == host)
-                                            .and_then(|w| self.wire_net(w));
                                         let endpoint = WireEndpoint::Junction {
                                             wire: host,
                                             waypoint: segment,
@@ -2079,21 +2148,13 @@ impl eframe::App for SimLogixApp {
                                         } else {
                                             self.wires[i].to = endpoint;
                                         }
-                                        if let (Some(host_net), Some(net)) =
-                                            (host_net, self.wire_net(&self.wires[i]))
-                                        {
-                                            if net != host_net {
-                                                self.circuit.merge_nets(net, host_net);
-                                                self.advance_circuit(SETTLE_TICKS);
-                                            }
-                                        }
                                         continue;
                                     }
                                 }
 
-                                let (endpoint, target_net) = match onto_pin.or(onto_wire) {
-                                    Some((endpoint, target_net)) => (endpoint, Some(target_net)),
-                                    None => (WireEndpoint::Free(dropped), None),
+                                let endpoint = match onto_pin.or(onto_wire) {
+                                    Some((endpoint, _)) => endpoint,
+                                    None => WireEndpoint::Free(dropped),
                                 };
                                 if is_from {
                                     self.wires[i].from = endpoint;
@@ -2104,14 +2165,6 @@ impl eframe::App for SimLogixApp {
                                 // all while it dangled, in which case the pin it
                                 // just landed on is now its net and there's
                                 // nothing to merge.
-                                if let (Some(target_net), Some(net)) =
-                                    (target_net, self.wire_net(&self.wires[i]))
-                                {
-                                    if net != target_net {
-                                        self.circuit.merge_nets(net, target_net);
-                                        self.advance_circuit(SETTLE_TICKS);
-                                    }
-                                }
                             }
                             if response.clicked() {
                                 self.selected_wire = Some(wire_id);
@@ -2159,13 +2212,10 @@ impl eframe::App for SimLogixApp {
                                             if host == wire_id && waypoint == waypoint_index
                                     );
                                 if response.clicked() && !starting_here {
-                                    junction_finish = Some((
-                                        net,
-                                        JunctionTarget::Existing {
-                                            wire: wire_id,
-                                            waypoint: waypoint_index,
-                                        },
-                                    ));
+                                    junction_finish = Some(JunctionTarget::Existing {
+                                        wire: wire_id,
+                                        waypoint: waypoint_index,
+                                    });
                                 }
                             } else {
                                 if response.drag_started() {
@@ -2230,43 +2280,24 @@ impl eframe::App for SimLogixApp {
                             }
                         }
 
-                        for (wire_id, is_from, pin_index, pin_net) in attach {
+                        for (wire_id, is_from, pin_index, _) in attach {
                             let Some(index) = self.wires.iter().position(|w| w.id == wire_id)
                             else {
                                 continue;
                             };
-                            let wire_net = self.wire_net(&self.wires[index]);
                             let endpoint = WireEndpoint::Pin(component, pin_index);
                             if is_from {
                                 self.wires[index].from = endpoint;
                             } else {
                                 self.wires[index].to = endpoint;
                             }
-                            if let Some(wire_net) = wire_net {
-                                if wire_net != pin_net {
-                                    self.circuit.merge_nets(wire_net, pin_net);
-                                    self.advance_circuit(SETTLE_TICKS);
-                                }
-                            }
                             self.dirty = true;
                         }
                     }
 
                     if let Some((keep, keep_is_from, absorb, absorb_is_from, at)) = wires_to_join {
-                        let nets = [keep, absorb].map(|id| {
-                            self.wires
-                                .iter()
-                                .find(|w| w.id == id)
-                                .and_then(|w| self.wire_net(w))
-                        });
                         self.join_wires(keep, keep_is_from, absorb, absorb_is_from, at);
                         self.dedupe_waypoints(keep);
-                        if let [Some(kept), Some(absorbed)] = nets {
-                            if kept != absorbed {
-                                self.circuit.merge_nets(absorbed, kept);
-                                self.advance_circuit(SETTLE_TICKS);
-                            }
-                        }
                     }
 
                     // Whether the right-click was aimed at a wire, in which case
@@ -2335,12 +2366,6 @@ impl eframe::App for SimLogixApp {
                         if let Some(in_progress) = self.wiring_from.take() {
                             if in_progress.net != Some(net) {
                                 self.record_edit();
-                                // Nothing to merge if the wire started loose:
-                                // it had no net of its own to join with.
-                                if let Some(from_net) = in_progress.net {
-                                    self.circuit.merge_nets(from_net, net);
-                                    self.advance_circuit(SETTLE_TICKS);
-                                }
                                 self.add_wire(
                                     in_progress.from,
                                     WireEndpoint::Pin(component, pin_index),
@@ -2359,7 +2384,7 @@ impl eframe::App for SimLogixApp {
                                 waypoints: Vec::new(),
                             });
                         }
-                    } else if let Some((target_net, target)) = junction_finish {
+                    } else if let Some(target) = junction_finish {
                         if let Some(in_progress) = self.wiring_from.take() {
                             self.record_edit();
 
@@ -2381,14 +2406,6 @@ impl eframe::App for SimLogixApp {
                                 }
                             };
 
-                            // Only two real nets need joining; tapping a wire
-                            // that carries nothing yet is purely structural.
-                            if let (Some(from_net), Some(target_net)) =
-                                (in_progress.net, target_net)
-                            {
-                                self.circuit.merge_nets(from_net, target_net);
-                                self.advance_circuit(SETTLE_TICKS);
-                            }
                             self.add_wire(
                                 in_progress.from,
                                 WireEndpoint::Junction {
@@ -2580,6 +2597,15 @@ impl eframe::App for SimLogixApp {
                         }
                     }
                 }
+            }
+
+            // Every edit above changed the drawing, never the nets: they're
+            // recomputed here, once, from whatever the drawing now says.
+            let fingerprint = self.connectivity_fingerprint();
+            if fingerprint != self.net_fingerprint {
+                self.net_fingerprint = fingerprint;
+                self.rebuild_nets();
+                self.advance_circuit(SETTLE_TICKS);
             }
 
             // Wheel zoom, applied to the framed region for the next frame:

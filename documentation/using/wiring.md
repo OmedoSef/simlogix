@@ -68,11 +68,14 @@ Consequences worth knowing:
 - Removing a point that carries a tap leaves that tap loose at the same
   spot, since it no longer has a point to hold on to.
 
-## A known limitation
+## What counts as connected
 
-Connectivity is tracked as nets that get merged when wires are drawn, not
-recomputed from the drawing after every edit. So if **two entirely separate
-wires** connect the same two components and you cut one, the pin is
-disconnected even though the other route plainly still exists on screen. The
-common cases — a junction bridging a cut, deleting one of several wires on a
-pin — are handled; this one is not. Redraw the connection if you hit it.
+What's connected is worked out from the drawing itself, after every edit:
+the wires on screen are the record, and the simulator's nets are derived
+from them. So the rule is simply what it looks like — pins that a chain of
+wires links are on the same net, and pins nothing links are not.
+
+That includes the awkward cases. Draw **two entirely separate wires**
+between the same two components and cut one: they stay connected, because
+the other one plainly still joins them. There's nothing to remember or
+undo — the drawing is re-read, and it still says the same thing.

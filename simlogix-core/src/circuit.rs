@@ -54,9 +54,15 @@ pub struct Circuit {
     next_net_id: usize,
     next_component_id: usize,
     components: HashMap<ComponentId, RegisteredComponent>,
-    /// Each net's current contribution per driving component, so re-evaluating a
-    /// component replaces only its own contribution, not every other driver's.
-    drivers: HashMap<NetId, HashMap<ComponentId, Signal>>,
+    /// Each net's current contribution per driving **pin** — `(component,
+    /// pin index)` — so re-evaluating a component replaces only its own
+    /// contributions, not every other driver's.
+    ///
+    /// Keyed by pin rather than by component for two reasons: a component
+    /// with two output pins on one net would otherwise have the second
+    /// overwrite the first, and a contribution has to be able to follow its
+    /// pin when [`Circuit::rewire`] moves that pin to a different net.
+    drivers: HashMap<NetId, HashMap<(ComponentId, usize), Signal>>,
     /// Each net's last resolved signal, used to detect real changes.
     settled: HashMap<NetId, Signal>,
     clock: u64,
@@ -109,78 +115,115 @@ impl Circuit {
             .map(|registered| registered.pins.as_slice())
     }
 
-    /// Merges `from` into `to`: every pin currently wired to `from` (across every
-    /// registered component) is rewired to `to` instead — this is what "drawing a
-    /// wire" between two previously separate pins means at the model level.
+    /// Replaces the entire pin-to-net mapping: each entry of `groups` lists
+    /// pins that share one net, and every pin not mentioned gets a net to
+    /// itself.
     ///
-    /// Any driver contribution already recorded on `from` carries over to `to`,
-    /// and `to`'s resolved signal is recomputed immediately from the combined
-    /// drivers (same rule as [`Circuit::signal_at`]). If that changes `to`'s
-    /// value, components reading it are scheduled to react, same as a normal
-    /// output change — call [`Circuit::run`] afterward to process those. No-op
-    /// if `from == to`.
-    pub fn merge_nets(&mut self, from: NetId, to: NetId) {
-        if from == to {
-            return;
+    /// This is connectivity *derived* rather than accumulated. The caller
+    /// owns the drawing — which wires exist and what they touch — and hands
+    /// over the resulting groups after every edit, so a net is always a
+    /// statement about the drawing as it stands now.
+    ///
+    /// Merging nets destructively as each wire is drawn — which is what
+    /// this replaced — can't express that, because a merge doesn't remember
+    /// *why* two pins ended up together: cut one of two parallel wires
+    /// between the same pins and there's no way to tell that the other
+    /// still holds them connected. Recomputing sidesteps the question
+    /// entirely — that case simply comes out as the same group.
+    ///
+    /// Contributions already driven onto a net follow their pin, so nothing
+    /// has to be re-evaluated to get the values back. Only components whose
+    /// inputs genuinely changed value are scheduled; a component with no
+    /// inputs at all (a `Clock`, a `Button`) is never disturbed, so editing
+    /// elsewhere can't shift a clock's phase.
+    pub fn rewire(&mut self, groups: &[Vec<(ComponentId, usize)>]) {
+        // What each pin drives, and what each reading pin currently sees.
+        // Both are indexed by pin so they survive the remap below.
+        let contributions: HashMap<(ComponentId, usize), Signal> = self
+            .drivers
+            .values()
+            .flat_map(|on_net| on_net.iter().map(|(&pin, &signal)| (pin, signal)))
+            .collect();
+        let previously_read: HashMap<(ComponentId, usize), Signal> = self
+            .reading_pins()
+            .map(|(pin, net)| (pin, self.signal_at(net)))
+            .collect();
+
+        // One fresh net per group, then one each for the pins left over.
+        let mut assignment: HashMap<(ComponentId, usize), NetId> = HashMap::new();
+        for group in groups {
+            let net = self.add_net();
+            for &pin in group {
+                assignment.insert(pin, net);
+            }
+        }
+        let unassigned: Vec<(ComponentId, usize)> = self
+            .components
+            .iter()
+            .flat_map(|(&component, registered)| {
+                (0..registered.pins.len()).map(move |index| (component, index))
+            })
+            .filter(|pin| !assignment.contains_key(pin))
+            .collect();
+        for pin in unassigned {
+            let net = self.add_net();
+            assignment.insert(pin, net);
         }
 
-        for registered in self.components.values_mut() {
-            for pin in &mut registered.pins {
-                if pin.net == from {
-                    pin.net = to;
+        for (&component, registered) in self.components.iter_mut() {
+            for (index, pin) in registered.pins.iter_mut().enumerate() {
+                if let Some(&net) = assignment.get(&(component, index)) {
+                    pin.net = net;
                 }
             }
         }
 
-        if let Some(from_drivers) = self.drivers.remove(&from) {
-            self.drivers.entry(to).or_default().extend(from_drivers);
+        // Rebuild what each net carries from the contributions that moved.
+        self.drivers.clear();
+        for (pin, signal) in contributions {
+            let Some(&net) = assignment.get(&pin) else {
+                continue; // Its component has since been removed.
+            };
+            self.drivers.entry(net).or_default().insert(pin, signal);
         }
-        self.settled.remove(&from);
+        self.settled.clear();
+        for &net in assignment.values() {
+            let resolved = self
+                .drivers
+                .get(&net)
+                .map(Self::resolve)
+                .unwrap_or(Signal::Unknown);
+            self.settled.insert(net, resolved);
+        }
 
-        self.resettle(to);
+        // Wake only what actually saw its input move.
+        let disturbed: Vec<ComponentId> = self
+            .reading_pins()
+            .filter(|&(pin, net)| {
+                let before = previously_read
+                    .get(&pin)
+                    .copied()
+                    .unwrap_or(Signal::Unknown);
+                self.signal_at(net) != before
+            })
+            .map(|((component, _), _)| component)
+            .collect();
+        for component in disturbed {
+            let delay = self.components[&component].component.propagation_delay();
+            self.schedule_at(component, self.clock + delay);
+        }
     }
 
-    /// Gives `component`'s pin at `pin_index` its own fresh, unconnected net —
-    /// the inverse of [`Circuit::merge_nets`], used to delete a wire. Any other
-    /// pins that were sharing the old net stay connected to each other; only
-    /// this one pin is pulled out. Returns the freshly allocated net.
-    ///
-    /// If this pin was itself driving the old net (i.e. it's an `Output`/`InOut`
-    /// pin that has been evaluated at least once), that contribution moves with
-    /// it. Both the old and new net are recomputed immediately, same as
-    /// [`Circuit::merge_nets`] — call [`Circuit::run`] afterward to process any
-    /// resulting schedule.
-    ///
-    /// Returns `None` if there's no such pin, because `component` has already
-    /// been removed or doesn't have that many pins. That's an ordinary case,
-    /// not a caller mistake: deleting a component in the GUI also deletes the
-    /// wires attached to it, and each of those still names the pin it used to
-    /// end on.
-    pub fn disconnect_pin(&mut self, component: ComponentId, pin_index: usize) -> Option<NetId> {
-        let new_net = self.add_net();
-
-        let old_net = {
-            let pin = self
-                .components
-                .get_mut(&component)?
+    /// Every pin that reads (`Input` or `InOut`), with the net it's on.
+    fn reading_pins(&self) -> impl Iterator<Item = ((ComponentId, usize), NetId)> + '_ {
+        self.components.iter().flat_map(|(&component, registered)| {
+            registered
                 .pins
-                .get_mut(pin_index)?;
-            std::mem::replace(&mut pin.net, new_net)
-        };
-
-        if let Some(drivers_on_old) = self.drivers.get_mut(&old_net) {
-            if let Some(signal) = drivers_on_old.remove(&component) {
-                self.drivers
-                    .entry(new_net)
-                    .or_default()
-                    .insert(component, signal);
-            }
-        }
-
-        self.resettle(old_net);
-        self.resettle(new_net);
-
-        Some(new_net)
+                .iter()
+                .enumerate()
+                .filter(|(_, pin)| pin.direction != PinDirection::Output)
+                .map(move |(index, pin)| ((component, index), pin.net))
+        })
     }
 
     /// Removes `component` from the circuit entirely (e.g. the user deleted it
@@ -203,7 +246,7 @@ impl Circuit {
 
         for net in driven_nets {
             if let Some(drivers) = self.drivers.get_mut(&net) {
-                drivers.remove(&component);
+                drivers.retain(|&(driver, _), _| driver != component);
             }
             self.resettle(net);
         }
@@ -316,13 +359,14 @@ impl Circuit {
 
         let output_pins = pins
             .into_iter()
-            .filter(|pin| pin.direction != PinDirection::Input);
+            .enumerate()
+            .filter(|(_, pin)| pin.direction != PinDirection::Input);
 
-        for (pin, signal) in output_pins.zip(outputs) {
+        for ((index, pin), signal) in output_pins.zip(outputs) {
             self.drivers
                 .entry(pin.net)
                 .or_default()
-                .insert(component, signal);
+                .insert((component, index), signal);
             let resolved = Self::resolve(&self.drivers[&pin.net]);
             let previous = self
                 .settled
@@ -379,7 +423,7 @@ impl Circuit {
     /// Resolves a net's signal from its current drivers: ignores `HighZ`, then
     /// 0 remaining -> `Unknown`, 1 (or several agreeing) -> that value,
     /// several disagreeing -> `Error`.
-    fn resolve(drivers: &HashMap<ComponentId, Signal>) -> Signal {
+    fn resolve(drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
         let mut active = drivers
             .values()
             .copied()
@@ -600,11 +644,15 @@ mod tests {
     }
 
     #[test]
-    fn merging_nets_lets_a_previously_unconnected_button_and_led_react() {
+    fn rewire_keeps_pins_connected_while_a_second_route_remains() {
+        // The case a destructive merge can't get right: two separate wires
+        // hold a button and a LED together, one is removed, and the pins
+        // must stay connected because the other plainly still does the job.
+        // Recomputed connectivity has nothing to undo — the group is simply
+        // the same both times.
         let mut circuit = Circuit::new();
-        let button_net = circuit.add_net();
-        let led_net = circuit.add_net();
-
+        // `rewire` reassigns these straight away; they only have to exist.
+        let (button_net, led_net) = (circuit.add_net(), circuit.add_net());
         let (button_component, pressed) = Button::new();
         let button = circuit.add_component(
             Box::new(button_component),
@@ -621,27 +669,29 @@ mod tests {
             }],
         );
 
+        // Both wires say the same thing, so one group names both pins.
+        let connected = vec![vec![(button, 0), (led, 0)]];
+        circuit.rewire(&connected);
         pressed.set(true);
         circuit.schedule_now(button);
-        circuit.run().unwrap();
-        // Not connected yet: the LED's own net never sees the button's value.
-        assert_eq!(circuit.signal_at(led_net), Signal::Unknown);
+        circuit.run().expect("settles");
+        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Signal::High);
 
-        circuit.merge_nets(button_net, led_net);
-        assert_eq!(circuit.pins(button)[0].net, led_net);
-        assert_eq!(circuit.pins(led)[0].net, led_net);
-
-        // The button's already-driven value carries over the merge immediately,
-        // without needing a fresh press.
-        assert_eq!(circuit.signal_at(led_net), Signal::High);
+        // Drop one of the two wires: the remaining one still groups them.
+        circuit.rewire(&connected);
+        circuit.run().expect("settles");
+        assert_eq!(
+            circuit.signal_at(circuit.pins(led)[0].net),
+            Signal::High,
+            "the surviving wire should still carry the button through"
+        );
     }
 
     #[test]
-    fn disconnecting_a_pin_undoes_a_merge() {
+    fn rewire_separates_pins_once_nothing_groups_them() {
         let mut circuit = Circuit::new();
-        let button_net = circuit.add_net();
-        let led_net = circuit.add_net();
-
+        // `rewire` reassigns these straight away; they only have to exist.
+        let (button_net, led_net) = (circuit.add_net(), circuit.add_net());
         let (button_component, pressed) = Button::new();
         let button = circuit.add_component(
             Box::new(button_component),
@@ -658,28 +708,51 @@ mod tests {
             }],
         );
 
+        circuit.rewire(&[vec![(button, 0), (led, 0)]]);
         pressed.set(true);
         circuit.schedule_now(button);
-        circuit.run().unwrap();
-        circuit.merge_nets(button_net, led_net);
-        assert_eq!(circuit.signal_at(led_net), Signal::High);
+        circuit.run().expect("settles");
+        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Signal::High);
 
-        let new_net = circuit.disconnect_pin(button, 0).expect("pin exists");
-
-        // The button keeps its already-driven value on its new, private net...
-        assert_eq!(circuit.pins(button)[0].net, new_net);
-        assert_eq!(circuit.signal_at(new_net), Signal::High);
-        // ...while the LED's net (still shared with nothing else now) reverts.
-        assert_eq!(circuit.pins(led)[0].net, led_net);
-        assert_eq!(circuit.signal_at(led_net), Signal::Unknown);
+        // Now nothing groups them: each pin gets a net of its own, and the
+        // LED's goes back to undriven.
+        circuit.rewire(&[]);
+        circuit.run().expect("settles");
+        assert_ne!(circuit.pins(button)[0].net, circuit.pins(led)[0].net);
+        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Signal::Unknown);
+        // The button is still driving its own net -- a contribution follows
+        // its pin rather than belonging to whichever net it sat on.
+        assert_eq!(circuit.signal_at(circuit.pins(button)[0].net), Signal::High);
     }
 
     #[test]
-    fn disconnecting_a_pin_of_an_already_removed_component_reports_nothing_to_do() {
+    fn rewire_leaves_a_clocks_phase_alone() {
+        // A clock has no inputs, so nothing about an edit elsewhere should
+        // make it tick: re-evaluating one flips its output.
+        let mut circuit = Circuit::new();
+        let clock_net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net: clock_net,
+            }],
+        );
+        circuit.schedule_now(clock);
+        circuit.advance(1).expect("settles");
+        let phase = circuit.signal_at(circuit.pins(clock)[0].net);
+
+        circuit.rewire(&[]);
+
+        assert_eq!(circuit.signal_at(circuit.pins(clock)[0].net), phase);
+    }
+
+    #[test]
+    fn rewiring_a_pin_of_an_already_removed_component_is_ignored() {
         // What the GUI does when a component is deleted: the component goes
-        // first, then every wire that was attached to it is torn down — and
-        // each of those still names the pin it used to end on. That has to
-        // read as "nothing to disconnect", not bring the program down.
+        // first, and a wire that was attached to it may still name the pin
+        // it used to end on for one more rebuild. That has to read as
+        // "nothing to wire", not bring the program down.
         let mut circuit = Circuit::new();
         let net = circuit.add_net();
         let (button_component, _pressed) = Button::new();
@@ -693,13 +766,12 @@ mod tests {
 
         circuit.remove_component(button);
 
-        assert_eq!(circuit.disconnect_pin(button, 0), None);
-        // Out of range on a component that *is* still there, likewise.
-        assert_eq!(circuit.disconnect_pin(button, 99), None);
+        circuit.rewire(&[vec![(button, 0)]]);
+        assert_eq!(circuit.try_pins(button), None);
     }
 
     #[test]
-    fn disconnecting_one_pin_leaves_the_others_on_a_shared_net_connected() {
+    fn rewire_leaves_the_rest_of_a_group_connected_when_one_pin_drops_out() {
         let mut circuit = Circuit::new();
         let button_net = circuit.add_net();
         let led_a_net = circuit.add_net();
@@ -728,24 +800,24 @@ mod tests {
             }],
         );
 
-        // Merge everyone onto button_net: button, led_a, and led_b all share it.
-        circuit.merge_nets(led_a_net, button_net);
-        circuit.merge_nets(led_b_net, button_net);
-
+        // One group holds all three: button, led_a and led_b.
+        circuit.rewire(&[vec![(button, 0), (led_a, 0), (led_b, 0)]]);
         pressed.set(true);
         circuit.schedule_now(button);
-        circuit.run().unwrap();
-        assert_eq!(circuit.signal_at(button_net), Signal::High);
+        circuit.run().expect("settles");
+        assert_eq!(circuit.signal_at(circuit.pins(button)[0].net), Signal::High);
 
-        // Disconnect led_a (as if its wire to the group were deleted): the
-        // button and led_b must remain connected to each other on button_net.
-        let led_a_new_net = circuit.disconnect_pin(led_a, 0).expect("pin exists");
-        assert_eq!(circuit.pins(button)[0].net, button_net);
-        assert_eq!(circuit.pins(led_b)[0].net, button_net);
-        assert_eq!(circuit.signal_at(button_net), Signal::High);
-        // led_a's own net is now undriven.
-        assert_eq!(circuit.pins(led_a)[0].net, led_a_new_net);
-        assert_eq!(circuit.signal_at(led_a_new_net), Signal::Unknown);
+        // led_a's wire to the group is deleted, so it no longer appears in
+        // it: the button and led_b must stay connected to each other.
+        circuit.rewire(&[vec![(button, 0), (led_b, 0)]]);
+        circuit.run().expect("settles");
+        let shared = circuit.pins(button)[0].net;
+        assert_eq!(circuit.pins(led_b)[0].net, shared);
+        assert_eq!(circuit.signal_at(shared), Signal::High);
+        // led_a is on a net of its own now, driven by nobody.
+        let led_a_net = circuit.pins(led_a)[0].net;
+        assert_ne!(led_a_net, shared);
+        assert_eq!(circuit.signal_at(led_a_net), Signal::Unknown);
     }
 
     #[test]
