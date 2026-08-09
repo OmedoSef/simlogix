@@ -2,6 +2,8 @@
 name = "simlogix-gui"
 version = "0.1.0"
 edition = "2021"
+# Two binaries now: the app, and the tool that writes its icon out as a PNG.
+default-run = "simlogix-gui"
 
 [dependencies]
 eframe = { version = "0.35", features = ["persistence"] }

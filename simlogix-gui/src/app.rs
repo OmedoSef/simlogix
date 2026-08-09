@@ -4650,12 +4650,34 @@ impl eframe::App for SimLogixApp {
             .collapsible(false)
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(strings.about_body);
-                ui.label(
-                    strings
-                        .about_version
-                        .replace("{}", env!("CARGO_PKG_VERSION")),
-                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(4.0);
+                    // Drawn, not a scaled-down copy of the window icon: it's
+                    // line work, and a 256 px bitmap shrunk to this would be
+                    // soft for no reason.
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(76.0, 76.0), egui::Sense::hover());
+                    crate::icon::paint(ui.painter(), rect);
+
+                    ui.add_space(14.0);
+                    ui.vertical(|ui| {
+                        ui.heading("SimLogix");
+                        ui.label(
+                            egui::RichText::new(
+                                strings
+                                    .about_version
+                                    .replace("{}", env!("CARGO_PKG_VERSION")),
+                            )
+                            .weak(),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(strings.about_body);
+                        ui.label(egui::RichText::new(strings.about_built_with).weak());
+                    });
+                    ui.add_space(4.0);
+                });
+                ui.add_space(4.0);
             });
 
         let mut error_open = self.error.is_some();

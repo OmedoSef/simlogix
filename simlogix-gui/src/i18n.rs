@@ -203,6 +203,7 @@ pub struct Strings {
 
     pub about_title: &'static str,
     pub about_body: &'static str,
+    pub about_built_with: &'static str,
     /// Contains a literal `{}` for the version number — see
     /// `palette_click_to_place` on how to fill it in.
     pub about_version: &'static str,
@@ -447,7 +448,8 @@ static ENGLISH: Strings = Strings {
         "Click to add a point, click a pin or wire to finish, Enter to leave the end loose, Esc to cancel",
 
     about_title: "About SimLogix",
-    about_body: "SimLogix — a cross-platform logic simulator.",
+    about_body: "A cross-platform logic simulator: draw a circuit, watch it run.",
+    about_built_with: "Written in Rust, with egui.",
     about_version: "Version {}",
 
     title_untitled: "Untitled",
@@ -637,7 +639,8 @@ static FRENCH: Strings = Strings {
         "Cliquez pour ajouter un point, une pin ou un fil pour finir, Entrée pour laisser le bout libre, Échap pour annuler",
 
     about_title: "À propos de SimLogix",
-    about_body: "SimLogix — un simulateur logique multiplateforme.",
+    about_body: "Un simulateur logique multiplateforme : dessinez un circuit, regardez-le tourner.",
+    about_built_with: "Écrit en Rust, avec egui.",
     about_version: "Version {}",
 
     title_untitled: "Sans titre",
@@ -828,7 +831,8 @@ static ITALIAN: Strings = Strings {
         "Clicca per aggiungere un punto, un pin o un filo per finire, Invio per lasciare l'estremità libera, Esc per annullare",
 
     about_title: "Informazioni su SimLogix",
-    about_body: "SimLogix — un simulatore logico multipiattaforma.",
+    about_body: "Un simulatore logico multipiattaforma: disegna un circuito e guardalo funzionare.",
+    about_built_with: "Scritto in Rust, con egui.",
     about_version: "Versione {}",
 
     title_untitled: "Senza titolo",
