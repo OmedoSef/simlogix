@@ -21,6 +21,7 @@ const CAP_TRAVEL: f32 = 2.5;
 
 /// Where a drawn component's pins ended up — a wire attaches at these exact
 /// points — in the same order `Circuit::pins` reports them.
+#[derive(Default)]
 pub struct PinPositions {
     pub inputs: Vec<Pos2>,
     pub outputs: Vec<Pos2>,
@@ -54,7 +55,7 @@ pub struct SymbolState<'a> {
 /// returns where its pins ended up.
 pub fn draw(
     painter: &Painter,
-    kind: ComponentKind,
+    kind: &ComponentKind,
     rect: Rect,
     rotation: Rotation,
     color: Color32,
@@ -84,6 +85,8 @@ pub fn draw(
         ComponentKind::OutputPort => draw_port(painter, rect, rotation, stroke, color, -1, state),
         ComponentKind::InOutPort => draw_port(painter, rect, rotation, stroke, color, 0, state),
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke),
+        // A circuit instance draws its own generated box, not a fixed symbol.
+        ComponentKind::Circuit(_) => PinPositions::default(),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
         ComponentKind::BusTransceiver => {
             draw_bus_transceiver(painter, rect, rotation, stroke, false)

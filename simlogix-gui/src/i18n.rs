@@ -235,7 +235,12 @@ impl Strings {
 
     /// The display name for a palette entry / a placed component's on-canvas
     /// box label.
-    pub fn component_kind_label(&self, kind: ComponentKind) -> &'static str {
+    /// A circuit instance is named by the circuit it refers to, which isn't
+    /// a translatable string — hence the borrowed return.
+    pub fn component_kind_label<'a>(&'a self, kind: &'a ComponentKind) -> &'a str {
+        if let ComponentKind::Circuit(path) = kind {
+            return path;
+        }
         match kind {
             ComponentKind::Button => self.component_button,
             ComponentKind::Switch => self.component_switch,
@@ -255,6 +260,8 @@ impl Strings {
             ComponentKind::Not => self.component_not,
             ComponentKind::Buffer => self.component_buffer,
             ComponentKind::SrLatch => self.component_sr_latch,
+            // Handled above by returning the path itself.
+            ComponentKind::Circuit(path) => path,
             ComponentKind::TriStateBuffer => self.component_tri_state,
             ComponentKind::BusTransceiver => self.component_bus_transceiver,
             ComponentKind::BusTransceiverOe => self.component_bus_transceiver_oe,

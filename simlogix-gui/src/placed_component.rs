@@ -233,16 +233,16 @@ impl PlacedComponent {
     /// Which palette entry would place an identical component — what a
     /// project file needs to reconstruct this on load.
     pub fn kind(&self) -> ComponentKind {
-        match self.shape {
+        match &self.shape {
             Shape::Button { .. } => ComponentKind::Button,
             Shape::Switch { .. } => ComponentKind::Switch,
             Shape::Led => ComponentKind::Led,
-            Shape::Port { kind, .. } => kind,
+            Shape::Port { kind, .. } => kind.clone(),
             Shape::Transistor(kind)
             | Shape::BusTransceiver(kind)
             | Shape::Rail(kind)
             | Shape::TwoInputGate(kind)
-            | Shape::OneInputGate(kind) => kind,
+            | Shape::OneInputGate(kind) => kind.clone(),
             Shape::Probe => ComponentKind::Probe,
             Shape::Clock => ComponentKind::Clock,
             Shape::SrLatch => ComponentKind::SrLatch,
@@ -330,7 +330,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -380,7 +380,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -424,7 +424,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     color,
@@ -453,7 +453,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -538,7 +538,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -581,7 +581,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -643,7 +643,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -695,7 +695,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -741,7 +741,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     color,
@@ -783,7 +783,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     color,
@@ -812,7 +812,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,
@@ -864,7 +864,7 @@ impl PlacedComponent {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
-                    kind,
+                    &kind,
                     rect,
                     *rotation,
                     symbol_color,

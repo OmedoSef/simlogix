@@ -17,6 +17,11 @@ use crate::toolbar::Tool;
 /// after a since-retired extension would be a small permanent puzzle.
 pub const BUILTIN_LIBRARY: &str = "simlogix";
 
+/// What marks a saved kind as a circuit of *this* project rather than a
+/// built-in. Not a library name: a local reference has to survive the
+/// project's own library being renamed.
+pub const LOCAL_CIRCUIT_PREFIX: &str = "circuit:";
+
 /// Which kind of component the palette currently has queued for placement.
 /// Also the tag saved in a project file (see `project.rs`) to say which
 /// concrete component a saved entry should become on load.
@@ -27,7 +32,11 @@ pub const BUILTIN_LIBRARY: &str = "simlogix";
 /// the gate. Nothing produces a non-builtin kind yet; the format speaks the
 /// qualified form ahead of that so it won't have to change again when it
 /// does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Not `Copy` since [`ComponentKind::Circuit`] carries a name. A unit
+/// variant plus a separate "which circuit" field would have kept it, at the
+/// price of two ways to say one thing — and a kind that is only meaningful
+/// alongside another field is exactly the pair that drifts.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ComponentKind {
     Button,
     Led,
@@ -53,6 +62,12 @@ pub enum ComponentKind {
     OutputPort,
     InOutPort,
     Switch,
+    /// An instance of another circuit in this project, by its path —
+    /// `adder`, or `alu/adder` when it's filed in a folder. Deliberately
+    /// *not* qualified by library: a local reference must survive the
+    /// project being renamed, and renaming is exactly what a stored library
+    /// name is there to allow.
+    Circuit(String),
 }
 
 impl ComponentKind {
@@ -88,27 +103,49 @@ impl ComponentKind {
         (ComponentKind::Switch, "Switch"),
     ];
 
-    fn saved_name(self) -> &'static str {
+    fn saved_name(&self) -> Option<&'static str> {
         Self::SAVED_NAMES
             .iter()
-            .find(|(kind, _)| *kind == self)
+            .find(|(kind, _)| kind == self)
             .map(|(_, name)| *name)
-            // Unreachable while the table lists every variant, which is what
-            // the round-trip test below is there to hold to.
-            .unwrap_or("Button")
+    }
+
+    /// The circuit this instance refers to, if it is one.
+    ///
+    /// Unused until instances can be placed — the next step — but it is the
+    /// one accessor the rest of the code will reach for, so it lives with
+    /// the variant rather than being invented at the call site later.
+    #[allow(dead_code)]
+    pub fn circuit_path(&self) -> Option<&str> {
+        match self {
+            ComponentKind::Circuit(path) => Some(path),
+            _ => None,
+        }
     }
 
     fn from_saved_name(name: &str) -> Option<Self> {
         Self::SAVED_NAMES
             .iter()
             .find(|(_, saved)| *saved == name)
-            .map(|(kind, _)| *kind)
+            .map(|(kind, _)| kind.clone())
     }
 }
 
 impl Serialize for ComponentKind {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(&format_args!("{BUILTIN_LIBRARY}:{}", self.saved_name()))
+        match self.saved_name() {
+            Some(name) => serializer.collect_str(&format_args!("{BUILTIN_LIBRARY}:{name}")),
+            // A circuit of this project's own, written bare so that
+            // renaming the project's library doesn't repoint every
+            // instance in it.
+            None => serializer.collect_str(&format_args!(
+                "{LOCAL_CIRCUIT_PREFIX}{}",
+                match self {
+                    ComponentKind::Circuit(path) => path.as_str(),
+                    _ => "",
+                }
+            )),
+        }
     }
 }
 
@@ -121,6 +158,9 @@ impl<'de> Deserialize<'de> for ComponentKind {
             .split_once(':')
             .unwrap_or((BUILTIN_LIBRARY, text.as_str()));
 
+        if let Some(path) = text.strip_prefix(LOCAL_CIRCUIT_PREFIX) {
+            return Ok(ComponentKind::Circuit(path.to_string()));
+        }
         if library != BUILTIN_LIBRARY {
             return Err(serde::de::Error::custom(format!(
                 "unknown component library `{library}`: circuits from another project can't be placed yet"
@@ -141,7 +181,7 @@ const ROW_HEIGHT: f32 = 28.0;
 /// itself shows what you're about to drop — not just the status bar.
 /// Returns `Some(kind)` the frame a palette entry is clicked, requesting
 /// that kind be queued for placement.
-pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
+pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
     ui.heading(strings.palette_heading);
 
     let mut clicked = None;
@@ -202,15 +242,15 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
         egui::CollapsingHeader::new(egui::RichText::new(category_label).strong())
             .default_open(true)
             .show(ui, |ui| {
-                for &kind in kinds {
-                    let is_active = active == Tool::Place(kind);
+                for kind in kinds {
+                    let is_active = *active == Tool::Place(kind.clone());
                     if palette_row(
                         ui,
                         Some(kind),
                         strings.component_kind_label(kind),
                         is_active,
                     ) {
-                        clicked = Some(Tool::Place(kind));
+                        clicked = Some(Tool::Place(kind.clone()));
                     }
                 }
             });
@@ -224,7 +264,7 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
 /// wire tool's own icon instead of a component symbol. `is_active` draws the
 /// entry as held down (this is the current tool). Returns `true` if clicked
 /// this frame.
-fn palette_row(ui: &mut Ui, kind: Option<ComponentKind>, name: &str, is_active: bool) -> bool {
+fn palette_row(ui: &mut Ui, kind: Option<&ComponentKind>, name: &str, is_active: bool) -> bool {
     let desired_size = egui::vec2(ui.available_width(), ROW_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
     if response.hovered() {
@@ -257,7 +297,7 @@ fn palette_row(ui: &mut Ui, kind: Option<ComponentKind>, name: &str, is_active: 
         );
         match kind {
             Some(kind) => {
-                let preview_label = if kind == ComponentKind::Probe {
+                let preview_label = if *kind == ComponentKind::Probe {
                     "1"
                 } else {
                     ""
@@ -317,9 +357,36 @@ mod tests {
         // count is the half a duplicated entry wouldn't catch.
         let kinds: std::collections::HashSet<ComponentKind> = ComponentKind::SAVED_NAMES
             .iter()
-            .map(|(kind, _)| *kind)
+            .map(|(kind, _)| kind.clone())
             .collect();
         assert_eq!(kinds.len(), ComponentKind::SAVED_NAMES.len());
+    }
+
+    #[test]
+    fn a_circuit_instance_round_trips_by_path() {
+        let kind = ComponentKind::Circuit("alu/adder".to_string());
+
+        let json = serde_json::to_string(&kind).expect("serializes");
+        // Written bare, without the project's library name: a local
+        // reference has to survive that name being changed.
+        assert_eq!(json, "\"circuit:alu/adder\"");
+        assert_eq!(
+            serde_json::from_str::<ComponentKind>(&json).expect("parses"),
+            kind
+        );
+    }
+
+    #[test]
+    fn a_circuit_reference_is_never_mistaken_for_a_builtin() {
+        // A circuit may perfectly well be called `And`; the prefix is what
+        // keeps the two apart, in both directions.
+        let kind = ComponentKind::Circuit("And".to_string());
+        let json = serde_json::to_string(&kind).expect("serializes");
+        assert_ne!(json, "\"simlogix:And\"");
+        assert_eq!(
+            serde_json::from_str::<ComponentKind>(&json).expect("parses"),
+            kind
+        );
     }
 
     #[test]

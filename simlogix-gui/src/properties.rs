@@ -99,8 +99,8 @@ const VARIANTS: [[ComponentKind; 2]; 2] = [
     ],
 ];
 
-fn siblings(kind: ComponentKind) -> Option<[ComponentKind; 2]> {
-    VARIANTS.into_iter().find(|pair| pair.contains(&kind))
+fn siblings(kind: &ComponentKind) -> Option<[ComponentKind; 2]> {
+    VARIANTS.into_iter().find(|pair| pair.contains(kind))
 }
 
 /// What the panel wants done, beyond the properties it edited in place.
@@ -117,7 +117,7 @@ pub struct PanelResult {
 pub fn show(
     ui: &mut Ui,
     strings: &Strings,
-    kind: ComponentKind,
+    kind: &ComponentKind,
     properties: &mut Properties,
 ) -> PanelResult {
     let mut result = PanelResult::default();
@@ -132,8 +132,8 @@ pub fn show(
         Some(pair) => {
             ui.label(strings.property_variant);
             for option in pair {
-                let label = strings.component_kind_label(option);
-                if ui.radio(option == kind, label).clicked() && option != kind {
+                let label = strings.component_kind_label(&option);
+                if ui.radio(option == *kind, label).clicked() && option != *kind {
                     result.change_kind = Some(option);
                 }
             }
@@ -172,7 +172,7 @@ pub fn show(
             // switch stays where it was put, so where it is *is* how the
             // circuit was left — something the user set, not something the
             // simulation produced, and the line the document draws.
-            let (label, hint) = if kind == ComponentKind::Switch {
+            let (label, hint) = if *kind == ComponentKind::Switch {
                 (strings.property_switch_on, strings.property_switch_on_hint)
             } else {
                 (strings.property_pressed, strings.property_pressed_hint)

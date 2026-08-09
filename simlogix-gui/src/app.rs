@@ -670,6 +670,17 @@ impl SimLogixApp {
                 self.circuit.schedule_now(id);
                 PlacedComponent::port(id, center, kind, level)
             }
+            // Placing an instance means flattening the referenced circuit
+            // into this one, which is the next step; nothing offers it yet,
+            // so this arm is unreachable. It exists as an anchor with no
+            // pins rather than a panic, because an unreachable arm that
+            // crashes is still a crash.
+            ComponentKind::Circuit(_) => {
+                let id = self
+                    .circuit
+                    .add_component(Box::new(CircuitOutput), Vec::new());
+                PlacedComponent::led(id, center)
+            }
             ComponentKind::SrLatch => {
                 let nets = [
                     self.circuit.add_net(),
@@ -901,7 +912,7 @@ impl SimLogixApp {
             .components
             .iter()
             .map(|saved| {
-                let id = app.place(saved.kind, egui::pos2(saved.x, saved.y));
+                let id = app.place(saved.kind.clone(), egui::pos2(saved.x, saved.y));
                 if let Some(placed) = app.placed.iter_mut().find(|p| p.id() == id) {
                     placed.set_rotation(saved.rotation);
                     placed.set_properties(saved.properties.clone());
@@ -1134,7 +1145,7 @@ impl SimLogixApp {
             .components
             .iter()
             .map(|saved| {
-                let id = self.place(saved.kind, egui::pos2(saved.x, saved.y) + offset);
+                let id = self.place(saved.kind.clone(), egui::pos2(saved.x, saved.y) + offset);
                 if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
                     placed.set_rotation(saved.rotation);
                     placed.set_properties(saved.properties.clone());
@@ -2668,7 +2679,7 @@ impl eframe::App for SimLogixApp {
                 Some(strings.status_paused.to_string())
             } else if self.wiring_from.is_some() {
                 Some(strings.hint_wiring.to_string())
-            } else if let Tool::Place(kind) = self.tool {
+            } else if let Tool::Place(kind) = &self.tool {
                 let label = strings.component_kind_label(kind);
                 Some(strings.palette_click_to_place.replace("{}", label))
             } else if self.selection.lone_wire().is_some() {
@@ -2739,7 +2750,7 @@ impl eframe::App for SimLogixApp {
                 // the whole window.
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
-                    if let Some(tool) = palette::show(ui, strings, self.tool) {
+                    if let Some(tool) = palette::show(ui, strings, &self.tool) {
                         // Clicking the active entry again drops back to
                         // selecting, so the palette doubles as its own
                         // "never mind" button.
@@ -2824,7 +2835,7 @@ impl eframe::App for SimLogixApp {
                             Some(placed) => {
                                 let mut edited = placed.properties().clone();
                                 let outcome =
-                                    properties::show(ui, strings, placed.kind(), &mut edited);
+                                    properties::show(ui, strings, &placed.kind(), &mut edited);
                                 if let Some(kind) = outcome.change_kind {
                                     pending_kind = Some((placed.id(), kind));
                                 }
@@ -2881,7 +2892,7 @@ impl eframe::App for SimLogixApp {
         // only the canvas, not the whole window: panels claim their space in
         // declaration order, and this bar acts on the canvas alone.
         egui::Panel::top("toolbar").show(ui, |ui| {
-            if let Some(tool) = toolbar::show(ui, strings, self.tool) {
+            if let Some(tool) = toolbar::show(ui, strings, &self.tool) {
                 self.tool = tool;
             }
         });
@@ -4091,7 +4102,7 @@ impl eframe::App for SimLogixApp {
                         }
                     }
 
-                    if let Tool::Place(kind) = self.tool {
+                    if let Tool::Place(kind) = &self.tool {
                         // A translucent preview of what's about to be dropped, at
                         // the grid position it will actually land on -- otherwise
                         // placing is a blind click.
@@ -4127,7 +4138,7 @@ impl eframe::App for SimLogixApp {
             // Placing goes through the scene's own background response, so a
             // click that landed on a component or a wire never also drops a
             // new component underneath it.
-            if let Tool::Place(kind) = self.tool {
+            if let Tool::Place(kind) = self.tool.clone() {
                 if scene_response.response.clicked() {
                     if let Some(pos) = scene_response.response.interact_pointer_pos() {
                         self.record_edit();
