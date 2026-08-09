@@ -316,3 +316,224 @@ fn a_transceiver_driving_against_a_live_source_is_reported() {
         .expect("settles");
     assert_eq!(bus.bus(1), Signal::Error);
 }
+
+/// The construct the weak-level model exists for: an NMOS and a PMOS in
+/// parallel, gated oppositely, passing *both* levels cleanly where either
+/// alone would only manage one.
+#[test]
+fn a_transmission_gate_passes_a_high_at_full_strength() {
+    use simlogix_core::Transistor;
+
+    let mut circuit = Circuit::new();
+    let nets: Vec<_> = (0..8).map(|_| circuit.add_net()).collect();
+
+    let (source_button, source) = Button::new();
+    let source_pin = circuit.add_component(
+        Box::new(source_button),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[0],
+        }],
+    );
+    let (gate_button, gate) = Button::new();
+    let gate_pin = circuit.add_component(
+        Box::new(gate_button),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[1],
+        }],
+    );
+    // The PMOS half needs the opposite gate level; an inverter supplies it.
+    let inverter = circuit.add_component(
+        Box::new(simlogix_core::Not),
+        vec![
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[2],
+            },
+            Pin {
+                direction: PinDirection::Output,
+                net: nets[3],
+            },
+        ],
+    );
+    let pass = |circuit: &mut Circuit, transistor: Transistor, g, s, d| {
+        circuit.add_component(
+            Box::new(transistor),
+            vec![
+                Pin {
+                    direction: PinDirection::Input,
+                    net: g,
+                },
+                Pin {
+                    direction: PinDirection::Input,
+                    net: s,
+                },
+                Pin {
+                    direction: PinDirection::Output,
+                    net: d,
+                },
+            ],
+        )
+    };
+    let n = pass(
+        &mut circuit,
+        Transistor::n_type(),
+        nets[4],
+        nets[5],
+        nets[6],
+    );
+    let p = pass(
+        &mut circuit,
+        Transistor::p_type(),
+        nets[7],
+        nets[5],
+        nets[6],
+    );
+
+    circuit.rewire(&[
+        vec![(gate_pin, 0), (n, 0), (inverter, 0)],
+        vec![(inverter, 1), (p, 0)],
+        vec![(source_pin, 0), (n, 1), (p, 1)],
+        // Both drains on one net: that net is the gate's output.
+        vec![(n, 2), (p, 2)],
+    ]);
+
+    source.set(true);
+    gate.set(true);
+    circuit.schedule_now(source_pin);
+    circuit.schedule_now(gate_pin);
+    circuit.run().expect("settles");
+
+    // The NMOS half can only deliver a weak high; the PMOS half delivers a
+    // strong one and overrides it.
+    let output = circuit.pins(n)[2].net;
+    assert_eq!(circuit.signal_at(output), Signal::High);
+    assert!(
+        !circuit.is_weakly_driven(output),
+        "the PMOS half is what makes this a full-strength high"
+    );
+}
+
+#[test]
+fn a_lone_n_type_delivers_a_high_that_is_real_but_weak() {
+    use simlogix_core::Transistor;
+
+    let mut circuit = Circuit::new();
+    let nets: Vec<_> = (0..5).map(|_| circuit.add_net()).collect();
+
+    let (gate_button, gate) = Button::new();
+    let gate_pin = circuit.add_component(
+        Box::new(gate_button),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[0],
+        }],
+    );
+    let power = circuit.add_component(
+        Box::new(simlogix_core::Rail::power()),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[1],
+        }],
+    );
+    let n = circuit.add_component(
+        Box::new(Transistor::n_type()),
+        vec![
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[2],
+            },
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[3],
+            },
+            Pin {
+                direction: PinDirection::Output,
+                net: nets[4],
+            },
+        ],
+    );
+    circuit.rewire(&[vec![(gate_pin, 0), (n, 0)], vec![(power, 0), (n, 1)]]);
+
+    gate.set(true);
+    for component in [gate_pin, power] {
+        circuit.schedule_now(component);
+    }
+    circuit.run().expect("settles");
+
+    // It *is* a logic high -- a real NMOS pass gate delivers Vdd minus a
+    // threshold, which the next gate still reads as a one. Reporting
+    // anything else here would make a working circuit look broken.
+    let output = circuit.pins(n)[2].net;
+    assert_eq!(circuit.signal_at(output), Signal::High);
+    // What's true and worth seeing is that it has no margin left.
+    assert!(circuit.is_weakly_driven(output));
+}
+
+#[test]
+fn a_lone_pass_transistor_loses_to_anything_pulling_the_other_way() {
+    use simlogix_core::{Rail, Transistor};
+
+    let mut circuit = Circuit::new();
+    let nets: Vec<_> = (0..6).map(|_| circuit.add_net()).collect();
+
+    let (gate_button, gate) = Button::new();
+    let gate_pin = circuit.add_component(
+        Box::new(gate_button),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[0],
+        }],
+    );
+    let power = circuit.add_component(
+        Box::new(Rail::power()),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[1],
+        }],
+    );
+    let ground = circuit.add_component(
+        Box::new(Rail::ground()),
+        vec![Pin {
+            direction: PinDirection::Output,
+            net: nets[2],
+        }],
+    );
+    let n = circuit.add_component(
+        Box::new(Transistor::n_type()),
+        vec![
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[3],
+            },
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[4],
+            },
+            Pin {
+                direction: PinDirection::Output,
+                net: nets[5],
+            },
+        ],
+    );
+
+    circuit.rewire(&[
+        vec![(gate_pin, 0), (n, 0)],
+        vec![(power, 0), (n, 1)],
+        // The NMOS's weak high meets a hard ground on its drain.
+        vec![(ground, 0), (n, 2)],
+    ]);
+
+    gate.set(true);
+    // A component drives nothing until it has been evaluated once, rails
+    // included — they have no inputs, so nothing would ever trigger them.
+    for component in [gate_pin, power, ground] {
+        circuit.schedule_now(component);
+    }
+    circuit.run().expect("settles");
+
+    // Not a conflict: the strong driver simply wins, which is what a weak
+    // level *means*. With the old ideal-switch model this was `Error`.
+    assert_eq!(circuit.signal_at(circuit.pins(n)[2].net), Signal::Low);
+}

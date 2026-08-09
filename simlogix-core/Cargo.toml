@@ -2,3 +2,13 @@
 name = "simlogix-core"
 version = "0.1.0"
 edition = "2021"
+
+[features]
+# Off by default: the on-disk format lives in the GUI, and this crate has no
+# business serialising anything of its own. The GUI turns it on because one
+# engine type — `PortLevel` — is a *setting* a project has to remember, and
+# mirroring it GUI-side would be a copy free to drift from the original.
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }

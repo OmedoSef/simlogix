@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use egui::{Align2, Color32, FontId, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
-use simlogix_core::{Circuit, ComponentId, NetId, Signal};
+use simlogix_core::{Circuit, ComponentId, NetId, PortLevel, Signal};
 
 use crate::canvas::{self, Rotation, BOX_SIZE};
 use crate::palette::ComponentKind;
@@ -40,6 +40,12 @@ pub struct FrameResult {
     /// rather than settled here: whether the simulation is even running is
     /// the app's decision, not an individual component's.
     pub input_changed: bool,
+    /// Whether a latching switch was clicked and wants flipping.
+    ///
+    /// *Reported* rather than done, because a switch's position is document
+    /// data: the caller has to snapshot for undo before it changes, and by
+    /// the time this returns it would already be too late.
+    pub toggled: bool,
     /// How far this component moved under the pointer this frame, zero when
     /// it isn't being dragged. The caller uses it to carry the rest of a
     /// multi-selection along by the same amount.
@@ -82,6 +88,11 @@ enum Shape {
     Button {
         pressed: Rc<Cell<bool>>,
     },
+    /// The latching counterpart of `Button`: a click flips it and it stays.
+    /// Same engine component — the difference lives here, in the gesture.
+    Switch {
+        on: Rc<Cell<bool>>,
+    },
     Led,
     Transistor(ComponentKind),
     Rail(ComponentKind),
@@ -96,6 +107,14 @@ enum Shape {
     /// The 1-input mirror of `TwoInputGate` (`Not`/`Buffer`), via
     /// [`PlacedComponent::one_input_gate`].
     OneInputGate(ComponentKind),
+    /// A circuit boundary port. `level` is present only on an input, the
+    /// one port whose value is set by hand — clicking it *latches*, unlike
+    /// a `Button`, because a port stands for what a parent will drive and
+    /// that doesn't spring back.
+    Port {
+        kind: ComponentKind,
+        level: Option<Rc<Cell<PortLevel>>>,
+    },
     /// Two `InOut` bus sides at pin indices 0/1 (`A`, `B`) and two control
     /// inputs at 2/3 (`Dir`, `Enable`) — the only component whose pins both
     /// read and drive.
@@ -119,6 +138,10 @@ impl PlacedComponent {
 
     pub fn button(id: ComponentId, center: Pos2, pressed: Rc<Cell<bool>>) -> Self {
         Self::new(id, center, Shape::Button { pressed })
+    }
+
+    pub fn switch(id: ComponentId, center: Pos2, on: Rc<Cell<bool>>) -> Self {
+        Self::new(id, center, Shape::Switch { on })
     }
 
     pub fn led(id: ComponentId, center: Pos2) -> Self {
@@ -153,6 +176,15 @@ impl PlacedComponent {
         Self::new(id, center, Shape::SrLatch)
     }
 
+    pub fn port(
+        id: ComponentId,
+        center: Pos2,
+        kind: ComponentKind,
+        level: Option<Rc<Cell<PortLevel>>>,
+    ) -> Self {
+        Self::new(id, center, Shape::Port { kind, level })
+    }
+
     pub fn bus_transceiver(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
         Self::new(id, center, Shape::BusTransceiver(kind))
     }
@@ -174,6 +206,27 @@ impl PlacedComponent {
     }
 
     pub fn set_properties(&mut self, properties: Properties) {
+        // A port's resting level is a property, so it has to reach the cell
+        // the engine reads — on load and whenever it's edited. Same idea as
+        // a button's `pressed`, except a latching port has no "held" state
+        // to settle itself from, so it's pushed explicitly.
+        if let Shape::Port {
+            level: Some(level), ..
+        } = &self.shape
+        {
+            if properties.initial_level() != self.properties.initial_level() {
+                level.set(properties.initial_level());
+            }
+        }
+        // A switch needs the same push for the same reason: it latches, so
+        // there is no "held" state for it to settle itself from the way a
+        // button does.
+        if let Shape::Switch { on } = &self.shape {
+            let starts_on = properties.pressed.unwrap_or(false);
+            if starts_on != self.properties.pressed.unwrap_or(false) {
+                on.set(starts_on);
+            }
+        }
         self.properties = properties;
     }
 
@@ -182,7 +235,9 @@ impl PlacedComponent {
     pub fn kind(&self) -> ComponentKind {
         match self.shape {
             Shape::Button { .. } => ComponentKind::Button,
+            Shape::Switch { .. } => ComponentKind::Switch,
             Shape::Led => ComponentKind::Led,
+            Shape::Port { kind, .. } => kind,
             Shape::Transistor(kind)
             | Shape::BusTransceiver(kind)
             | Shape::Rail(kind)
@@ -316,6 +371,40 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins: vec![pin],
+                }
+            }
+            Shape::Switch { on } => {
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState {
+                        pressed: on.get(),
+                        ..Default::default()
+                    },
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center);
+                let net = circuit.pins(id)[0].net;
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    // Only on a click: dragging one across the canvas must
+                    // not also flip it.
+                    toggled: response.clicked(),
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
@@ -355,6 +444,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
@@ -418,8 +508,73 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins,
+                }
+            }
+            Shape::Port { level, .. } => {
+                // Every port shows what its net resolves to, driving or not:
+                // on an output that's the whole point, and on the other two
+                // it's what tells you a value you set is being fought over.
+                let signal = circuit
+                    .pins(id)
+                    .first()
+                    .map(|pin| circuit.signal_at(pin.net))
+                    .unwrap_or(Signal::Unknown);
+                let readout = signal_letter(signal);
+                // The readout follows the signal, the body doesn't: which way
+                // the value crosses the boundary is structure and shouldn't
+                // change colour as the circuit runs.
+                let mut readout_color = canvas::signal_color(signal, dark_mode);
+                if circuit
+                    .pins(id)
+                    .first()
+                    .is_some_and(|pin| circuit.is_weakly_driven(pin.net))
+                {
+                    readout_color = readout_color.gamma_multiply(canvas::WEAK_FADE);
+                }
+
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState {
+                        label: readout,
+                        label_color: Some(readout_color),
+                        ..Default::default()
+                    },
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center);
+                // Latching: a click advances it and it stays there. Only on
+                // a click, never on a drag, so moving a port across the
+                // canvas can't also change what it carries.
+                if let Some(level) = level {
+                    if response.clicked() {
+                        level.set(level.get().next(properties.is_tri_state()));
+                        circuit.schedule_now(id);
+                        input_changed = true;
+                    }
+                }
+
+                let net = circuit.pins(id)[0].net;
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net);
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins: vec![pin],
                 }
             }
             Shape::SrLatch => {
@@ -479,6 +634,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins,
                 }
@@ -530,6 +686,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![gate, source, drain],
                 }
@@ -558,6 +715,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
@@ -571,14 +729,15 @@ impl PlacedComponent {
                 // A probe reads out the net it's attached to, so it uses the
                 // very colour code that net is drawn in — its own duplicate
                 // of the five states was the one place they could disagree.
-                let color = canvas::signal_color(signal, dark_mode);
-                let label = match signal {
-                    Signal::High => "1",
-                    Signal::Low => "0",
-                    Signal::Unknown => "?",
-                    Signal::Error => "E",
-                    Signal::HighZ => "Z",
-                };
+                let mut color = canvas::signal_color(signal, dark_mode);
+                if circuit
+                    .pins(id)
+                    .first()
+                    .is_some_and(|pin| circuit.is_weakly_driven(pin.net))
+                {
+                    color = color.gamma_multiply(canvas::WEAK_FADE);
+                }
+                let label = signal_letter(signal);
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
@@ -605,6 +764,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
@@ -643,6 +803,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
@@ -694,6 +855,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![a, b, out],
                 }
@@ -737,6 +899,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![input, output],
                 }
@@ -751,6 +914,20 @@ impl PlacedComponent {
 ///
 /// The interactive area is inset by [`PIN_HIT_MARGIN`] so it never overlaps
 /// a pin's own hit-rect — see that constant.
+/// The one-character readout a `Probe` or a port shows for a signal.
+fn signal_letter(signal: Signal) -> &'static str {
+    // A net never resolves to a weak level, so those arms are unreachable;
+    // reading them as their full-strength selves is the only answer that
+    // could ever be right.
+    match signal.strengthened() {
+        Signal::High => "1",
+        Signal::Low => "0",
+        Signal::Error => "E",
+        Signal::HighZ => "Z",
+        _ => "?",
+    }
+}
+
 /// How far `interact_box` actually moved a component this frame.
 ///
 /// Zero on the frame a drag *starts*, because `interact_box` deliberately

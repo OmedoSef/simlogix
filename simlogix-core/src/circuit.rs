@@ -423,16 +423,49 @@ impl Circuit {
     /// Resolves a net's signal from its current drivers: ignores `HighZ`, then
     /// 0 remaining -> `Unknown`, 1 (or several agreeing) -> that value,
     /// several disagreeing -> `Error`.
-    fn resolve(drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
+    /// Whether `net`'s level rests only on weak contributions — a level
+    /// that is genuinely there, and that any full-strength driver would
+    /// override.
+    ///
+    /// Separate from [`Circuit::signal_at`] on purpose: a lone NMOS passing
+    /// a high really does deliver a logic 1, so reporting anything else
+    /// would make a working circuit look broken. What's missing without this
+    /// is any way to *see* that the 1 has no noise margin left, which is
+    /// exactly the thing a pass-transistor mistake costs you.
+    pub fn is_weakly_driven(&self, net: NetId) -> bool {
+        let Some(drivers) = self.drivers.get(&net) else {
+            return false;
+        };
         let mut active = drivers
             .values()
             .copied()
-            .filter(|&signal| signal != Signal::HighZ);
+            .filter(|&signal| signal != Signal::HighZ)
+            .peekable();
+        active.peek().is_some() && active.all(|signal| signal.is_weak())
+    }
 
-        let Some(first) = active.next() else {
+    fn resolve(drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
+        let active: Vec<Signal> = drivers
+            .values()
+            .copied()
+            .filter(|&signal| signal != Signal::HighZ)
+            .collect();
+
+        // A full-strength driver simply wins: that is what a pass
+        // transistor's weakened level *means*, and it's what lets a
+        // transmission gate work — the PMOS half drives a strong high that
+        // overrides the NMOS half's weak one, instead of the two being
+        // called a conflict.
+        let strong: Vec<Signal> = active.iter().copied().filter(|s| !s.is_weak()).collect();
+        let deciding = if strong.is_empty() { &active } else { &strong };
+
+        let mut levels = deciding.iter().map(|signal| signal.strengthened());
+        let Some(first) = levels.next() else {
             return Signal::Unknown;
         };
-        if active.all(|signal| signal == first) {
+        if levels.all(|signal| signal == first) {
+            // Never weak on the way out: a net carries a level, and only a
+            // *contribution* carries a strength.
             first
         } else {
             Signal::Error

@@ -19,11 +19,15 @@ impl Component for Not {
 }
 
 fn not(a: Signal) -> Signal {
-    match a {
+    // A weak level can't reach an input: `Circuit` resolves a net before any
+    // component reads it, and it never hands out a weak one. The arms exist
+    // because the compiler is right to insist, and treating them as their
+    // full-strength selves is the only answer that could ever be correct.
+    match a.strengthened() {
         Signal::High => Signal::Low,
         Signal::Low => Signal::High,
         Signal::Error => Signal::Error,
-        Signal::Unknown | Signal::HighZ => Signal::Unknown,
+        _ => Signal::Unknown,
     }
 }
 

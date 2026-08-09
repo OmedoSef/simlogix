@@ -64,3 +64,25 @@ wires never look like something broken.
 
 Unlike the theme or the language, this isn't remembered between runs. It's a
 way of working at a given moment, like pause.
+
+## Weak levels
+
+A transistor passes one level well and the other badly: an NMOS can only
+pull *up* through a threshold drop, and a PMOS only pull *down* through one.
+That asymmetry is the whole reason CMOS puts the two in parallel as a
+transmission gate, so the simulator models it rather than pretending a lone
+transistor is a perfect switch.
+
+A level delivered that way is **weak**: real, but overridden by any
+full-strength driver on the same net.
+
+- A **transmission gate** — an NMOS and a PMOS in parallel, gated oppositely
+  — passes both levels cleanly, because whichever half pulls well wins.
+- A **lone pass transistor** still works in its good direction, and in its
+  bad one loses to anything pulling the other way. That is what it does in
+  silicon too.
+
+A net held up only by a weak contribution is drawn **faded** — wires, probes
+and port readouts alike. The colour stays, because the level is real and the
+gate downstream will read it; the fading says the noise margin has gone. It
+is the difference between a circuit that works and one that happens to work.

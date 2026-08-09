@@ -8,6 +8,7 @@ pub mod nand;
 pub mod nor;
 pub mod not;
 pub mod or;
+pub mod port;
 pub mod probe;
 pub mod rail;
 pub mod sr_latch;

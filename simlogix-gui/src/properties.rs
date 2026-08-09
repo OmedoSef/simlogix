@@ -13,6 +13,8 @@
 use egui::Ui;
 use serde::{Deserialize, Serialize};
 
+use simlogix_core::PortLevel;
+
 use crate::i18n::Strings;
 use crate::palette::ComponentKind;
 
@@ -39,6 +41,18 @@ pub struct Properties {
     /// LED is by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[u8; 3]>,
+
+    /// Driving ports only — whether clicking can put the port in its
+    /// undriven position, and therefore whether the interface admits a
+    /// third state at all. Unset means two-state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tri_state: Option<bool>,
+
+    /// Driving ports only — where the port rests when the circuit is
+    /// loaded. Like a button's `pressed`, this is the *resting* value, not
+    /// the current one: runtime state is still never saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial: Option<PortLevel>,
 }
 
 impl Properties {
@@ -46,6 +60,17 @@ impl Properties {
     /// the file rather than written as a row of nulls.
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
+    }
+
+    /// Whether this port's click cycle includes the undriven position.
+    pub fn is_tri_state(&self) -> bool {
+        self.tri_state.unwrap_or(false)
+    }
+
+    /// Where a driving port rests. Undriven unless told otherwise — the
+    /// honest starting point, since nothing has said what it carries yet.
+    pub fn initial_level(&self) -> PortLevel {
+        self.initial.unwrap_or_default()
     }
 
     /// The name to draw under the symbol, if there is one worth drawing.
@@ -138,12 +163,21 @@ pub fn show(
     }
 
     match kind {
-        ComponentKind::Button => {
+        ComponentKind::Button | ComponentKind::Switch => {
             ui.add_space(8.0);
             let mut pressed = properties.pressed.unwrap_or(false);
-            let response = ui
-                .checkbox(&mut pressed, strings.property_pressed)
-                .on_hover_text(strings.property_pressed_hint);
+            // The same stored value, said two ways. For a button it is a
+            // *resting* state, since a press springs back and is never
+            // saved. For a switch it is the position itself: a latched
+            // switch stays where it was put, so where it is *is* how the
+            // circuit was left — something the user set, not something the
+            // simulation produced, and the line the document draws.
+            let (label, hint) = if kind == ComponentKind::Switch {
+                (strings.property_switch_on, strings.property_switch_on_hint)
+            } else {
+                (strings.property_pressed, strings.property_pressed_hint)
+            };
+            let response = ui.checkbox(&mut pressed, label).on_hover_text(hint);
             if response.changed() {
                 edit_started = true;
                 // Back to unset when it's the default again, so a project
@@ -170,6 +204,40 @@ pub fn show(
                     properties.color = None;
                 }
             });
+        }
+        // The two ports that drive. An output only reads, so it has neither
+        // a resting value nor a say in how many states the interface has.
+        ComponentKind::InputPort | ComponentKind::InOutPort => {
+            ui.add_space(8.0);
+            let mut tri_state = properties.is_tri_state();
+            if ui
+                .checkbox(&mut tri_state, strings.property_tri_state)
+                .on_hover_text(strings.property_tri_state_hint)
+                .changed()
+            {
+                edit_started = true;
+                properties.tri_state = tri_state.then_some(true);
+            }
+
+            ui.add_space(8.0);
+            ui.label(strings.property_initial);
+            let current = properties.initial_level();
+            for (level, label) in [
+                (PortLevel::Undriven, strings.port_level_undriven),
+                (PortLevel::Low, strings.port_level_low),
+                (PortLevel::High, strings.port_level_high),
+            ] {
+                // Undriven stays offered even on a two-state port: it is
+                // still where a port sits before anything drives it, and
+                // hiding it would make that state unreachable rather than
+                // absent.
+                if ui.radio(current == level, label).clicked() && current != level {
+                    edit_started = true;
+                    // Back to unset when it's the default again, so a
+                    // project that says nothing keeps saying nothing.
+                    properties.initial = (level != PortLevel::default()).then_some(level);
+                }
+            }
         }
         _ => {}
     }
@@ -250,12 +318,22 @@ mod tests {
             name: Some("clk".to_string()),
             pressed: Some(true),
             color: Some([1, 2, 3]),
+            tri_state: Some(true),
+            initial: Some(PortLevel::High),
         };
 
         let json = serde_json::to_string(&properties).expect("serializes");
         let parsed: Properties = serde_json::from_str(&json).expect("parses");
 
         assert_eq!(parsed, properties);
+    }
+
+    #[test]
+    fn a_ports_resting_level_defaults_to_undriven() {
+        // Nothing has said what it carries yet, so claiming a level would be
+        // inventing one — and undriven is the case worth being able to test.
+        assert_eq!(Properties::default().initial_level(), PortLevel::Undriven);
+        assert!(!Properties::default().is_tri_state());
     }
 
     #[test]

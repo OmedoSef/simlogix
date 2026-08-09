@@ -19,6 +19,7 @@ pub use components::nand::Nand;
 pub use components::nor::Nor;
 pub use components::not::Not;
 pub use components::or::Or;
+pub use components::port::{CircuitOutput, CircuitPort, PortLevel};
 pub use components::probe::Probe;
 pub use components::rail::Rail;
 pub use components::sr_latch::SrLatch;

@@ -9,7 +9,7 @@ egui = "0.35"
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-simlogix-core = { path = "../simlogix-core" }
+simlogix-core = { path = "../simlogix-core", features = ["serde"] }
 zip = { version = "8.6.0", default-features = false }
 
 [dev-dependencies]

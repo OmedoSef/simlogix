@@ -36,8 +36,16 @@ pub struct PinPositions {
 /// change at every call site.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SymbolState<'a> {
-    /// `Probe`: the net state it's reading, e.g. `"1"`/`"0"`/`"?"`.
+    /// `Probe` and the ports: the net state being read, e.g. `"1"`/`"0"`.
     pub label: &'a str,
+    /// What to draw that readout in, when it shouldn't follow the symbol's
+    /// own colour.
+    ///
+    /// A `Probe` is nothing *but* its readout, so its whole symbol takes the
+    /// signal colour. A port's body and arrow say which way the value
+    /// crosses the boundary — structure, not state — so only the letter
+    /// follows the signal.
+    pub label_color: Option<Color32>,
     /// `Button`: whether its cap is currently down.
     pub pressed: bool,
 }
@@ -56,6 +64,7 @@ pub fn draw(
     let label = state.label;
     match kind {
         ComponentKind::Button => draw_button(painter, rect, rotation, stroke, color, state.pressed),
+        ComponentKind::Switch => draw_switch(painter, rect, rotation, stroke, color, state.pressed),
         ComponentKind::Led => draw_led(painter, rect, rotation, stroke, color),
         ComponentKind::NTransistor => draw_transistor(painter, rect, rotation, stroke, true),
         ComponentKind::PTransistor => draw_transistor(painter, rect, rotation, stroke, false),
@@ -71,6 +80,9 @@ pub fn draw(
         ComponentKind::Xnor => draw_or_gate(painter, rect, rotation, stroke, true, true),
         ComponentKind::Buffer => draw_triangle_gate(painter, rect, rotation, stroke, false),
         ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
+        ComponentKind::InputPort => draw_port(painter, rect, rotation, stroke, color, 1, state),
+        ComponentKind::OutputPort => draw_port(painter, rect, rotation, stroke, color, -1, state),
+        ComponentKind::InOutPort => draw_port(painter, rect, rotation, stroke, color, 0, state),
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
         ComponentKind::BusTransceiver => {
@@ -234,6 +246,133 @@ fn draw_tri_state_buffer(
         // pins in, and therefore the order a saved wire refers to them by.
         inputs: vec![r(pin_in), r(pin_enable)],
         outputs: vec![r(pin_out)],
+    }
+}
+
+/// A latching switch: a lever that stays where it was put.
+///
+/// Drawn as the schematic single-pole switch — a pivot, a lever and a
+/// contact — rather than as a variant of the button's cap. The two do the
+/// same thing electrically and differ only in whether the level springs
+/// back, so the symbol is the only place that difference can be read before
+/// you touch it: a lever resting on its contact says "closed and staying
+/// closed" in a way a filled circle never could.
+fn draw_switch(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    color: Color32,
+    on: bool,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+
+    let pin = pos2(rect.right(), c.y);
+    let pivot = pos2(c.x - rect.width() * 0.22, c.y);
+    let contact = pos2(c.x + rect.width() * 0.1, c.y);
+
+    painter.line_segment([r(contact), r(pin)], stroke);
+    painter.circle_stroke(r(pivot), 2.5, stroke);
+    painter.circle_stroke(r(contact), 2.5, stroke);
+
+    // Closed, the lever lies on the contact; open, it lifts off it. The
+    // gap is what carries the state, so it is drawn wide enough to read at
+    // a glance rather than as a hairline.
+    let far = if on {
+        pos2(contact.x, contact.y)
+    } else {
+        pos2(contact.x - 2.0, contact.y - rect.height() * 0.32)
+    };
+    painter.line_segment([r(pivot), r(far)], stroke);
+
+    draw_pin(painter, r(pin), color);
+
+    PinPositions {
+        inputs: vec![],
+        outputs: vec![r(pin)],
+    }
+}
+
+/// A circuit port: the boundary marker a parent will connect to.
+///
+/// `flow` is `1` for a value entering the circuit, `-1` for one leaving, and
+/// `0` for both ways — drawn as the arrowhead's direction inside a plain
+/// body. The arrow points *along the signal relative to the lead*, so the
+/// shape reads without a label: heads towards the lead means it feeds the
+/// circuit, away means it comes from it.
+///
+/// Every port also shows what its net resolves to, in the same one-letter
+/// readout a `Probe` uses. A fill would have been enough for a switch with
+/// two positions; a port has three it can be *put* in and five it can
+/// *read*, and a letter says all of them.
+fn draw_port(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    color: Color32,
+    flow: i32,
+    state: SymbolState<'_>,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+
+    let pin = pos2(rect.right(), c.y);
+    let body = Rect::from_min_max(
+        pos2(rect.left() + rect.width() * 0.14, c.y - rect.height() * 0.3),
+        pos2(
+            rect.right() - rect.width() * 0.24,
+            c.y + rect.height() * 0.3,
+        ),
+    );
+
+    painter.line_segment([r(pos2(body.right(), c.y)), r(pin)], stroke);
+    let corners = [
+        body.left_top(),
+        body.right_top(),
+        body.right_bottom(),
+        body.left_bottom(),
+        body.left_top(),
+    ];
+    painter.line(corners.into_iter().map(r).collect(), stroke);
+
+    // Readout on the left, arrow on the right: the value changes constantly
+    // and the arrow never does, so the eye should land on the value first.
+    painter.text(
+        r(pos2(body.left() + 8.0, c.y)),
+        Align2::CENTER_CENTER,
+        state.label,
+        FontId::proportional(11.0),
+        state.label_color.unwrap_or(color),
+    );
+
+    let (left, right) = (body.left() + 17.0, body.right() - 5.0);
+    let head = 4.0;
+    let arrow = |tip: f32, towards: f32| {
+        for side in [-1.0, 1.0] {
+            painter.line_segment(
+                [
+                    r(pos2(tip, c.y)),
+                    r(pos2(tip - head * towards, c.y + head * side)),
+                ],
+                stroke,
+            );
+        }
+    };
+    painter.line_segment([r(pos2(left, c.y)), r(pos2(right, c.y))], stroke);
+    if flow >= 0 {
+        arrow(right, 1.0);
+    }
+    if flow <= 0 {
+        arrow(left, -1.0);
+    }
+
+    draw_pin(painter, r(pin), color);
+
+    PinPositions {
+        inputs: vec![r(pin)],
+        outputs: vec![r(pin)],
     }
 }
 

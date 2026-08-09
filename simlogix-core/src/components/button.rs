@@ -4,8 +4,15 @@ use std::rc::Rc;
 use crate::component::Component;
 use crate::signal::Signal;
 
-/// A push button: an input source with a single output pin (no inputs of its
-/// own) that follows whether it's currently pressed.
+/// A source with a single output pin and no inputs, carrying whichever level
+/// its handle is set to.
+///
+/// **Also what a latching switch is made of.** At this level the two are the
+/// same component — a source whose level the GUI owns; the difference
+/// between "held down" and "stays where you put it" is entirely in how the
+/// handle is driven, and a second identical type here would only be a name.
+/// The GUI keeps them apart as two `ComponentKind`s, which is where the
+/// distinction actually lives.
 ///
 /// The pressed state lives in a shared `Rc<Cell<bool>>` rather than a plain
 /// `bool` field, so the GUI can toggle it (e.g. on a mouse click) without

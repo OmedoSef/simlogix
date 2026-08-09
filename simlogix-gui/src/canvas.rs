@@ -17,6 +17,11 @@ use simlogix_core::Signal;
 /// midnight blue is the reverse. Every value below clears 4.5:1 against the
 /// background it is used on.
 pub fn signal_color(signal: Signal, dark_mode: bool) -> Color32 {
+    // A net never resolves to a weak level -- `Circuit` normalises those
+    // away, so only a *contribution* is ever weak. Folding them back here
+    // keeps the match honest without inventing two more colours nothing
+    // would ever draw.
+    let signal = signal.strengthened();
     if dark_mode {
         match signal {
             Signal::High => Color32::from_rgb(72, 200, 96),
@@ -27,6 +32,7 @@ pub fn signal_color(signal: Signal, dark_mode: bool) -> Color32 {
             // is a driver deliberately not driving, so it reads as "nothing
             // here" rather than as a value.
             Signal::HighZ => Color32::from_gray(150),
+            _ => Color32::from_gray(150),
         }
     } else {
         match signal {
@@ -35,9 +41,18 @@ pub fn signal_color(signal: Signal, dark_mode: bool) -> Color32 {
             Signal::Unknown => Color32::from_rgb(40, 52, 150),
             Signal::Error => Color32::from_rgb(186, 24, 24),
             Signal::HighZ => Color32::from_gray(105),
+            _ => Color32::from_gray(105),
         }
     }
 }
+
+/// How much a weakly driven net's colour is faded.
+///
+/// A level delivered only through a pass transistor is a real level — the
+/// gate downstream reads it — so it keeps its colour rather than becoming a
+/// different state. Fading is the honest cue: the value is there, the margin
+/// isn't.
+pub const WEAK_FADE: f32 = 0.5;
 
 /// The highlight blue: selection outlines, and the rings marking a pin or
 /// waypoint you can drop a wire onto. One definition rather than a literal

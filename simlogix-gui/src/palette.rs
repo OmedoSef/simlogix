@@ -49,6 +49,10 @@ pub enum ComponentKind {
     TriStateBuffer,
     BusTransceiver,
     BusTransceiverOe,
+    InputPort,
+    OutputPort,
+    InOutPort,
+    Switch,
 }
 
 impl ComponentKind {
@@ -57,7 +61,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 20] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 24] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -78,6 +82,10 @@ impl ComponentKind {
         (ComponentKind::TriStateBuffer, "TriStateBuffer"),
         (ComponentKind::BusTransceiver, "BusTransceiver"),
         (ComponentKind::BusTransceiverOe, "BusTransceiverOe"),
+        (ComponentKind::InputPort, "InputPort"),
+        (ComponentKind::OutputPort, "OutputPort"),
+        (ComponentKind::InOutPort, "InOutPort"),
+        (ComponentKind::Switch, "Switch"),
     ];
 
     fn saved_name(self) -> &'static str {
@@ -138,11 +146,20 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
 
     let mut clicked = None;
 
-    let categories: [(&str, &[ComponentKind]); 6] = [
+    let categories: [(&str, &[ComponentKind]); 7] = [
+        (
+            strings.category_interface,
+            &[
+                ComponentKind::InputPort,
+                ComponentKind::OutputPort,
+                ComponentKind::InOutPort,
+            ],
+        ),
         (
             strings.category_sources,
             &[
                 ComponentKind::Button,
+                ComponentKind::Switch,
                 ComponentKind::Clock,
                 ComponentKind::Ground,
                 ComponentKind::Power,

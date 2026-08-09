@@ -142,16 +142,60 @@ project file.
 | Property | Applies to | What it does |
 |---|---|---|
 | **Name** | every component | Drawn under the symbol, as your own annotation. |
-| **Pressed at rest** | Button | The button rests pressed, so clicking it *releases* it — a normally-closed switch. |
+| **Type** | transistors, transceivers | Switches between the pair — the symbol follows. |
+| **Pressed at rest** | Button | The button rests pressed, so clicking it *releases* it. |
+| **Closed** | Switch | Where the switch is now, and how it will be saved. |
+| **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
+| **Resting value** | Input, Bidirectional | Where the port sits when the project opens. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
 
-The button's setting is its **resting** state, not its current one. Runtime
-state is still never saved: opening a project starts every button at rest,
-which is now whatever you chose rather than always released.
+Two of those look alike and are not. A **button's** setting is its *resting*
+state: a press springs back, so what is saved is where it returns to. A
+**switch's** is its *position*, because a latched switch stays where you put
+it — so flipping one counts as an edit, marks the project modified and takes
+an undo step, exactly like moving a component.
+
+That's the line the project file draws, and it is worth stating plainly:
+**what you set is kept; what the simulation produced is not.** Signal levels,
+a clock's phase and a button's press are produced. A switch's position and a
+port's resting value are set.
 
 Setting a property is an ordinary edit, so `Ctrl+Z` undoes it. Typing a name
 counts as one step from the moment you click into the field; the colour
 picker leaves a step per change while you drag through it.
+
+## The circuit's interface
+
+The **Interface** category holds the three ports that make a circuit usable
+inside another one: `Input`, `Output` and `Bidirectional`. Each is one pin
+on the circuit's boundary, and giving it a **Name** is what will label it on
+the parent's symbol.
+
+They are useful before anything contains the circuit, which is deliberate —
+you test a circuit long before you reuse it:
+
+- An **input** is a latching switch you click. Unlike a button it stays
+  where you put it, because it stands for what a parent will drive.
+- An **output** just reads its net.
+- A **bidirectional** port does both: click it to drive, or leave it
+  undriven and watch what the circuit puts there.
+
+All three show what their net carries, using the probe's letters
+(`1`/`0`/`?`/`E`/`Z`). Only the readout follows the signal colour — the body
+and the arrow say which way the value crosses the boundary, and that doesn't
+change as the circuit runs.
+
+**Three-state** adds an undriven position to the click cycle, which then
+goes undriven → high → low. What "undriven" *means* differs by port, and the
+difference matters:
+
+- an **input** goes to unknown — nothing outside is supplying it;
+- a **bidirectional** port goes to high-impedance — it lets go, so the
+  circuit inside can drive the net. Unknown would count as a driver and put
+  the net into conflict instead of stepping aside.
+
+An output has no such setting: it never drives, and it already reads all
+five states including the absence of one.
 
 ## Memory
 

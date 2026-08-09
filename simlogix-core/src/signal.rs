@@ -13,6 +13,44 @@ pub enum Signal {
     /// High impedance: this driver is deliberately not driving the net right now
     /// (e.g. a disabled tri-state buffer), leaving room for another driver to.
     HighZ,
+    /// A `High` that a stronger driver overrides — what an NMOS pass
+    /// transistor puts out when it passes a high level, which it can only do
+    /// through a threshold drop.
+    ///
+    /// **Only ever appears as a driver's contribution, never as a net's
+    /// resolved value**: [`crate::Circuit`] normalises it away, so no
+    /// component ever receives one and no truth table has to know it exists.
+    /// That containment is what makes modelling strength cheap here.
+    WeakHigh,
+    /// A `Low` that a stronger driver overrides — a PMOS passing a low
+    /// level. See [`Signal::WeakHigh`].
+    WeakLow,
+}
+
+impl Signal {
+    /// Whether this contribution yields to a stronger one on the same net.
+    pub fn is_weak(self) -> bool {
+        matches!(self, Signal::WeakHigh | Signal::WeakLow)
+    }
+
+    /// The full-strength level a weak one stands for; anything else is
+    /// already itself.
+    pub fn strengthened(self) -> Self {
+        match self {
+            Signal::WeakHigh => Signal::High,
+            Signal::WeakLow => Signal::Low,
+            other => other,
+        }
+    }
+
+    /// The weakened form of a level, as a pass transistor delivers it.
+    pub fn weakened(self) -> Self {
+        match self {
+            Signal::High => Signal::WeakHigh,
+            Signal::Low => Signal::WeakLow,
+            other => other,
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------

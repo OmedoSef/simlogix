@@ -5,8 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use simlogix_core::{
-    And, Buffer, BusTransceiver, Button, Circuit, Clock, Component, ComponentId, Led, Nand, NetId,
-    Nor, Not, Or, Pin, PinDirection, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    And, Buffer, BusTransceiver, Button, Circuit, CircuitOutput, CircuitPort, Clock, Component,
+    ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, Probe, Rail, SrLatch,
+    Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::canvas::{self, BOX_SIZE};
@@ -445,6 +446,21 @@ impl SimLogixApp {
                 self.circuit.schedule_now(id);
                 PlacedComponent::button(id, center, pressed)
             }
+            ComponentKind::Switch => {
+                let net = self.circuit.add_net();
+                // The same engine component a button uses: at that level
+                // they are both "a source whose level the GUI owns".
+                let (switch, on) = Button::new();
+                let id = self.circuit.add_component(
+                    Box::new(switch),
+                    vec![Pin {
+                        direction: PinDirection::Output,
+                        net,
+                    }],
+                );
+                self.circuit.schedule_now(id);
+                PlacedComponent::switch(id, center, on)
+            }
             ComponentKind::Led => {
                 let net = self.circuit.add_net();
                 let id = self.circuit.add_component(
@@ -629,6 +645,30 @@ impl SimLogixApp {
                 // `TwoInputGate` already draws and wires generically, so it
                 // needs no variant of its own.
                 PlacedComponent::two_input_gate(id, center, kind)
+            }
+            ComponentKind::InputPort | ComponentKind::OutputPort | ComponentKind::InOutPort => {
+                let net = self.circuit.add_net();
+                // The pin points the way the value crosses the boundary: an
+                // input drives the internal net, an output reads it, and a
+                // bidirectional port does both.
+                let (component, direction, level): (Box<dyn Component>, _, _) = match kind {
+                    ComponentKind::InputPort => {
+                        let (port, level) = CircuitPort::input();
+                        (Box::new(port), PinDirection::Output, Some(level))
+                    }
+                    ComponentKind::OutputPort => {
+                        (Box::new(CircuitOutput), PinDirection::Input, None)
+                    }
+                    _ => {
+                        let (port, level) = CircuitPort::bidirectional();
+                        (Box::new(port), PinDirection::InOut, Some(level))
+                    }
+                };
+                let id = self
+                    .circuit
+                    .add_component(component, vec![Pin { direction, net }]);
+                self.circuit.schedule_now(id);
+                PlacedComponent::port(id, center, kind, level)
             }
             ComponentKind::SrLatch => {
                 let nets = [
@@ -2816,11 +2856,24 @@ impl eframe::App for SimLogixApp {
             if started {
                 self.record_edit();
             }
+            let mut changed = false;
             if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
                 if *placed.properties() != edited {
                     placed.set_properties(edited);
                     self.dirty = true;
+                    changed = true;
                 }
+            }
+            // Some properties are *inputs* — a switch's position, a port's
+            // resting level, a button's rest state — so editing one changes
+            // what the component drives. `set_properties` puts the value in
+            // the cell the engine reads, but only an evaluation makes the
+            // net notice. Scheduling unconditionally is right: a component
+            // whose properties don't reach the engine re-evaluates to the
+            // same thing and nothing propagates.
+            if changed {
+                self.circuit.schedule_now(id);
+                self.advance_circuit(SETTLE_TICKS);
             }
         }
 
@@ -2974,6 +3027,11 @@ impl eframe::App for SimLogixApp {
                     // group keeps its shape.
                     let mut group_drag: Option<(ComponentId, egui::Vec2)> = None;
                     let mut group_settled = false;
+                    // A switch that wants flipping. Applied after the loop
+                    // because its position is document data: the undo
+                    // snapshot has to be taken while it still holds the old
+                    // one, and `record_edit` needs all of `self`.
+                    let mut toggled_switch: Option<ComponentId> = None;
                     let chosen = self.selection.components.clone();
 
                     let mut pin_handles = Vec::new();
@@ -2987,6 +3045,9 @@ impl eframe::App for SimLogixApp {
                         }
                         grab_started |= frame.grab_started;
                         input_changed |= frame.input_changed;
+                        if frame.toggled {
+                            toggled_switch = Some(placed.id());
+                        }
                         if is_selected && frame.dragged_by != egui::Vec2::ZERO {
                             group_drag = Some((placed.id(), frame.dragged_by));
                         }
@@ -2995,6 +3056,24 @@ impl eframe::App for SimLogixApp {
                             self.pending_attach = Some(placed.id());
                         }
                         pin_handles.extend(frame.pins);
+                    }
+
+                    if let Some(id) = toggled_switch {
+                        self.record_edit();
+                        if let Some(placed) = self.placed.iter_mut().find(|p| p.id() == id) {
+                            let mut properties = placed.properties().clone();
+                            let now_on = !properties.pressed.unwrap_or(false);
+                            // Unset when it's back to the default, so a
+                            // project that never touched it keeps saying
+                            // nothing — the rule every property follows.
+                            properties.pressed = now_on.then_some(true);
+                            // `set_properties` pushes it into the cell the
+                            // engine reads, so there's one path for a flip
+                            // by hand and one by the properties panel.
+                            placed.set_properties(properties);
+                        }
+                        self.circuit.schedule_now(id);
+                        input_changed = true;
                     }
 
                     if let Some((mover, delta)) = group_drag {
@@ -3231,10 +3310,21 @@ impl eframe::App for SimLogixApp {
                         // that reports nothing is just a thicker wire.
                         let color = if self.show_signal_state {
                             match net {
-                                Some(net) => canvas::signal_color(
-                                    self.circuit.signal_at(net),
-                                    ui.visuals().dark_mode,
-                                ),
+                                Some(net) => {
+                                    let level = canvas::signal_color(
+                                        self.circuit.signal_at(net),
+                                        ui.visuals().dark_mode,
+                                    );
+                                    // Faded when nothing but a pass
+                                    // transistor is holding it up: the level
+                                    // is real, the noise margin is gone, and
+                                    // that is worth seeing before it bites.
+                                    if self.circuit.is_weakly_driven(net) {
+                                        level.gamma_multiply(canvas::WEAK_FADE)
+                                    } else {
+                                        level
+                                    }
+                                }
                                 None => ui.visuals().weak_text_color(),
                             }
                         } else {
@@ -4734,6 +4824,24 @@ mod tests {
 
         app.undo();
         assert_eq!(app.placed.len(), 1);
+    }
+
+    #[test]
+    fn a_switchs_position_is_saved_where_a_buttons_press_is_not() {
+        let mut app = SimLogixApp::default();
+        let switch = app.place(ComponentKind::Switch, egui::pos2(40.0, 40.0));
+        if let Some(placed) = app.placed.iter_mut().find(|p| p.id() == switch) {
+            let mut properties = placed.properties().clone();
+            properties.pressed = Some(true);
+            placed.set_properties(properties);
+        }
+
+        let project = app.to_project();
+        let reloaded = SimLogixApp::from_project(&project, 0);
+
+        // The line the document draws: what the user set is kept, what the
+        // simulation produced is not. A latched switch is the former.
+        assert_eq!(reloaded.placed[0].properties().pressed, Some(true));
     }
 
     #[test]
