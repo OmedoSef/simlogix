@@ -44,3 +44,23 @@ This is deliberate: circuits with feedback are exactly what SimLogix exists
 to handle, so a circuit that oscillates has to be reported, not hidden and
 not fatal. The underlying model is described in
 [the simulation engine](../architecture/simulation-engine.md).
+
+## Hiding the signal state
+
+`C`, or **Simulation → Show signal state**, stops colouring wires by what
+they carry and draws them as plain structure. Useful while laying out a
+dense schematic, where four signal colours changing under you is noise
+rather than information.
+
+What it hides is the **state**, not your own wire colours — and with the
+levels quiet, a coloured net is drawn *in* its colour rather than ringed by
+it. The casing exists to leave the middle for the level; once there is no
+level to show, the colour takes the middle and the wire reads at full
+width.
+
+Components still report themselves — a lit LED stays lit, a probe still
+reads out. Only the wires go plain, and the status bar says so, so grey
+wires never look like something broken.
+
+Unlike the theme or the language, this isn't remembered between runs. It's a
+way of working at a given moment, like pause.

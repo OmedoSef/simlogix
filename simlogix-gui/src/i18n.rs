@@ -11,8 +11,27 @@
 
 use crate::palette::ComponentKind;
 
+/// One block of the shortcuts window: a heading and its rows.
+///
+/// Kept here with the rest of the UI text rather than next to the window
+/// that draws it — one home for everything translated is worth more than a
+/// tidier `help.rs`, since a second home is how translations drift.
+pub struct HelpSection {
+    pub title: &'static str,
+    /// `(the keys or the gesture, what it does)`.
+    ///
+    /// The left column is translated too, which is easy to get wrong in the
+    /// other direction: modifiers keep their universal names (`Ctrl`,
+    /// `Shift`), but the keys that are physically labelled differently do
+    /// not — a French keyboard says `Suppr`, `Entrée`, `Échap`. Writing
+    /// `Delete` there would be a list of names that aren't on the keyboard
+    /// in front of you. Gestures ("Wheel", "Middle drag") are plain prose
+    /// and translate like any other.
+    pub rows: &'static [(&'static str, &'static str)],
+}
+
 /// Which language the UI is currently displayed in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Language {
     English,
     French,
@@ -61,14 +80,23 @@ pub struct Strings {
     pub menu_edit: &'static str,
     pub menu_edit_undo: &'static str,
     pub menu_edit_redo: &'static str,
+    pub menu_edit_copy: &'static str,
+    pub menu_edit_paste: &'static str,
     pub menu_simulation: &'static str,
     pub menu_simulation_run: &'static str,
     pub menu_simulation_pause: &'static str,
+    pub menu_simulation_signals: &'static str,
+    pub status_signals_hidden: &'static str,
     pub menu_settings: &'static str,
     pub menu_settings_theme: &'static str,
     pub menu_settings_language: &'static str,
+    pub settings_reset: &'static str,
+    pub settings_reset_hint: &'static str,
     pub menu_help: &'static str,
     pub menu_help_about: &'static str,
+    pub menu_help_shortcuts: &'static str,
+    pub shortcuts_title: &'static str,
+    pub help_sections: &'static [HelpSection],
 
     pub circuits_heading: &'static str,
     /// Hover text on the tree's root: what the project's library name is
@@ -118,6 +146,11 @@ pub struct Strings {
     pub palette_click_to_place: &'static str,
     pub tool_select: &'static str,
     pub tool_wire: &'static str,
+    pub tool_marquee: &'static str,
+    pub tool_pan: &'static str,
+    pub menu_settings_left_drag: &'static str,
+    pub settings_left_drag_select: &'static str,
+    pub settings_left_drag_pan: &'static str,
     pub category_sources: &'static str,
     pub category_outputs: &'static str,
     pub category_transistors: &'static str,
@@ -148,6 +181,8 @@ pub struct Strings {
 
     pub hint_rotate_delete_component: &'static str,
     pub hint_delete_wire: &'static str,
+    /// Contains a literal `{}` for how many things are selected.
+    pub hint_selection: &'static str,
     pub hint_wiring: &'static str,
 
     pub about_title: &'static str,
@@ -223,14 +258,74 @@ static ENGLISH: Strings = Strings {
     menu_edit: "Edit",
     menu_edit_undo: "Undo",
     menu_edit_redo: "Redo",
+    menu_edit_copy: "Copy",
+    menu_edit_paste: "Paste",
     menu_simulation: "Simulation",
     menu_simulation_run: "Run",
     menu_simulation_pause: "Pause",
+    menu_simulation_signals: "Show signal state",
+    status_signals_hidden: "Signal state hidden — C shows it again",
     menu_settings: "Settings",
     menu_settings_theme: "Theme",
     menu_settings_language: "Language",
+    settings_reset: "Reset to defaults",
+    settings_reset_hint: "Theme, language and left drag go back to their starting values.",
     menu_help: "?",
     menu_help_about: "About",
+    menu_help_shortcuts: "Shortcuts and gestures",
+    shortcuts_title: "Shortcuts and gestures",
+    help_sections: &[
+        HelpSection {
+            title: "Files",
+            rows: &[
+            ("Ctrl+N", "New project"),
+            ("Ctrl+O", "Open a project"),
+            ("Ctrl+S", "Save"),
+            ("Ctrl+Shift+S", "Save as"),
+            ],
+        },
+        HelpSection {
+            title: "Editing",
+            rows: &[
+            ("Ctrl+Z", "Undo"),
+            ("Ctrl+Shift+Z / Ctrl+Y", "Redo"),
+            ("Ctrl+C", "Copy the selection"),
+            ("Ctrl+V", "Paste"),
+            ("Delete", "Remove what is selected"),
+            ("R", "Rotate the selected components"),
+            ],
+        },
+        HelpSection {
+            title: "Canvas",
+            rows: &[
+            ("Wheel", "Zoom, while over the canvas"),
+            ("Middle drag", "Move the view"),
+            ("Left drag", "Selection rectangle, or the view — see Settings"),
+            ("Shift+click", "Add to or remove from the selection"),
+            ("Shift while placing", "Keep the component loaded for the next click"),
+            ("Escape / right-click", "Back out one step"),
+            ],
+        },
+        HelpSection {
+            title: "Wires",
+            rows: &[
+            ("Click a pin", "Start a wire"),
+            ("Click", "Add a corner to the wire being drawn"),
+            ("Enter", "Finish the wire, leaving the end loose"),
+            ("Double-click a wire", "Add a point to it"),
+            ("Right-click a point", "Remove that point"),
+            ("Right-click a segment", "Cut the wire there"),
+            ("Drag a loose end onto another", "Join the two wires"),
+            ],
+        },
+        HelpSection {
+            title: "Simulation",
+            rows: &[
+            ("Space", "Run or pause the simulation"),
+            ("C", "Show or hide the signal state on wires"),
+            ],
+        },
+    ],
 
     circuits_heading: "Circuits",
     project_library_hint: "The name other projects use to refer to this one's circuits. Double-click to change it.",
@@ -266,6 +361,11 @@ static ENGLISH: Strings = Strings {
         "Click the canvas to place a {} — hold Shift to place several",
     tool_select: "Select",
     tool_wire: "Draw wire",
+    tool_marquee: "Selection rectangle",
+    tool_pan: "Pan the view",
+    menu_settings_left_drag: "Left drag",
+    settings_left_drag_select: "Sweeps a selection",
+    settings_left_drag_pan: "Moves the view",
     category_sources: "Sources",
     category_outputs: "Outputs",
     category_transistors: "Transistors",
@@ -297,6 +397,7 @@ static ENGLISH: Strings = Strings {
     hint_rotate_delete_component:
         "R to rotate, Delete to remove the selected component, Esc to deselect",
     hint_delete_wire: "Delete removes the wire, double-click adds a point, right-click removes one",
+    hint_selection: "{} selected — drag to move, Delete to remove, Ctrl+C to copy",
     hint_wiring:
         "Click to add a point, click a pin or wire to finish, Enter to leave the end loose, Esc to cancel",
 
@@ -330,14 +431,74 @@ static FRENCH: Strings = Strings {
     menu_edit: "Édition",
     menu_edit_undo: "Annuler",
     menu_edit_redo: "Rétablir",
+    menu_edit_copy: "Copier",
+    menu_edit_paste: "Coller",
     menu_simulation: "Simulation",
     menu_simulation_run: "Démarrer",
     menu_simulation_pause: "Pause",
+    menu_simulation_signals: "Afficher l'état des signaux",
+    status_signals_hidden: "État des signaux masqué — C le réaffiche",
     menu_settings: "Paramètres",
     menu_settings_theme: "Thème",
     menu_settings_language: "Langue",
+    settings_reset: "Réinitialiser",
+    settings_reset_hint: "Le thème, la langue et le glisser gauche reviennent à leurs valeurs de départ.",
     menu_help: "?",
     menu_help_about: "À propos",
+    menu_help_shortcuts: "Raccourcis et gestes",
+    shortcuts_title: "Raccourcis et gestes",
+    help_sections: &[
+        HelpSection {
+            title: "Fichiers",
+            rows: &[
+            ("Ctrl+N", "Nouveau projet"),
+            ("Ctrl+O", "Ouvrir un projet"),
+            ("Ctrl+S", "Enregistrer"),
+            ("Ctrl+Shift+S", "Enregistrer sous"),
+            ],
+        },
+        HelpSection {
+            title: "Édition",
+            rows: &[
+            ("Ctrl+Z", "Annuler"),
+            ("Ctrl+Shift+Z / Ctrl+Y", "Rétablir"),
+            ("Ctrl+C", "Copier la sélection"),
+            ("Ctrl+V", "Coller"),
+            ("Suppr", "Supprimer la sélection"),
+            ("R", "Faire pivoter les composants sélectionnés"),
+            ],
+        },
+        HelpSection {
+            title: "Canevas",
+            rows: &[
+            ("Molette", "Zoomer, au-dessus du canevas"),
+            ("Glisser du milieu", "Déplacer la vue"),
+            ("Glisser gauche", "Rectangle de sélection, ou la vue — voir Réglages"),
+            ("Shift+clic", "Ajouter à la sélection ou en retirer"),
+            ("Shift en posant", "Garder le composant en main pour le clic suivant"),
+            ("Échap / clic droit", "Revenir d'un cran en arrière"),
+            ],
+        },
+        HelpSection {
+            title: "Fils",
+            rows: &[
+            ("Clic sur une broche", "Commencer un fil"),
+            ("Clic", "Ajouter un coin au fil en cours"),
+            ("Entrée", "Terminer le fil en laissant l'extrémité libre"),
+            ("Double-clic sur un fil", "Y ajouter un point"),
+            ("Clic droit sur un point", "Retirer ce point"),
+            ("Clic droit sur un segment", "Couper le fil à cet endroit"),
+            ("Glisser un bout libre sur un autre", "Raccorder les deux fils"),
+            ],
+        },
+        HelpSection {
+            title: "Simulation",
+            rows: &[
+            ("Espace", "Lancer ou mettre en pause la simulation"),
+            ("C", "Afficher ou masquer l'état des signaux sur les fils"),
+            ],
+        },
+    ],
 
     circuits_heading: "Circuits",
     project_library_hint: "Le nom que les autres projets utilisent pour désigner les circuits de celui-ci. Double-cliquez pour le changer.",
@@ -373,6 +534,11 @@ static FRENCH: Strings = Strings {
         "Cliquez sur le canevas pour placer : {} — maintenez Maj pour en poser plusieurs",
     tool_select: "Sélection",
     tool_wire: "Tracer un fil",
+    tool_marquee: "Rectangle de sélection",
+    tool_pan: "Déplacer la vue",
+    menu_settings_left_drag: "Glisser gauche",
+    settings_left_drag_select: "Trace une sélection",
+    settings_left_drag_pan: "Déplace la vue",
     category_sources: "Sources",
     category_outputs: "Sorties",
     category_transistors: "Transistors",
@@ -404,6 +570,7 @@ static FRENCH: Strings = Strings {
     hint_rotate_delete_component:
         "R pour tourner, Suppr pour supprimer le composant sélectionné, Échap pour désélectionner",
     hint_delete_wire: "Suppr supprime le fil, double-clic ajoute un point, clic droit en retire un",
+    hint_selection: "{} sélectionnés — glisser pour déplacer, Suppr pour retirer, Ctrl+C pour copier",
     hint_wiring:
         "Cliquez pour ajouter un point, une pin ou un fil pour finir, Entrée pour laisser le bout libre, Échap pour annuler",
 
@@ -437,14 +604,74 @@ static ITALIAN: Strings = Strings {
     menu_edit: "Modifica",
     menu_edit_undo: "Annulla",
     menu_edit_redo: "Ripeti",
+    menu_edit_copy: "Copia",
+    menu_edit_paste: "Incolla",
     menu_simulation: "Simulazione",
     menu_simulation_run: "Avvia",
     menu_simulation_pause: "Pausa",
+    menu_simulation_signals: "Mostra lo stato dei segnali",
+    status_signals_hidden: "Stato dei segnali nascosto — C lo rimostra",
     menu_settings: "Impostazioni",
     menu_settings_theme: "Tema",
     menu_settings_language: "Lingua",
+    settings_reset: "Ripristina i valori predefiniti",
+    settings_reset_hint: "Tema, lingua e trascinamento sinistro tornano ai valori iniziali.",
     menu_help: "?",
     menu_help_about: "Informazioni",
+    menu_help_shortcuts: "Scorciatoie e gesti",
+    shortcuts_title: "Scorciatoie e gesti",
+    help_sections: &[
+        HelpSection {
+            title: "File",
+            rows: &[
+            ("Ctrl+N", "Nuovo progetto"),
+            ("Ctrl+O", "Apri un progetto"),
+            ("Ctrl+S", "Salva"),
+            ("Ctrl+Shift+S", "Salva con nome"),
+            ],
+        },
+        HelpSection {
+            title: "Modifica",
+            rows: &[
+            ("Ctrl+Z", "Annulla"),
+            ("Ctrl+Shift+Z / Ctrl+Y", "Ripeti"),
+            ("Ctrl+C", "Copia la selezione"),
+            ("Ctrl+V", "Incolla"),
+            ("Canc", "Elimina la selezione"),
+            ("R", "Ruota i componenti selezionati"),
+            ],
+        },
+        HelpSection {
+            title: "Area di lavoro",
+            rows: &[
+            ("Rotellina", "Zoom, sopra l'area di lavoro"),
+            ("Trascinamento centrale", "Sposta la vista"),
+            ("Trascinamento sinistro", "Rettangolo di selezione, o la vista — vedi Impostazioni"),
+            ("Shift+clic", "Aggiungi alla selezione o togli"),
+            ("Shift mentre posizioni", "Tieni il componente per il clic successivo"),
+            ("Esc / clic destro", "Torna indietro di un passo"),
+            ],
+        },
+        HelpSection {
+            title: "Fili",
+            rows: &[
+            ("Clic su un pin", "Inizia un filo"),
+            ("Clic", "Aggiungi un angolo al filo in corso"),
+            ("Invio", "Termina il filo lasciando l'estremità libera"),
+            ("Doppio clic su un filo", "Aggiungi un punto"),
+            ("Clic destro su un punto", "Rimuovi quel punto"),
+            ("Clic destro su un segmento", "Taglia il filo lì"),
+            ("Trascina un'estremità libera su un'altra", "Unisci i due fili"),
+            ],
+        },
+        HelpSection {
+            title: "Simulazione",
+            rows: &[
+            ("Spazio", "Avvia o metti in pausa la simulazione"),
+            ("C", "Mostra o nascondi lo stato dei segnali sui fili"),
+            ],
+        },
+    ],
 
     circuits_heading: "Circuiti",
     project_library_hint: "Il nome che gli altri progetti usano per riferirsi ai circuiti di questo. Fai doppio clic per cambiarlo.",
@@ -480,6 +707,11 @@ static ITALIAN: Strings = Strings {
         "Clicca sulla tela per posizionare: {} — tieni premuto Maiusc per posarne più",
     tool_select: "Selezione",
     tool_wire: "Traccia un filo",
+    tool_marquee: "Rettangolo di selezione",
+    tool_pan: "Sposta la vista",
+    menu_settings_left_drag: "Trascinamento sinistro",
+    settings_left_drag_select: "Traccia una selezione",
+    settings_left_drag_pan: "Sposta la vista",
     category_sources: "Sorgenti",
     category_outputs: "Uscite",
     category_transistors: "Transistor",
@@ -512,6 +744,7 @@ static ITALIAN: Strings = Strings {
         "R per ruotare, Canc per eliminare il componente selezionato, Esc per deselezionare",
     hint_delete_wire:
         "Canc elimina il filo, doppio clic aggiunge un punto, clic destro ne rimuove uno",
+    hint_selection: "{} selezionati — trascina per spostare, Canc per rimuovere, Ctrl+C per copiare",
     hint_wiring:
         "Clicca per aggiungere un punto, un pin o un filo per finire, Invio per lasciare l'estremità libera, Esc per annullare",
 
@@ -534,3 +767,51 @@ static ITALIAN: Strings = Strings {
     error_save_failed: "Impossibile salvare il progetto: {}",
     error_open_failed: "Impossibile aprire il progetto: {}",
 };
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A row added to one language and forgotten in another is invisible
+    /// until someone switches language, so the tables are held to the same
+    /// *shape*.
+    ///
+    /// Deliberately not to the same text, not even in the key column: this
+    /// test first asserted that and failed on `Suppr` vs `Delete` — which
+    /// was the test being wrong, since that is exactly what a French
+    /// keyboard has printed on it.
+    #[test]
+    fn every_language_lists_the_same_shortcuts() {
+        for other in [&FRENCH, &ITALIAN] {
+            assert_eq!(
+                other.help_sections.len(),
+                ENGLISH.help_sections.len(),
+                "different number of sections"
+            );
+            for (reference, translated) in ENGLISH.help_sections.iter().zip(other.help_sections) {
+                assert_eq!(
+                    translated.rows.len(),
+                    reference.rows.len(),
+                    "section \"{}\" has a different number of rows",
+                    reference.title
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_shortcut_row_is_left_empty() {
+        for strings in [&ENGLISH, &FRENCH, &ITALIAN] {
+            for section in strings.help_sections {
+                assert!(!section.title.is_empty());
+                for (keys, what) in section.rows {
+                    assert!(!keys.is_empty() && !what.is_empty(), "in {}", section.title);
+                }
+            }
+        }
+    }
+}

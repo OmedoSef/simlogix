@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use egui::{Align2, Color32, FontId, Id, Painter, Pos2, Rect, Sense, Ui};
+use egui::{Align2, Color32, FontId, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
 use simlogix_core::{Circuit, ComponentId, NetId, Signal};
 
 use crate::canvas::{self, Rotation, BOX_SIZE};
@@ -40,6 +40,10 @@ pub struct FrameResult {
     /// rather than settled here: whether the simulation is even running is
     /// the app's decision, not an individual component's.
     pub input_changed: bool,
+    /// How far this component moved under the pointer this frame, zero when
+    /// it isn't being dragged. The caller uses it to carry the rest of a
+    /// multi-selection along by the same amount.
+    pub dragged_by: Vec2,
     pub pins: Vec<PinHandle>,
 }
 
@@ -190,6 +194,19 @@ impl PlacedComponent {
         }
     }
 
+    /// Shifts this component by `delta` — how the rest of a multi-selection
+    /// follows the one actually under the pointer.
+    pub fn move_by(&mut self, delta: Vec2) {
+        self.center += delta;
+    }
+
+    /// Puts this component back on the grid. Called when a drag ends rather
+    /// than every frame, for the same reason `interact_box` does it: snapping
+    /// mid-drag feels jerky.
+    pub fn snap(&mut self) {
+        self.center = canvas::snap_to_grid(self.center);
+    }
+
     /// Sets this component's rotation directly (used when loading a project).
     pub fn set_rotation(&mut self, new_rotation: Rotation) {
         self.rotation = new_rotation;
@@ -214,7 +231,7 @@ impl PlacedComponent {
         ui: &mut Ui,
         painter: &Painter,
         circuit: &mut Circuit,
-        selected: Option<ComponentId>,
+        is_selected: bool,
     ) -> FrameResult {
         let id = self.id();
         let kind = self.kind();
@@ -228,7 +245,7 @@ impl PlacedComponent {
             shape,
             ..
         } = self;
-        let is_selected = selected == Some(id);
+
         let rect_id = Id::new(("placed", id));
         let mut input_changed = false;
 
@@ -299,6 +316,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
             }
@@ -337,6 +355,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
             }
@@ -399,6 +418,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins,
                 }
             }
@@ -459,6 +479,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins,
                 }
             }
@@ -509,6 +530,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![gate, source, drain],
                 }
             }
@@ -536,6 +558,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
             }
@@ -582,6 +605,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
             }
@@ -619,6 +643,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![pin],
                 }
             }
@@ -669,6 +694,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![a, b, out],
                 }
             }
@@ -711,6 +737,7 @@ impl PlacedComponent {
                     grab_started: response.drag_started(),
                     settled: response.drag_stopped(),
                     input_changed,
+                    dragged_by: applied_drag(&response),
                     pins: vec![input, output],
                 }
             }
@@ -724,6 +751,20 @@ impl PlacedComponent {
 ///
 /// The interactive area is inset by [`PIN_HIT_MARGIN`] so it never overlaps
 /// a pin's own hit-rect — see that constant.
+/// How far `interact_box` actually moved a component this frame.
+///
+/// Zero on the frame a drag *starts*, because `interact_box` deliberately
+/// doesn't move then — reporting the delta anyway would shift the rest of a
+/// multi-selection by an amount the grabbed component never took, and the
+/// group would come apart by exactly that much.
+fn applied_drag(response: &egui::Response) -> Vec2 {
+    if response.dragged() && !response.drag_started() {
+        response.drag_delta()
+    } else {
+        Vec2::ZERO
+    }
+}
+
 fn interact_box(
     ui: &mut Ui,
     painter: &Painter,

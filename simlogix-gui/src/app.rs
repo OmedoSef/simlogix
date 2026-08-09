@@ -1,6 +1,7 @@
 //! The SimLogix application: state and the `eframe::App` loop.
 
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use simlogix_core::{
@@ -100,6 +101,112 @@ struct Wire {
     color: Option<[u8; 3]>,
 }
 
+/// What is currently selected, components and wires together.
+///
+/// These used to be two mutually exclusive `Option`s, with `Delete` checking
+/// the wire first so a stale wire selection couldn't shadow a component. A
+/// rubber band picks up whatever it lands on, so "which of the two is
+/// selected" stopped being a question worth asking.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Selection {
+    components: HashSet<ComponentId>,
+    wires: HashSet<u64>,
+}
+
+impl Selection {
+    fn is_empty(&self) -> bool {
+        self.components.is_empty() && self.wires.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.components.len() + self.wires.len()
+    }
+
+    fn clear(&mut self) {
+        self.components.clear();
+        self.wires.clear();
+    }
+
+    /// Replaces the whole selection with one component, or adds it to what's
+    /// already there when `add` — the Shift-click gesture.
+    fn pick_component(&mut self, id: ComponentId, add: bool) {
+        if add {
+            if !self.components.remove(&id) {
+                self.components.insert(id);
+            }
+        } else {
+            self.clear();
+            self.components.insert(id);
+        }
+    }
+
+    fn pick_wire(&mut self, id: u64, add: bool) {
+        if add {
+            if !self.wires.remove(&id) {
+                self.wires.insert(id);
+            }
+        } else {
+            self.clear();
+            self.wires.insert(id);
+        }
+    }
+
+    /// The single selected component, if that's all there is — what the
+    /// properties panel edits. Several selected means no one set of
+    /// properties to show.
+    fn lone_component(&self) -> Option<ComponentId> {
+        match (self.components.len(), self.wires.len()) {
+            (1, 0) => self.components.iter().copied().next(),
+            _ => None,
+        }
+    }
+
+    fn lone_wire(&self) -> Option<u64> {
+        match (self.components.len(), self.wires.len()) {
+            (0, 1) => self.wires.iter().copied().next(),
+            _ => None,
+        }
+    }
+}
+
+/// The preferences that outlive a session, written by `eframe`'s storage.
+///
+/// Deliberately only the things the user *chose*. The theme and the panel
+/// sizes are egui's own state and it persists them itself once the feature
+/// is on; the document, the camera and the selection are not preferences at
+/// all. Everything is optional so a settings file written by an older build
+/// still loads — the same rule the project format follows.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Settings {
+    /// `None` keeps following the OS locale, which is the default until the
+    /// user picks one — so "I never chose" and "I chose English" stay
+    /// different answers.
+    #[serde(default)]
+    language: Option<Language>,
+    #[serde(default)]
+    left_drag_pans: bool,
+}
+
+/// The key `eframe` files our settings under in its storage.
+const SETTINGS_KEY: &str = "simlogix_settings";
+
+/// A copied fragment of a circuit, in the same form a project file uses.
+///
+/// It goes on the **system** clipboard as JSON rather than into a field of
+/// our own, and not for the obvious reason. egui only reports a paste when
+/// the system clipboard actually holds text — so an in-app clipboard would
+/// have meant `Ctrl+V` silently doing nothing whenever the real clipboard
+/// was empty, which is most of the time. Putting the fragment there makes
+/// the event fire, and pasting between two windows works as a consequence.
+#[derive(Serialize, Deserialize, Clone)]
+struct Fragment {
+    /// Marks the text as ours. Pasting anything else — a URL, some prose —
+    /// parses to nothing and does nothing, rather than being half-read.
+    simlogix_fragment: u32,
+    components: Vec<SavedComponent>,
+    wires: Vec<SavedWire>,
+}
+
 /// A wire being placed click by click: the pin and net it started from, the
 /// screen position of that pin, and every waypoint confirmed so far
 /// (grid-snapped, in order) — the segment from the last of these to the
@@ -153,11 +260,35 @@ enum PendingAction {
 /// cancels a wire in progress.
 pub struct SimLogixApp {
     show_about: bool,
+    /// Whether wires are coloured by the signal they carry. Off draws them
+    /// as plain structure — see the Simulation menu. Session state, like
+    /// `running`: not a stored preference.
+    show_signal_state: bool,
+    /// Whether the shortcuts-and-gestures window is up. View state, like
+    /// `show_about`: never saved, never an undo step.
+    show_shortcuts: bool,
     circuit: Circuit,
     placed: Vec<PlacedComponent>,
     /// What the next canvas click does — placing, wiring, or selecting.
     tool: Tool,
-    selected: Option<ComponentId>,
+    selection: Selection,
+    /// The last fragment copied *here*, so the Edit menu has something to
+    /// paste — see [`SimLogixApp::copy_to_clipboard`].
+    clipboard: Option<String>,
+    /// Whether the language came from the Settings menu rather than the OS
+    /// locale. Only a chosen one is worth storing — see `Settings`.
+    language_chosen: bool,
+    /// Whether dragging the canvas with the left button moves the view
+    /// instead of sweeping a selection.
+    ///
+    /// A preference because the right answer depends on what you spend the
+    /// day doing. Whichever it takes away stays one toolbar click away —
+    /// `Tool::Marquee` and `Tool::Pan` each force one of the two — so this
+    /// only decides which is free.
+    left_drag_pans: bool,
+    /// Where a rubber-band drag began, in scene coordinates, while one is in
+    /// progress. View state: never saved, never part of an undo step.
+    band_origin: Option<egui::Pos2>,
     /// A wire currently being placed click by click, if one is in progress.
     wiring_from: Option<WireInProgress>,
     /// Every wire the user has drawn (or that was reconstructed on project
@@ -166,8 +297,6 @@ pub struct SimLogixApp {
     /// Monotonically increasing, so each `Wire` gets a stable id independent
     /// of its position in `wires` (which changes on deletion).
     next_wire_id: u64,
-    /// The currently selected wire's id, if any.
-    selected_wire: Option<u64>,
     /// Where this circuit was last saved to or loaded from. `None` means it
     /// has never been written anywhere, so "Save" has to ask for a path the
     /// same as "Save As".
@@ -249,14 +378,19 @@ impl Default for SimLogixApp {
     fn default() -> Self {
         Self {
             show_about: false,
+            show_signal_state: true,
+            show_shortcuts: false,
             circuit: Circuit::default(),
             placed: Vec::new(),
             tool: Tool::default(),
-            selected: None,
+            selection: Selection::default(),
+            clipboard: None,
+            language_chosen: false,
+            left_drag_pans: false,
+            band_origin: None,
             wiring_from: None,
             wires: Vec::new(),
             next_wire_id: 0,
-            selected_wire: None,
             current_path: None,
             dirty: false,
             pending_action: None,
@@ -816,6 +950,198 @@ impl SimLogixApp {
         }
     }
 
+    /// Puts every preference in this menu back where it started.
+    ///
+    /// Only what the Settings menu itself offers. The panel sizes and the
+    /// window geometry are persisted too, by egui rather than by us, and a
+    /// button labelled "settings" rearranging the window would be a
+    /// surprise — that belongs to a separate "reset the layout" if it's ever
+    /// wanted.
+    fn reset_settings(&mut self, ctx: &egui::Context) {
+        self.left_drag_pans = false;
+        // Back to *following* the OS locale, not to a fixed language:
+        // clearing the choice is the reset, and re-detecting is what that
+        // means the next time the machine's locale differs.
+        self.language_chosen = false;
+        self.language = Language::detect_from_os();
+        ctx.set_theme(egui::ThemePreference::System);
+    }
+
+    /// Whether a left drag on empty canvas moves the view right now — the
+    /// hand tool always, and the arrow when the preference says so.
+    fn pans_on_left_drag(&self) -> bool {
+        self.tool == Tool::Pan || (self.tool == Tool::Select && self.left_drag_pans)
+    }
+
+    /// The mirror: whether it sweeps a selection. The two are deliberately
+    /// separate rather than one negated, because most tools do neither — a
+    /// left drag while wiring is not a band and not a pan.
+    fn bands_on_left_drag(&self) -> bool {
+        self.tool == Tool::Marquee || (self.tool == Tool::Select && !self.left_drag_pans)
+    }
+
+    /// Copies the selection.
+    ///
+    /// A wire comes along only when **both** its ends land inside the copied
+    /// set — a wire whose far end is a pin you didn't copy has nowhere to
+    /// attach, and guessing a loose end for it would paste something you
+    /// never selected. So the rule is the predictable one: select the
+    /// components and the wires between them.
+    /// Puts the selection on the system clipboard, and keeps a copy.
+    ///
+    /// The copy is what the Edit menu's Paste uses: a menu item has no way
+    /// to read the system clipboard, since egui only ever surfaces it
+    /// through the `Ctrl+V` event. So the two paths differ on purpose —
+    /// `Ctrl+V` pastes whatever is really on the clipboard, including from
+    /// another window, and the menu pastes what this window last copied.
+    fn copy_to_clipboard(&mut self, ctx: &egui::Context) {
+        if let Some(fragment) = self.copied_fragment() {
+            ctx.copy_text(fragment.clone());
+            self.clipboard = Some(fragment);
+        }
+    }
+
+    /// Returns the fragment as JSON for the system clipboard, or `None` when
+    /// there's nothing to copy. Kept separate from the clipboard call itself
+    /// so the interesting half can be tested without a UI.
+    fn copied_fragment(&self) -> Option<String> {
+        if self.selection.is_empty() {
+            return None;
+        }
+
+        let ids: Vec<ComponentId> = self
+            .placed
+            .iter()
+            .filter(|placed| self.selection.components.contains(&placed.id()))
+            .map(|placed| placed.id())
+            .collect();
+        let index_of: HashMap<ComponentId, usize> =
+            ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+        let components: Vec<SavedComponent> = self
+            .placed
+            .iter()
+            .filter(|placed| index_of.contains_key(&placed.id()))
+            .map(|placed| {
+                let center = placed.center();
+                SavedComponent {
+                    kind: placed.kind(),
+                    x: center.x,
+                    y: center.y,
+                    rotation: placed.rotation(),
+                    properties: placed.properties().clone(),
+                }
+            })
+            .collect();
+
+        // Creation order is kept, so a junction still refers to a wire
+        // earlier in the list — which is what lets paste resolve them in one
+        // forward pass, exactly as loading a project does.
+        let kept: Vec<&Wire> = self
+            .wires
+            .iter()
+            .filter(|wire| self.selection.wires.contains(&wire.id))
+            .collect();
+        let wire_index: HashMap<u64, usize> = kept
+            .iter()
+            .enumerate()
+            .map(|(i, wire)| (wire.id, i))
+            .collect();
+        let save = |endpoint: WireEndpoint| match endpoint {
+            WireEndpoint::Pin(component, pin) => index_of
+                .get(&component)
+                .map(|&i| SavedEndpoint::Pin(i, pin)),
+            WireEndpoint::Junction { wire, waypoint } => wire_index
+                .get(&wire)
+                .map(|&i| SavedEndpoint::Junction { wire: i, waypoint }),
+            WireEndpoint::Free(at) => Some(SavedEndpoint::Free(at.x, at.y)),
+        };
+        let wires: Vec<SavedWire> = kept
+            .iter()
+            .filter_map(|wire| {
+                Some(SavedWire {
+                    from: save(wire.from)?,
+                    to: save(wire.to)?,
+                    waypoints: wire.waypoints.iter().map(|p| (p.x, p.y)).collect(),
+                    color: wire.color,
+                })
+            })
+            .collect();
+
+        serde_json::to_string(&Fragment {
+            simlogix_fragment: crate::project::CURRENT_VERSION,
+            components,
+            wires,
+        })
+        .ok()
+    }
+
+    /// Pastes the clipboard one grid step down and right, and leaves the
+    /// pasted copy selected — so a second paste, or a drag, acts on it
+    /// rather than on what you copied from.
+    fn paste_fragment(&mut self, text: &str) {
+        let Ok(clip) = serde_json::from_str::<Fragment>(text) else {
+            // Not ours: something else is on the clipboard, and pasting it
+            // here means nothing.
+            return;
+        };
+        if clip.components.is_empty() && clip.wires.is_empty() {
+            return;
+        }
+        self.record_edit();
+
+        let offset = egui::vec2(canvas::GRID_SPACING, canvas::GRID_SPACING);
+        let ids: Vec<ComponentId> = clip
+            .components
+            .iter()
+            .map(|saved| {
+                let id = self.place(saved.kind, egui::pos2(saved.x, saved.y) + offset);
+                if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
+                    placed.set_rotation(saved.rotation);
+                    placed.set_properties(saved.properties.clone());
+                }
+                id
+            })
+            .collect();
+
+        let mut wire_ids: Vec<u64> = Vec::with_capacity(clip.wires.len());
+        for saved in &clip.wires {
+            let load = |endpoint: &SavedEndpoint| match *endpoint {
+                SavedEndpoint::Pin(component, pin) => {
+                    ids.get(component).map(|&id| WireEndpoint::Pin(id, pin))
+                }
+                SavedEndpoint::Junction { wire, waypoint } => {
+                    wire_ids.get(wire).map(|&host| WireEndpoint::Junction {
+                        wire: host,
+                        waypoint,
+                    })
+                }
+                SavedEndpoint::Free(x, y) => Some(WireEndpoint::Free(egui::pos2(x, y) + offset)),
+            };
+            let (Some(from), Some(to)) = (load(&saved.from), load(&saved.to)) else {
+                continue;
+            };
+            let waypoints = saved
+                .waypoints
+                .iter()
+                .map(|&(x, y)| egui::pos2(x, y) + offset)
+                .collect();
+            let id = self.add_wire(from, to, waypoints);
+            if let Some(wire) = self.wires.iter_mut().find(|wire| wire.id == id) {
+                wire.color = saved.color;
+            }
+            wire_ids.push(id);
+        }
+
+        self.selection.clear();
+        self.selection.components.extend(ids);
+        self.selection.wires.extend(wire_ids);
+
+        self.rebuild_nets();
+        self.net_fingerprint = self.connectivity_fingerprint();
+        self.advance_circuit(SETTLE_TICKS);
+        self.dirty = true;
+    }
+
     /// Turns a placed component into its sibling kind — an NMOS into a
     /// PMOS, a transceiver's enable from `EN` to `OE`.
     ///
@@ -849,7 +1175,10 @@ impl SimLogixApp {
         // Ids are handed out afresh by the rebuild, so the selection is
         // recovered by position — otherwise changing the type would
         // deselect the thing you're editing.
-        self.selected = self.placed.get(index).map(|placed| placed.id());
+        self.selection.clear();
+        if let Some(placed) = self.placed.get(index) {
+            self.selection.components.insert(placed.id());
+        }
         self.dirty = true;
     }
 
@@ -904,9 +1233,9 @@ impl SimLogixApp {
             Ok(project) => {
                 // Loading a project resets everything else, but the
                 // language is a UI preference, not part of the circuit.
-                let language = self.language;
+                let preferences = (self.language, self.language_chosen, self.left_drag_pans);
                 *self = Self::from_project(&project, 0);
-                self.language = language;
+                (self.language, self.language_chosen, self.left_drag_pans) = preferences;
                 self.name_library_after(&path);
                 self.current_path = Some(path);
             }
@@ -1562,7 +1891,10 @@ impl SimLogixApp {
     /// switching circuits inherits the same trade, so a clock in a circuit
     /// you leave stops, and restarts from phase zero when you come back.
     fn reopen(&mut self, project: &SavedProject, open: usize) {
-        let language = self.language;
+        // Preferences aren't document state: a rebuild must not quietly put
+        // them back to their defaults.
+        let preferences = (self.language, self.language_chosen, self.left_drag_pans);
+        let clipboard = self.clipboard.take();
         let dirty = self.dirty;
         let current_path = self.current_path.take();
         let undo_stack = std::mem::take(&mut self.undo_stack);
@@ -1576,7 +1908,8 @@ impl SimLogixApp {
         self.scene_rect = scene_rect;
         self.dirty = dirty;
 
-        self.language = language;
+        (self.language, self.language_chosen, self.left_drag_pans) = preferences;
+        self.clipboard = clipboard;
         self.current_path = current_path;
         self.undo_stack = undo_stack;
         self.redo_stack = redo_stack;
@@ -1864,9 +2197,12 @@ impl SimLogixApp {
     fn run_action(&mut self, action: PendingAction, ctx: &egui::Context) {
         match action {
             PendingAction::New => {
-                let language = self.language;
+                let (language, chosen, left_drag_pans) =
+                    (self.language, self.language_chosen, self.left_drag_pans);
                 *self = Self::default();
                 self.language = language;
+                self.language_chosen = chosen;
+                self.left_drag_pans = left_drag_pans;
             }
             PendingAction::Open => self.open_project(),
             PendingAction::Quit => {
@@ -1892,7 +2228,39 @@ impl SimLogixApp {
     }
 }
 
+impl SimLogixApp {
+    /// Builds the app, applying whatever preferences were stored last time.
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut app = Self::default();
+        let Some(storage) = cc.storage else {
+            return app;
+        };
+        let settings: Settings = eframe::get_value(storage, SETTINGS_KEY).unwrap_or_default();
+
+        // A stored language wins over the OS locale; no stored language
+        // means the user never chose, so keep following the system.
+        if let Some(language) = settings.language {
+            app.language = language;
+        }
+        app.left_drag_pans = settings.left_drag_pans;
+        app
+    }
+}
+
 impl eframe::App for SimLogixApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(
+            storage,
+            SETTINGS_KEY,
+            &Settings {
+                // Recorded only once it has been picked from the menu, so a
+                // machine whose locale changes still follows it.
+                language: self.language_chosen.then_some(self.language),
+                left_drag_pans: self.left_drag_pans,
+            },
+        );
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Advance the circuit by real elapsed time every frame, not just
         // after an explicit interaction -- this is what lets a placed Clock
@@ -1953,6 +2321,45 @@ impl eframe::App for SimLogixApp {
             self.save_project();
         }
 
+        if !ui.ctx().text_edit_focused()
+            && ui.ctx().input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::NONE,
+                    egui::Key::C,
+                ))
+            })
+        {
+            self.show_signal_state = !self.show_signal_state;
+        }
+
+        // Copy and paste act on the canvas selection, so they're guarded the
+        // same way as everything else here: Ctrl+C in a name field has to
+        // stay Ctrl+C in a name field.
+        //
+        // Read as *events*, not as a `Ctrl+C` shortcut: egui turns those two
+        // chords into `Event::Copy`/`Event::Paste` and never emits the key
+        // press, so matching on the chord silently never fires. It also means
+        // this follows whatever the platform's copy chord actually is.
+        if !ui.ctx().text_edit_focused() {
+            let mut copy = false;
+            let mut pasted = None;
+            ui.ctx().input(|input| {
+                for event in &input.events {
+                    match event {
+                        egui::Event::Copy => copy = true,
+                        egui::Event::Paste(text) => pasted = Some(text.clone()),
+                        _ => {}
+                    }
+                }
+            });
+            if copy {
+                self.copy_to_clipboard(ui.ctx());
+            }
+            if let Some(text) = pasted {
+                self.paste_fragment(&text);
+            }
+        }
+
         // The canvas keeps off the keyboard entirely while text is being
         // typed anywhere — the circuit tree's rename field, a component's
         // name in the properties panel, or anything added later. Asking egui
@@ -1981,6 +2388,11 @@ impl eframe::App for SimLogixApp {
             egui::Key::Z,
         );
         let redo_alt_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
+        // Shown in the menu only. These chords never arrive as key presses —
+        // egui turns them into `Event::Copy`/`Event::Paste` — so they are
+        // labels here rather than something to consume.
+        let copy_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C);
+        let paste_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::V);
         // Redo is tested first: Ctrl+Shift+Z would otherwise also match the
         // plain Ctrl+Z pattern and undo instead.
         if ui.ctx().input_mut(|i| {
@@ -2062,6 +2474,32 @@ impl eframe::App for SimLogixApp {
                         self.toggle_running();
                         ui.close();
                     }
+                    ui.separator();
+                    // In this menu rather than in Settings: what the wires
+                    // show *is* the simulation's output, and this is
+                    // something you flip while working — which is why it has
+                    // a key of its own — not something you set once like a
+                    // theme. It isn't remembered between runs, for the same
+                    // reason pause isn't.
+                    let mut show_state = self.show_signal_state;
+                    // A `Checkbox` carries no shortcut column, so the key
+                    // goes in the label — the tick is worth more here than
+                    // the alignment would be.
+                    let signals_label = format!(
+                        "{}  ({})",
+                        strings.menu_simulation_signals,
+                        ui.ctx().format_shortcut(&egui::KeyboardShortcut::new(
+                            egui::Modifiers::NONE,
+                            egui::Key::C,
+                        ))
+                    );
+                    if ui
+                        .add(egui::Checkbox::new(&mut show_state, signals_label))
+                        .changed()
+                    {
+                        self.show_signal_state = show_state;
+                        ui.close();
+                    }
                 });
                 ui.menu_button(strings.menu_edit, |ui| {
                     let shortcut =
@@ -2091,8 +2529,47 @@ impl eframe::App for SimLogixApp {
                         self.redo();
                         ui.close();
                     }
+                    ui.separator();
+                    if ui
+                        .add_enabled(
+                            !self.selection.is_empty(),
+                            egui::Button::new(strings.menu_edit_copy)
+                                .shortcut_text(shortcut(ui, &copy_shortcut)),
+                        )
+                        .clicked()
+                    {
+                        self.copy_to_clipboard(ui.ctx());
+                        ui.close();
+                    }
+                    // Pastes what *this* window last copied, because that's
+                    // all a menu item can reach: egui only ever hands over
+                    // the system clipboard through the `Ctrl+V` event, so
+                    // there is no way to read it on demand from here.
+                    if ui
+                        .add_enabled(
+                            self.clipboard.is_some(),
+                            egui::Button::new(strings.menu_edit_paste)
+                                .shortcut_text(shortcut(ui, &paste_shortcut)),
+                        )
+                        .clicked()
+                    {
+                        if let Some(fragment) = self.clipboard.clone() {
+                            self.paste_fragment(&fragment);
+                        }
+                        ui.close();
+                    }
                 });
                 ui.menu_button(strings.menu_settings, |ui| {
+                    ui.label(strings.menu_settings_left_drag);
+                    for (pans, label) in [
+                        (false, strings.settings_left_drag_select),
+                        (true, strings.settings_left_drag_pan),
+                    ] {
+                        if ui.radio(self.left_drag_pans == pans, label).clicked() {
+                            self.left_drag_pans = pans;
+                        }
+                    }
+                    ui.separator();
                     ui.label(strings.menu_settings_theme);
                     // egui already defaults to ThemePreference::System (follows
                     // the OS) and tracks the current choice itself -- read it,
@@ -2107,13 +2584,36 @@ impl eframe::App for SimLogixApp {
                     ui.label(strings.menu_settings_language);
                     ui.horizontal(|ui| {
                         for language in [Language::English, Language::French, Language::Italian] {
-                            ui.selectable_value(&mut self.language, language, language.label());
+                            if ui
+                                .selectable_value(&mut self.language, language, language.label())
+                                .clicked()
+                            {
+                                // From here on it's a choice, not a guess at
+                                // the OS locale, so it's worth remembering.
+                                self.language_chosen = true;
+                            }
                         }
                     });
+
+                    ui.separator();
+                    if ui
+                        .button(strings.settings_reset)
+                        .on_hover_text(strings.settings_reset_hint)
+                        .clicked()
+                    {
+                        self.reset_settings(ui.ctx());
+                        ui.close();
+                    }
                 });
                 ui.menu_button(strings.menu_help, |ui| {
+                    if ui.button(strings.menu_help_shortcuts).clicked() {
+                        self.show_shortcuts = true;
+                        ui.close();
+                    }
+                    ui.separator();
                     if ui.button(strings.menu_help_about).clicked() {
                         self.show_about = true;
+                        ui.close();
                     }
                 });
             });
@@ -2122,6 +2622,8 @@ impl eframe::App for SimLogixApp {
         egui::Panel::bottom("status_bar").show(ui, |ui| {
             let hint = if let Some(net) = self.unstable_net {
                 Some(strings.status_unstable.replace("{}", &net.0.to_string()))
+            } else if !self.show_signal_state {
+                Some(strings.status_signals_hidden.to_string())
             } else if !self.running {
                 Some(strings.status_paused.to_string())
             } else if self.wiring_from.is_some() {
@@ -2129,10 +2631,16 @@ impl eframe::App for SimLogixApp {
             } else if let Tool::Place(kind) = self.tool {
                 let label = strings.component_kind_label(kind);
                 Some(strings.palette_click_to_place.replace("{}", label))
-            } else if self.selected_wire.is_some() {
+            } else if self.selection.lone_wire().is_some() {
                 Some(strings.hint_delete_wire.to_string())
-            } else if self.selected.is_some() {
+            } else if self.selection.lone_component().is_some() {
                 Some(strings.hint_rotate_delete_component.to_string())
+            } else if !self.selection.is_empty() {
+                Some(
+                    strings
+                        .hint_selection
+                        .replace("{}", &self.selection.len().to_string()),
+                )
             } else {
                 None
             };
@@ -2255,8 +2763,11 @@ impl eframe::App for SimLogixApp {
                     .id_salt("properties_scroll")
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
+                        // Only a lone selection has properties to show: with
+                        // several picked there is no one set to edit.
                         let selected_wire = self
-                            .selected_wire
+                            .selection
+                            .lone_wire()
                             .and_then(|id| self.wires.iter().find(|wire| wire.id == id));
                         if let Some(wire) = selected_wire {
                             if let Some(color) = properties::show_wire(ui, strings, wire.color) {
@@ -2266,7 +2777,8 @@ impl eframe::App for SimLogixApp {
                         }
 
                         let selected = self
-                            .selected
+                            .selection
+                            .lone_component()
                             .and_then(|id| self.placed.iter().find(|placed| placed.id() == id));
                         match selected {
                             Some(placed) => {
@@ -2348,10 +2860,17 @@ impl eframe::App for SimLogixApp {
             // the rest of `self`; `Scene` mutates it in place as the user
             // pans and zooms.
             let mut scene_rect = self.scene_rect;
-            let scene_response = egui::Scene::new().zoom_range(MIN_ZOOM..=MAX_ZOOM).show(
-                ui,
-                &mut scene_rect,
-                |ui| {
+            // The primary drag belongs to the rubber band unless the hand
+            // tool is out; the middle button always pans, so there's a way to
+            // move the view whatever the tool — and no preference to set.
+            let mut pan_buttons = egui::containers::DragPanButtons::MIDDLE;
+            if self.pans_on_left_drag() {
+                pan_buttons |= egui::containers::DragPanButtons::PRIMARY;
+            }
+            let scene_response = egui::Scene::new()
+                .zoom_range(MIN_ZOOM..=MAX_ZOOM)
+                .drag_pan_buttons(pan_buttons)
+                .show(ui, &mut scene_rect, |ui| {
                     // Inside the scene everything is in scene coordinates: the
                     // visible area is the clip rect, and raw pointer positions (which
                     // egui reports globally) have to be mapped in.
@@ -2372,6 +2891,39 @@ impl eframe::App for SimLogixApp {
                         .map(|pos| to_scene * pos)
                         .filter(|pos| canvas_rect.contains(*pos));
                     zoom_pivot = pointer_scene;
+
+                    // The band rides the scene's *own* background response
+                    // rather than a widget of its own. A full-canvas
+                    // `ui.interact` here covered that background, which is
+                    // what placement and panning both go through — so it
+                    // silently broke both. The origin is set after the scene
+                    // closes (see below); this only paints it and notices the
+                    // release, which is what has to happen in here, where
+                    // every wire's resolved route is known.
+                    let mut band_finished = None;
+                    let released = ui.ctx().input(|i| i.pointer.primary_released());
+                    if self.bands_on_left_drag() {
+                        if let (Some(origin), Some(now)) = (self.band_origin, pointer_scene) {
+                            let rect = egui::Rect::from_two_pos(origin, now);
+                            let accent = canvas::accent_color(ui.visuals().dark_mode);
+                            painter.rect_filled(rect, 0.0, accent.gamma_multiply(0.12));
+                            painter.rect_stroke(
+                                rect,
+                                0.0,
+                                egui::Stroke::new(1.0, accent),
+                                egui::StrokeKind::Inside,
+                            );
+                            if released {
+                                band_finished = Some(rect);
+                            }
+                        }
+                        if released {
+                            self.band_origin = None;
+                        }
+                    } else {
+                        self.band_origin = None;
+                    }
+
                     // Faint enough to stay a background on either theme: the
                     // weak text colour already tracks the background, and the
                     // alpha keeps the dots from competing with the circuit.
@@ -2381,19 +2933,26 @@ impl eframe::App for SimLogixApp {
                         ui.visuals().weak_text_color().gamma_multiply(0.55),
                     );
 
-                    if let Some(selected) = self.selected {
-                        if !ui.ctx().text_edit_focused()
-                            && ui.ctx().input(|i| i.key_pressed(egui::Key::R))
-                            && self.placed.iter().any(|p| p.id() == selected)
-                        {
-                            self.record_edit();
-                            if let Some(placed) =
-                                self.placed.iter_mut().find(|p| p.id() == selected)
-                            {
+                    // Rotation applies to everything selected. Each turns on
+                    // its own centre rather than the group's: a component's
+                    // pins have to land on the grid, and turning the group as
+                    // one body would put them between dots.
+                    if !self.selection.components.is_empty()
+                        && !ui.ctx().text_edit_focused()
+                        && ui.ctx().input(|i| i.key_pressed(egui::Key::R))
+                    {
+                        self.record_edit();
+                        let chosen = self.selection.components.clone();
+                        for placed in &mut self.placed {
+                            if chosen.contains(&placed.id()) {
                                 placed.rotate();
                             }
                         }
                     }
+
+                    // Shift turns a click into "add to what's already there",
+                    // the gesture every list and canvas uses.
+                    let extend_selection = ui.ctx().input(|i| i.modifiers.shift);
 
                     // Set last frame, so the pin positions below are the ones
                     // this component actually came to rest on.
@@ -2409,30 +2968,76 @@ impl eframe::App for SimLogixApp {
                     // `self.placed` is being iterated mutably.
                     let mut grab_started = false;
                     let mut input_changed = false;
+                    // Which selected component the pointer is actually
+                    // dragging, and by how much: the rest of the selection is
+                    // carried by the same amount once the loop is done, so the
+                    // group keeps its shape.
+                    let mut group_drag: Option<(ComponentId, egui::Vec2)> = None;
+                    let mut group_settled = false;
+                    let chosen = self.selection.components.clone();
 
                     let mut pin_handles = Vec::new();
                     for placed in &mut self.placed {
-                        let frame = placed.draw_and_interact(
-                            ui,
-                            &painter,
-                            &mut self.circuit,
-                            self.selected,
-                        );
+                        let is_selected = self.selection.components.contains(&placed.id());
+                        let frame =
+                            placed.draw_and_interact(ui, &painter, &mut self.circuit, is_selected);
                         if let Some(id) = frame.clicked {
-                            // A component and a wire are never selected at once:
-                            // Delete checks the wire first, so leaving a stale wire
-                            // selected would delete that instead of the component
-                            // just clicked.
-                            self.selected = Some(id);
-                            self.selected_wire = None;
+                            self.selection.pick_component(id, extend_selection);
                             click_consumed = true;
                         }
                         grab_started |= frame.grab_started;
                         input_changed |= frame.input_changed;
+                        if is_selected && frame.dragged_by != egui::Vec2::ZERO {
+                            group_drag = Some((placed.id(), frame.dragged_by));
+                        }
                         if frame.settled {
+                            group_settled |= is_selected;
                             self.pending_attach = Some(placed.id());
                         }
                         pin_handles.extend(frame.pins);
+                    }
+
+                    if let Some((mover, delta)) = group_drag {
+                        // Everything but the one under the pointer, which
+                        // `interact_box` has already moved.
+                        for placed in &mut self.placed {
+                            if placed.id() != mover && chosen.contains(&placed.id()) {
+                                placed.move_by(delta);
+                            }
+                        }
+                        // A selected wire's own points come along; the ends
+                        // that sit on pins follow those pins anyway.
+                        for wire in &mut self.wires {
+                            if self.selection.wires.contains(&wire.id) {
+                                for point in &mut wire.waypoints {
+                                    *point += delta;
+                                }
+                                for end in [&mut wire.from, &mut wire.to] {
+                                    if let WireEndpoint::Free(at) = end {
+                                        *at += delta;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if group_settled {
+                        for placed in &mut self.placed {
+                            if chosen.contains(&placed.id()) {
+                                placed.snap();
+                            }
+                        }
+                        for wire in &mut self.wires {
+                            if self.selection.wires.contains(&wire.id) {
+                                for point in &mut wire.waypoints {
+                                    *point = canvas::snap_to_grid(*point);
+                                }
+                                for end in [&mut wire.from, &mut wire.to] {
+                                    if let WireEndpoint::Free(at) = end {
+                                        *at = canvas::snap_to_grid(*at);
+                                    }
+                                }
+                            }
+                        }
                     }
                     if grab_started {
                         self.record_edit();
@@ -2617,12 +3222,26 @@ impl eframe::App for SimLogixApp {
                             continue; // Stale, already skipped above.
                         };
 
-                        let color = match net {
-                            Some(net) => canvas::signal_color(
-                                self.circuit.signal_at(net),
-                                ui.visuals().dark_mode,
-                            ),
-                            None => ui.visuals().weak_text_color(),
+                        let user_color =
+                            wire_color.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b));
+                        // With the signal state showing, the core is the
+                        // level and a colour of your own rings it. With the
+                        // state hidden the core has nothing left to say, so
+                        // the colour takes it over — a casing around a core
+                        // that reports nothing is just a thicker wire.
+                        let color = if self.show_signal_state {
+                            match net {
+                                Some(net) => canvas::signal_color(
+                                    self.circuit.signal_at(net),
+                                    ui.visuals().dark_mode,
+                                ),
+                                None => ui.visuals().weak_text_color(),
+                            }
+                        } else {
+                            user_color.unwrap_or_else(|| match net {
+                                Some(_) => ui.visuals().strong_text_color(),
+                                None => ui.visuals().weak_text_color(),
+                            })
                         };
                         let mut path = vec![from_pos];
                         path.extend(waypoints.iter().copied());
@@ -2646,7 +3265,7 @@ impl eframe::App for SimLogixApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
 
-                        let is_selected_wire = self.selected_wire == Some(wire_id);
+                        let is_selected_wire = self.selection.wires.contains(&wire_id);
                         let stroke = if is_selected_wire {
                             egui::Stroke::new(3.0, canvas::accent_color(ui.visuals().dark_mode))
                         } else if is_hovered {
@@ -2659,15 +3278,17 @@ impl eframe::App for SimLogixApp {
                         // the signal colour keeps the full width of the core,
                         // so the thing that changes during simulation stays
                         // the thing the eye reads first.
-                        if let Some([r, g, b]) = wire_color {
-                            canvas::draw_path(
-                                &painter,
-                                &path,
-                                egui::Stroke::new(
-                                    stroke.width + 4.0,
-                                    egui::Color32::from_rgb(r, g, b),
-                                ),
-                            );
+                        // Only while the core carries the level. Once the
+                        // colour *is* the core, a casing would be the same
+                        // colour twice.
+                        if self.show_signal_state {
+                            if let Some(casing) = user_color {
+                                canvas::draw_path(
+                                    &painter,
+                                    &path,
+                                    egui::Stroke::new(stroke.width + 4.0, casing),
+                                );
+                            }
                         }
                         canvas::draw_path(&painter, &path, stroke);
                         for &point in &waypoints {
@@ -2699,8 +3320,7 @@ impl eframe::App for SimLogixApp {
                                             ));
                                         }
                                     } else {
-                                        self.selected_wire = Some(wire_id);
-                                        self.selected = None;
+                                        self.selection.pick_wire(wire_id, extend_selection);
                                     }
                                     click_consumed = true;
                                 }
@@ -2726,8 +3346,7 @@ impl eframe::App for SimLogixApp {
                                             .waypoints
                                             .insert(segment, canvas::snap_to_grid(dbl_pos));
                                         self.dedupe_waypoints(wire_id);
-                                        self.selected_wire = Some(wire_id);
-                                        self.selected = None;
+                                        self.selection.pick_wire(wire_id, extend_selection);
                                         click_consumed = true;
                                     }
                                 }
@@ -2963,8 +3582,7 @@ impl eframe::App for SimLogixApp {
                                 // nothing to merge.
                             }
                             if response.clicked() {
-                                self.selected_wire = Some(wire_id);
-                                self.selected = None;
+                                self.selection.pick_wire(wire_id, extend_selection);
                                 click_consumed = true;
                             }
                         }
@@ -3029,8 +3647,7 @@ impl eframe::App for SimLogixApp {
                                     }
                                 }
                                 if response.clicked() {
-                                    self.selected_wire = Some(wire_id);
-                                    self.selected = None;
+                                    self.selection.pick_wire(wire_id, extend_selection);
                                     click_consumed = true;
                                 }
                                 if response.secondary_clicked() {
@@ -3106,39 +3723,70 @@ impl eframe::App for SimLogixApp {
                         self.split_wire(wire_id, segment, &path);
                     }
 
+                    // Applied here rather than where the band ends, because
+                    // this is where every wire's resolved route is known.
+                    if let Some(rect) = band_finished {
+                        if !extend_selection {
+                            self.selection.clear();
+                        }
+                        for placed in &self.placed {
+                            let box_rect = egui::Rect::from_center_size(placed.center(), BOX_SIZE);
+                            if rect.intersects(box_rect) {
+                                self.selection.components.insert(placed.id());
+                            }
+                        }
+                        for wire in &self.wires {
+                            let ends_inside = wire_ends
+                                .get(&wire.id)
+                                .is_some_and(|(a, b)| rect.contains(*a) || rect.contains(*b));
+                            let points_inside = resolved_waypoints
+                                .get(&wire.id)
+                                .is_some_and(|points| points.iter().any(|p| rect.contains(*p)));
+                            if ends_inside || points_inside {
+                                self.selection.wires.insert(wire.id);
+                            }
+                        }
+                        // A band that swept over nothing is still a deliberate
+                        // gesture, not a click on empty canvas.
+                        click_consumed = true;
+                    }
+
                     let delete_pressed = !ui.ctx().text_edit_focused()
                         && ui.ctx().input(|i| {
                             i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
                         });
-                    if delete_pressed {
-                        if let Some(wire_id) = self.selected_wire {
-                            self.record_edit();
-                            self.remove_wires(vec![wire_id], &resolved_waypoints);
-                            self.selected_wire = None;
-                        } else if let Some(selected) = self.selected {
-                            self.record_edit();
-                            self.circuit.remove_component(selected);
-                            self.placed.retain(|placed| placed.id() != selected);
+                    if delete_pressed && !self.selection.is_empty() {
+                        self.record_edit();
 
-                            // The wires that touched it are kept, cut loose
-                            // where the pin used to be: redrawing them is far
-                            // more work than deleting one you didn't want, and
-                            // a loose end can be dragged straight onto the
-                            // replacement component.
-                            for wire in &mut self.wires {
-                                for (end, at) in [
-                                    (&mut wire.from, wire_ends.get(&wire.id).map(|e| e.0)),
-                                    (&mut wire.to, wire_ends.get(&wire.id).map(|e| e.1)),
-                                ] {
-                                    if matches!(*end, WireEndpoint::Pin(c, _) if c == selected) {
-                                        if let Some(at) = at {
-                                            *end = WireEndpoint::Free(at);
-                                        }
+                        let doomed_wires: Vec<u64> = self.selection.wires.iter().copied().collect();
+                        if !doomed_wires.is_empty() {
+                            self.remove_wires(doomed_wires, &resolved_waypoints);
+                        }
+
+                        let doomed = self.selection.components.clone();
+                        for &component in &doomed {
+                            self.circuit.remove_component(component);
+                        }
+                        self.placed.retain(|placed| !doomed.contains(&placed.id()));
+
+                        // The wires that touched it are kept, cut loose
+                        // where the pin used to be: redrawing them is far
+                        // more work than deleting one you didn't want, and
+                        // a loose end can be dragged straight onto the
+                        // replacement component.
+                        for wire in &mut self.wires {
+                            for (end, at) in [
+                                (&mut wire.from, wire_ends.get(&wire.id).map(|e| e.0)),
+                                (&mut wire.to, wire_ends.get(&wire.id).map(|e| e.1)),
+                            ] {
+                                if matches!(*end, WireEndpoint::Pin(c, _) if doomed.contains(&c)) {
+                                    if let Some(at) = at {
+                                        *end = WireEndpoint::Free(at);
                                     }
                                 }
                             }
-                            self.selected = None;
                         }
+                        self.selection.clear();
                     }
 
                     // A wire being placed click by click: clicking a pin starts one
@@ -3315,8 +3963,7 @@ impl eframe::App for SimLogixApp {
                         if self.wiring_from.is_some() {
                             self.wiring_from = None;
                         } else {
-                            self.selected = None;
-                            self.selected_wire = None;
+                            self.selection.clear();
                             self.tool = Tool::Select;
                         }
                     }
@@ -3331,8 +3978,7 @@ impl eframe::App for SimLogixApp {
                         && self.wiring_from.is_none()
                         && self.tool == Tool::Select
                     {
-                        self.selected = None;
-                        self.selected_wire = None;
+                        self.selection.clear();
                     }
 
                     if let Some(in_progress) = &self.wiring_from {
@@ -3373,10 +4019,20 @@ impl eframe::App for SimLogixApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                         }
                     }
-                },
-            );
+                });
 
             self.scene_rect = scene_rect;
+
+            // A drag that the scene's background saw is a drag on empty
+            // canvas -- everything else would have claimed it first. Only the
+            // primary button: the middle one is still panning.
+            if self.bands_on_left_drag()
+                && scene_response
+                    .response
+                    .drag_started_by(egui::PointerButton::Primary)
+            {
+                self.band_origin = scene_response.response.interact_pointer_pos();
+            }
 
             // Placing goes through the scene's own background response, so a
             // click that landed on a component or a wire never also drops a
@@ -3450,6 +4106,8 @@ impl eframe::App for SimLogixApp {
                 });
             });
         }
+
+        crate::help::show(ui.ctx(), strings, &mut self.show_shortcuts);
 
         egui::Window::new(strings.about_title)
             .open(&mut self.show_about)
@@ -3956,7 +4614,7 @@ mod tests {
         assert_eq!(app.placed[0].center(), egui::pos2(60.0, 60.0));
         assert_eq!(app.wires.len(), 1);
         assert_eq!(app.wires[0].waypoints, vec![egui::pos2(140.0, 60.0)]);
-        assert_eq!(app.selected, Some(app.placed[0].id()));
+        assert_eq!(app.selection.lone_component(), Some(app.placed[0].id()));
     }
 
     #[test]
@@ -3970,6 +4628,112 @@ mod tests {
 
         app.undo();
         assert_eq!(app.placed[0].kind(), ComponentKind::BusTransceiver);
+    }
+
+    #[test]
+    fn copying_a_selection_and_pasting_it_duplicates_the_wire_between_them() {
+        let mut app = SimLogixApp::default();
+        let button = app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
+        let led = app.place(ComponentKind::Led, egui::pos2(160.0, 40.0));
+        let wire = app.add_wire(
+            WireEndpoint::Pin(button, 0),
+            WireEndpoint::Pin(led, 0),
+            vec![egui::pos2(100.0, 40.0)],
+        );
+        app.selection.components.insert(button);
+        app.selection.components.insert(led);
+        app.selection.wires.insert(wire);
+
+        let fragment = app.copied_fragment().expect("something is selected");
+        app.paste_fragment(&fragment);
+
+        assert_eq!(app.placed.len(), 4);
+        assert_eq!(app.wires.len(), 2);
+        // The copy lands offset, and is what's selected afterwards, so a
+        // drag or a second paste acts on it rather than the original.
+        assert_eq!(app.selection.components.len(), 2);
+        assert_eq!(app.selection.wires.len(), 1);
+        assert!(app
+            .placed
+            .iter()
+            .any(|placed| placed.center() == egui::pos2(60.0, 60.0)));
+    }
+
+    #[test]
+    fn a_wire_with_one_end_outside_the_selection_is_not_copied() {
+        let mut app = SimLogixApp::default();
+        let button = app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
+        let led = app.place(ComponentKind::Led, egui::pos2(160.0, 40.0));
+        let wire = app.add_wire(
+            WireEndpoint::Pin(button, 0),
+            WireEndpoint::Pin(led, 0),
+            Vec::new(),
+        );
+        // Only one end's component is taken along, so the wire has nowhere
+        // to attach — copying it anyway would paste an end you never chose.
+        app.selection.components.insert(button);
+        app.selection.wires.insert(wire);
+
+        let fragment = app.copied_fragment().expect("something is selected");
+        app.paste_fragment(&fragment);
+
+        assert_eq!(app.placed.len(), 3, "the button alone should be pasted");
+        assert_eq!(app.wires.len(), 1, "the original wire, and no copy");
+    }
+
+    #[test]
+    fn pasting_something_that_is_not_a_fragment_does_nothing() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::Led, egui::pos2(40.0, 40.0));
+
+        // The system clipboard usually holds someone else's text. Pasting it
+        // into the canvas has to be a no-op, not a half-read.
+        app.paste_fragment("https://example.com");
+        app.paste_fragment("{\"components\": []}");
+        app.paste_fragment("");
+
+        assert_eq!(app.placed.len(), 1);
+    }
+
+    #[test]
+    fn settings_written_by_an_older_build_still_load() {
+        // Every field optional or defaulted, so a settings file missing the
+        // ones a later build added still reads — the same rule the project
+        // format follows, and the reason a preference can be added without
+        // resetting everyone's others.
+        let settings: Settings = ron::from_str("()").expect("parses");
+        assert_eq!(settings.language, None);
+        assert!(!settings.left_drag_pans);
+    }
+
+    #[test]
+    fn a_chosen_language_survives_a_round_trip() {
+        let stored = Settings {
+            language: Some(Language::French),
+            left_drag_pans: true,
+        };
+
+        let text = ron::to_string(&stored).expect("serializes");
+        let read: Settings = ron::from_str(&text).expect("parses");
+
+        // `None` has to stay distinguishable from a chosen language: it is
+        // what keeps following the OS locale.
+        assert_eq!(read.language, Some(Language::French));
+        assert!(read.left_drag_pans);
+    }
+
+    #[test]
+    fn pasting_is_undoable() {
+        let mut app = SimLogixApp::default();
+        let id = app.place(ComponentKind::Led, egui::pos2(40.0, 40.0));
+        app.selection.components.insert(id);
+        let fragment = app.copied_fragment().expect("something is selected");
+
+        app.paste_fragment(&fragment);
+        assert_eq!(app.placed.len(), 2);
+
+        app.undo();
+        assert_eq!(app.placed.len(), 1);
     }
 
     #[test]

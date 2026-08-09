@@ -3,6 +3,7 @@
 mod app;
 mod canvas;
 mod circuit_tree;
+mod help;
 mod i18n;
 mod palette;
 mod placed_component;
@@ -15,6 +16,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "SimLogix",
         eframe::NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(app::SimLogixApp::default()))),
+        Box::new(|cc| Ok(Box::new(app::SimLogixApp::new(cc)))),
     )
 }

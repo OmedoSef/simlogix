@@ -12,13 +12,18 @@ without this page.
 
 The toolbar holds the interaction modes — what a click on the canvas *does*:
 
-| Tool | What clicking the canvas does |
+| Tool | What a click or drag on the canvas does |
 |---|---|
 | **Select** | Select and move things. The resting state. |
+| **Selection rectangle** | Always sweeps a selection, whatever the setting below says. |
 | **Wire** | Start drawing a wire, anywhere — see [Wiring](wiring.md). |
+| **Pan** | Always moves the view. |
 
-Choosing a component in the palette is a third, temporary mode: the next
+Choosing a component in the palette is a fifth, temporary mode: the next
 click drops that component, then you fall back to Select.
+
+The last two exist so both canvas gestures stay reachable however you set
+**Settings → Left drag** — one of them is always a click away.
 
 Pins always start a wire when clicked, whichever tool is active — you never
 have to switch to the wire tool just to connect two components.
@@ -45,13 +50,29 @@ the panel edge can be dragged to resize it.
 - **Select** — click a component or a wire. A selected item gets a blue
   outline; hovering shows a fainter one, so you can tell what a click is
   about to take.
+- **Select several** — drag a rectangle across the canvas, or `Shift`-click
+  to add and remove one at a time. Components and wires can be selected
+  together.
 - **Deselect** — click empty canvas, or press Escape, or right-click.
-- **Move** — drag a component. It follows the pointer freely and snaps to
-  the grid when you let go, which keeps dragging smooth instead of jerky.
-- **Rotate** — `R` with a component selected. The symbol turns a quarter
-  turn clockwise, pins included.
-- **Delete** — `Delete` or `Backspace`. A selected wire takes priority over
-  a selected component, and the two are never selected at once.
+- **Move** — drag any selected item and the whole selection comes with it,
+  keeping its shape. It follows the pointer freely and snaps to the grid
+  when you let go, which keeps dragging smooth instead of jerky.
+- **Rotate** — `R` turns every selected component a quarter turn clockwise,
+  pins included. Each turns on **its own** centre rather than the group's:
+  pins have to land on the grid, and turning the group as one body would put
+  them between dots.
+- **Delete** — `Delete` or `Backspace` removes everything selected.
+- **Copy and paste** — `Ctrl+C` and `Ctrl+V`, or the Edit menu. The copy
+  lands one grid step down and right, and *it* becomes the selection, so a
+  second paste or a drag acts on the copy rather than the original.
+
+A wire is copied only when **both** its ends are inside the selection. One
+whose far end is a pin you didn't take has nowhere to attach, so it is left
+out rather than pasted dangling — select the components *and* the wires
+between them.
+
+The copy travels on the system clipboard, so it can be pasted into another
+SimLogix window. Pasting anything else — a URL, some text — does nothing.
 
 Deleting a component **keeps the wires that were attached to it**, cut loose
 where the pin used to be. Swapping one gate for another is then a matter of
@@ -61,28 +82,50 @@ dragging those loose ends onto the replacement rather than redrawing them.
 
 - **Zoom** — mouse wheel, anchored on the pointer: whatever is under the
   cursor stays under it.
-- **Pan** — drag the empty background. Dragging a component or a wire point
-  moves that instead, since those claim the gesture first.
+- **Pan** — drag with the **middle** button, anywhere, whatever the tool.
+  Or use the Pan tool, or set the left drag to pan (below).
+
+Dragging a component or a wire point moves that instead, since those claim
+the gesture first — the background is only reached where there is nothing.
 
 The view is not part of the circuit: it isn't saved in the project file, and
 undo won't move you somewhere else.
 
 ## Settings
 
+**Settings → Left drag** decides what dragging the empty canvas with the
+left button does: sweep a **selection rectangle** (the default) or **move
+the view**. Pick whichever you do more often; the other stays one toolbar
+click away.
+
 **Settings → Theme** follows the operating system by default, and can be
 forced to light or dark. **Settings → Language** offers English, French and
 Italian, defaulting to the system locale. Neither affects what a project
 file means — the language you edit in is invisible to the saved circuit.
 
+These are remembered between runs, along with the window size and the panel
+widths. **Settings → Reset to defaults** puts back the three above — it
+leaves the window and panels alone, since a button labelled "settings"
+rearranging your layout would be a surprise.
+
+Resetting the language doesn't force English: it clears your *choice*, so
+the editor goes back to following the system locale and keeps following it.
+
 ## Keyboard reference
+
+The same list, plus the mouse gestures, is in the app under **? → Shortcuts
+and gestures**.
 
 | Key | Action |
 |---|---|
-| `R` | Rotate the selected component |
+| `R` | Rotate the selected components |
 | `Delete` / `Backspace` | Delete the selection |
+| `Ctrl+C` / `Ctrl+V` | Copy / paste the selection |
+| `Shift`+click | Add to or remove from the selection |
 | `Escape` | Cancel the wire being drawn, otherwise clear the selection |
 | `Enter` | Finish the wire being drawn, leaving its end loose |
 | `Space` | Run / pause the simulation |
+| `C` | Show / hide the signal state on wires |
 | `Shift` (held) | Keep placing the same component |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo |

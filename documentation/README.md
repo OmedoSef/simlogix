@@ -6,7 +6,7 @@ This folder holds the documentation for users and contributors. It's a work in p
   - [Installation](getting-started/installation.md) — prerequisites and opening the devcontainer.
   - [Building and running](getting-started/building-and-running.md) — building, testing, and running each crate.
 - **Using SimLogix**
-  - [Editor basics](using/editor-basics.md) — tools, placing components, selecting, moving, the view, settings, keyboard reference.
+  - [Editor basics](using/editor-basics.md) — tools, placing components, selecting several, moving, copy/paste, the view, settings, keyboard reference.
   - [Wiring](using/wiring.md) — drawing and reshaping wires, loose ends, junctions.
   - [Running a circuit](using/simulation.md) — run/pause, signal colours, unstable circuits.
   - [Projects, saving and undo](using/files-and-history.md) — undo/redo, save/load, the file format.

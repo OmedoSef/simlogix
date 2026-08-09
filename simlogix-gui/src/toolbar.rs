@@ -24,6 +24,18 @@ pub enum Tool {
     /// Click anywhere to start a wire, not just on a pin. Its ends can be
     /// left loose and connected later by dragging them onto something.
     Wire,
+    /// Drag to sweep a selection rectangle, whatever the left-drag setting
+    /// says. Its counterpart `Pan` does the same for the view: between them,
+    /// both gestures stay reachable however the setting is set — the setting
+    /// only picks which one `Select` gives you without a trip to the bar.
+    Marquee,
+    /// Drag the canvas to move the view.
+    ///
+    /// Exists so `Select` can have the primary drag for its rubber band —
+    /// the arrow-and-hand pair every editor has. The middle button still
+    /// pans whatever the tool is, so this is a convenience rather than the
+    /// only way.
+    Pan,
 }
 
 /// Side of the square icon buttons.
@@ -35,7 +47,9 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
     ui.horizontal(|ui| {
         for (tool, label) in [
             (Tool::Select, strings.tool_select),
+            (Tool::Marquee, strings.tool_marquee),
             (Tool::Wire, strings.tool_wire),
+            (Tool::Pan, strings.tool_pan),
         ] {
             if tool_button(ui, tool, label, active == tool) {
                 clicked = Some(tool);
@@ -73,6 +87,8 @@ fn tool_button(ui: &mut Ui, tool: Tool, label: &str, is_active: bool) -> bool {
 
         let icon = rect.shrink(5.0);
         match tool {
+            Tool::Pan => symbol::draw_pan_tool(ui.painter(), icon, visuals.fg_stroke.color),
+            Tool::Marquee => symbol::draw_marquee_tool(ui.painter(), icon, visuals.fg_stroke.color),
             Tool::Wire => symbol::draw_wire_tool(ui.painter(), icon, visuals.fg_stroke.color),
             _ => symbol::draw_select_tool(ui.painter(), icon, visuals.fg_stroke.color),
         }

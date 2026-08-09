@@ -320,6 +320,57 @@ fn draw_sr_latch(
     }
 }
 
+/// The marquee tool's icon: a dashed rectangle, the mark every editor uses
+/// for a selection sweep.
+pub fn draw_marquee_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.4, color);
+    let box_rect = rect.shrink(rect.width() * 0.12);
+    let dash = rect.width() * 0.16;
+
+    for (from, to) in [
+        (box_rect.left_top(), box_rect.right_top()),
+        (box_rect.right_top(), box_rect.right_bottom()),
+        (box_rect.right_bottom(), box_rect.left_bottom()),
+        (box_rect.left_bottom(), box_rect.left_top()),
+    ] {
+        let span = to - from;
+        let length = span.length();
+        let step = span / length;
+        let mut travelled = 0.0;
+        while travelled < length {
+            let end = (travelled + dash).min(length);
+            painter.line_segment([from + step * travelled, from + step * end], stroke);
+            travelled = end + dash;
+        }
+    }
+}
+
+/// The pan tool's icon: arrows out of a centre, the universal "move the
+/// view" mark. A hand would be the other convention; four arrows read at
+/// 18 px, a hand doesn't.
+pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.34;
+    let head = reach * 0.35;
+
+    for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+        let tip = pos2(c.x + reach * dx, c.y + reach * dy);
+        painter.line_segment([c, tip], stroke);
+        // The two barbs are the arrow direction turned a quarter each way.
+        for side in [-1.0, 1.0] {
+            let back = pos2(tip.x - head * dx, tip.y - head * dy);
+            painter.line_segment(
+                [
+                    tip,
+                    pos2(back.x - head * dy * side, back.y + head * dx * side),
+                ],
+                stroke,
+            );
+        }
+    }
+}
+
 /// The wire tool's palette icon: a routed run with its corner points, the
 /// same shape the tool actually draws. Not tied to a `ComponentKind` —
 /// a wire isn't a component.
