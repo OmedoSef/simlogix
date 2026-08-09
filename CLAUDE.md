@@ -46,7 +46,8 @@ _(these are the decisions and their rationale; see Progress for what is actually
 - Real-time simulation wired into the UI loop.
 - Save/load a circuit (serde).
 
-**Out of scope for v1 (future roadmap, not to be built now):**
+**Out of scope for v1** — kept as the reasoning of the time; the live list of
+what's next is [ROADMAP.md](ROADMAP.md), and it is the one to update:
 - A full custom appearance *editor* (user-drawn symbols) — v1 ships hand-coded vector symbols per component kind instead (see the "Component appearance" convention below), not a UI for drawing your own. This is Romain's pain point #2; a real editor is addressed after the core is solid.
 - Multi-bit buses, memory (RAM/ROM), VHDL/FPGA export, collaboration.
 
@@ -73,6 +74,7 @@ _(these are the decisions and their rationale; see Progress for what is actually
   - **The notice is embedded as well as checked in**, via `include_str!`. The obligation is attribution, and attribution has to reach whoever ends up with a copy — a file beside a binary can be separated from it, text compiled into one cannot. Rendered by `ScrollArea::show_rows`, since handing 700 KiB to egui as a single label would lay out every line on every frame.
   - **Texts are deduplicated by content**: 2.4 MB of licence files become 708 KiB. Apache-2.0 is byte-identical wherever it appears; MIT differs by its copyright line and so genuinely repeats — that line *is* the attribution, and collapsing it would defeat the point.
   - A dependency declaring no licence is written as `NOT DECLARED` rather than guessed at, and **a test fails on it**. Today none do, and nothing in the tree is copyleft — everything is MIT, Apache-2.0, BSD, ISC, Zlib, Unicode-3.0 or a public-domain dedication.
+- **[ROADMAP.md](ROADMAP.md) holds what isn't built yet**, in roughly the order it's worth building, with the reason for each. Kept apart from this file on purpose: `CLAUDE.md` is the record of decisions *taken* and grows by appending, so a list of intentions buried in it would go stale unnoticed. When something ships it leaves the roadmap and its reasoning is written here — the two never describe the same thing.
 - **Conventional Commits** (`feat:`, `fix:`, `docs:`, etc., scope = name of the crate/area touched). Enforced locally by a `commit-msg` hook versioned in `.githooks/`, wired up automatically in the devcontainer via `postCreateCommand`. Details: [documentation/contributing/commit-conventions.md](documentation/contributing/commit-conventions.md).
 - **User/contributor documentation**: [documentation/](documentation/README.md) folder, in English, split into subfolders (`getting-started/`, `architecture/`, `contributing/`) to avoid overloading the README. Grows along with features. CLAUDE.md remains the internal decision log ("why" + progress); documentation/ is the "what/how" for an external reader.
 

@@ -80,5 +80,6 @@ warn on first run.
 
 - Using the editor, architecture, and contributor conventions: the
   [documentation/](documentation/README.md) folder.
+- What isn't built yet, and in roughly what order: [ROADMAP.md](ROADMAP.md).
 - Project context, decisions and progress (internal notes):
   [CLAUDE.md](CLAUDE.md).

@@ -23,4 +23,7 @@ This folder holds the documentation for users and contributors. It's a work in p
   - [CI and releases](contributing/releasing.md) — what runs when, cutting a release, and how each installer is built.
   - [Project scope](contributing/project-scope.md) — what's in and out of scope for v1.
 
+[ROADMAP.md](../ROADMAP.md) at the repo root lists what isn't built yet and
+in roughly what order — this folder documents what exists.
+
 For the project's internal decision log, rationale, and progress tracking, see [CLAUDE.md](../CLAUDE.md) at the repo root (kept for project continuity across sessions/machines, not aimed at outside readers).
