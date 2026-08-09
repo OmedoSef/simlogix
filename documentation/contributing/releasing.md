@@ -30,18 +30,34 @@ mark people learn to ignore. On a schedule it arrives as information.
 ## Cutting a release
 
 ```bash
-# 1. Set the version. It lives once, in the workspace manifest.
-#    Both crates read it from there.
-$EDITOR Cargo.toml            # [workspace.package] version = "0.2.0"
-
-# 2. Regenerate the third-party notices if any dependency moved.
-cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-party.json
-
-# 3. Commit, tag, push.
-git commit -am "chore: release 0.2.0"
-git tag v0.2.0
-git push && git push --tags
+scripts/release.sh 0.2.0
 ```
+
+Run it inside the devcontainer — the checks need cargo, and so does the
+commit hook. It sets the version, refreshes the lockfile, runs everything CI
+will run, shows you what it is about to do, asks, and then commits, tags and
+pushes.
+
+| Option | What it does |
+|---|---|
+| `--dry-run` | Says what would happen and changes nothing. |
+| `--no-push` | Commits and tags locally; prints the push command. |
+| `--no-verify` | Skips the checks. They are the point, so this is for a re-run after they have already passed. |
+
+**The version lives once**, as `version` under `[workspace.package]` in the
+root `Cargo.toml`. Both crates inherit it with `version.workspace = true`,
+cargo turns it into `CARGO_PKG_VERSION`, and that is what the About window
+shows — so setting it there is what changes the number a user sees.
+
+The script refuses rather than surprises: it will not run off `main`, with a
+dirty tree, onto a tag that already exists locally or on the remote, or with
+a version that is not semantic. It also compares `THIRD-PARTY.md` against a
+freshly generated one and stops if a dependency moved without the notices
+being regenerated — shipping stale attribution is shipping the wrong
+attribution.
+
+Everything before the confirmation is undone if a check fails, so a failed
+run leaves the tree exactly as it found it.
 
 The tag is the decision; the workflow only carries it out. Nothing in
 `.github/` has to be edited to cut a release.
