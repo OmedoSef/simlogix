@@ -23,7 +23,8 @@ away is not.
 Every dependency, its version and the terms it is offered under are listed in
 [THIRD-PARTY.md](../THIRD-PARTY.md), together with the licence text each one
 ships. The same list is in the application, under **? → Licences**, on the
-*Third-party* tab.
+*Third-party* tab — as a searchable table, with the licence texts behind
+collapsible headers.
 
 It is in **both** places on purpose. The obligation these licences carry is
 attribution, and attribution has to reach whoever ends up with a copy: a file
@@ -40,8 +41,13 @@ notices along, which is what the file and the window do.
 upgrading a dependency:
 
 ```bash
-cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md
+cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-party.json
 ```
+
+Two outputs, one pass. The Markdown is for the repository — readable on a
+forge, greppable, diffable. The JSON is for the application, which draws a
+real table rather than putting a marked-up file on screen as text. Both are
+written from the same value by the same call, so they cannot drift apart.
 
 The tool reads `cargo metadata`, walks the **normal** dependency graph out
 from this workspace's crates, and collects each crate's licence files from the

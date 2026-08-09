@@ -11,8 +11,16 @@
 //! Run it after changing a dependency:
 //!
 //! ```text
-//! cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md
+//! cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-party.json
 //! ```
+//!
+//! # Two outputs, one pass
+//!
+//! The Markdown is for the repository — readable on a forge, greppable,
+//! diffable. The JSON is for the application, which renders a real table
+//! rather than showing a marked-up file as text. Both are written from the
+//! same in-memory value by the same call, so there is no way for them to come
+//! to disagree.
 //!
 //! # What it collects
 //!
@@ -41,10 +49,11 @@ struct Crate {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("usage: write-licenses <output path>");
+    let mut args = std::env::args().skip(1);
+    let (Some(markdown_path), Some(json_path)) = (args.next(), args.next()) else {
+        eprintln!("usage: write-licenses <markdown path> <json path>");
         std::process::exit(2);
-    });
+    };
 
     let crates = match collect() {
         Ok(crates) => crates,
@@ -54,15 +63,21 @@ fn main() {
         }
     };
 
-    let notice = render(&crates);
-    if let Err(error) = std::fs::write(&path, &notice) {
-        eprintln!("could not write {path}: {error}");
-        std::process::exit(1);
+    let notice = Notice::gather(&crates);
+    for (path, body) in [
+        (&markdown_path, notice.to_markdown()),
+        (&json_path, notice.to_json()),
+    ] {
+        if let Err(error) = std::fs::write(path, &body) {
+            eprintln!("could not write {path}: {error}");
+            std::process::exit(1);
+        }
+        println!("wrote {path} — {} KiB", body.len() / 1024);
     }
     println!(
-        "wrote {path} — {} dependencies, {} KiB",
-        crates.len(),
-        notice.len() / 1024
+        "{} dependencies, {} distinct licence texts",
+        notice.crates.len(),
+        notice.groups.len()
     );
 }
 
@@ -182,87 +197,130 @@ fn licence_files(root: &Path) -> Vec<(String, String)> {
     found
 }
 
-fn render(crates: &[Crate]) -> String {
-    let mut out = String::new();
-    out.push_str(
-        "# Third-party licences\n\n\
-         SimLogix itself is offered under the MIT licence — see [LICENSE](LICENSE).\n\n\
-         This file lists everything it is built on, and the terms each of those \
-         is offered under. It is **generated**; run\n\n\
-         ```bash\n\
-         cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md\n\
-         ```\n\n\
-         after changing a dependency rather than editing it by hand.\n\n\
-         Only shipped dependencies are listed: dev-dependencies build the \
-         tests and build-dependencies run at build time, and neither reaches \
-         a released binary.\n\n",
-    );
+/// Everything the notice says, before it is written out in either form.
+///
+/// Built once and rendered twice, which is what keeps the file the repository
+/// shows and the table the application draws from ever disagreeing.
+#[derive(serde::Serialize)]
+struct Notice {
+    crates: Vec<Listed>,
+    /// Distinct licence texts, each with the crates that ship it.
+    groups: Vec<Group>,
+    /// Crates that declare terms in their manifest but ship no copy of them.
+    undocumented: Vec<String>,
+}
 
-    out.push_str(&format!("## Dependencies ({})\n\n", crates.len()));
-    out.push_str("| Crate | Version | Licence |\n|---|---|---|\n");
-    for entry in crates {
-        let name = match &entry.repository {
-            Some(url) => format!("[{}]({url})", entry.name),
-            None => entry.name.clone(),
-        };
-        out.push_str(&format!(
-            "| {name} | {} | {} |\n",
-            entry.version, entry.license
-        ));
+#[derive(serde::Serialize)]
+struct Listed {
+    name: String,
+    version: String,
+    license: String,
+    repository: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct Group {
+    users: Vec<String>,
+    text: String,
+}
+
+impl Notice {
+    fn gather(crates: &[Crate]) -> Self {
+        let mut by_text: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut undocumented = Vec::new();
+        for entry in crates {
+            let who = format!("{} {}", entry.name, entry.version);
+            let files = licence_files(&entry.root);
+            if files.is_empty() {
+                undocumented.push(who);
+                continue;
+            }
+            for (file, text) in files {
+                by_text
+                    .entry(text.trim_end().to_string())
+                    .or_default()
+                    .push(format!("{who} ({file})"));
+            }
+        }
+        Self {
+            crates: crates
+                .iter()
+                .map(|entry| Listed {
+                    name: entry.name.clone(),
+                    version: entry.version.clone(),
+                    license: entry.license.clone(),
+                    repository: entry.repository.clone(),
+                })
+                .collect(),
+            groups: by_text
+                .into_iter()
+                .map(|(text, users)| Group { users, text })
+                .collect(),
+            undocumented,
+        }
     }
 
-    // Grouped by the exact text, so a licence shared by a hundred crates is
-    // printed once with its hundred names above it.
-    let mut texts: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    let mut without: Vec<&str> = Vec::new();
-    let owned: Vec<(String, Vec<(String, String)>)> = crates
-        .iter()
-        .map(|entry| {
-            (
-                format!("{} {}", entry.name, entry.version),
-                licence_files(&entry.root),
-            )
-        })
-        .collect();
-    for (who, files) in &owned {
-        if files.is_empty() {
-            without.push(who);
-            continue;
-        }
-        for (file, text) in files {
-            texts
-                .entry(text.as_str())
-                .or_default()
-                .push(format!("{who} ({file})"));
-        }
+    fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
     }
 
-    out.push_str("\n## Licence texts\n\n");
-    out.push_str(
-        "Identical texts are shown once, with every crate that ships them \
-         listed above. A crate's own copyright line is part of its \
-         attribution, which is why the MIT text appears many times over.\n",
-    );
-    for (text, users) in &texts {
-        out.push_str("\n---\n\n");
-        for who in users {
-            out.push_str(&format!("- {who}\n"));
-        }
-        out.push_str("\n```\n");
-        out.push_str(text.trim_end());
-        out.push_str("\n```\n");
-    }
-
-    if !without.is_empty() {
+    fn to_markdown(&self) -> String {
+        let mut out = String::new();
         out.push_str(
-            "\n---\n\n## Crates shipping no licence file\n\n\
-             These declare their terms in their manifest — listed in the table \
-             above — but ship no copy of the text alongside their source.\n\n",
+            "# Third-party licences\n\n\
+             SimLogix itself is offered under the MIT licence — see [LICENSE](LICENSE).\n\n\
+             This file lists everything it is built on, and the terms each of those \
+             is offered under. It is **generated**; run\n\n\
+             ```bash\n\
+             cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-party.json\n\
+             ```\n\n\
+             after changing a dependency rather than editing it by hand. The same \
+             list is in the application, under **? → Licences**.\n\n\
+             Only shipped dependencies are listed: dev-dependencies build the \
+             tests and build-dependencies run at build time, and neither reaches \
+             a released binary.\n\n",
         );
-        for who in without {
-            out.push_str(&format!("- {who}\n"));
-        }
-    }
 
-    out
+        out.push_str(&format!("## Dependencies ({})\n\n", self.crates.len()));
+        out.push_str("| Crate | Version | Licence |\n|---|---|---|\n");
+        for entry in &self.crates {
+            let name = match &entry.repository {
+                Some(url) => format!("[{}]({url})", entry.name),
+                None => entry.name.clone(),
+            };
+            out.push_str(&format!(
+                "| {name} | {} | {} |\n",
+                entry.version, entry.license
+            ));
+        }
+
+        out.push_str("\n## Licence texts\n\n");
+        out.push_str(
+            "Identical texts are shown once, with every crate that ships them \
+             listed above. A crate's own copyright line is part of its \
+             attribution, which is why the MIT text appears many times over.\n",
+        );
+        for group in &self.groups {
+            out.push_str("\n---\n\n");
+            for who in &group.users {
+                out.push_str(&format!("- {who}\n"));
+            }
+            out.push_str("\n```\n");
+            out.push_str(&group.text);
+            out.push_str("\n```\n");
+        }
+
+        if !self.undocumented.is_empty() {
+            out.push_str(
+                "\n---\n\n## Crates shipping no licence file\n\n\
+                 These declare their terms in their manifest — listed in the table \
+                 above — but ship no copy of the text alongside their source.\n\n",
+            );
+            for who in &self.undocumented {
+                out.push_str(&format!("- {who}\n"));
+            }
+        }
+
+        out
+    }
 }

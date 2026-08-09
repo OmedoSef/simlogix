@@ -316,8 +316,7 @@ pub struct SimLogixApp {
     /// Whether the shortcuts-and-gestures window is up. View state, like
     /// `show_about`: never saved, never an undo step.
     show_shortcuts: bool,
-    show_licenses: bool,
-    licenses_tab: crate::licenses::Tab,
+    licenses: crate::licenses::State,
     circuit: Circuit,
     placed: Vec<PlacedComponent>,
     /// What the next canvas click does — placing, wiring, or selecting.
@@ -480,8 +479,7 @@ impl Default for SimLogixApp {
             show_about: false,
             show_signal_state: true,
             show_shortcuts: false,
-            show_licenses: false,
-            licenses_tab: crate::licenses::Tab::default(),
+            licenses: crate::licenses::State::default(),
             circuit: Circuit::default(),
             placed: Vec::new(),
             tool: Tool::default(),
@@ -3782,7 +3780,7 @@ impl eframe::App for SimLogixApp {
                     }
                     ui.separator();
                     if ui.button(strings.menu_help_licenses).clicked() {
-                        self.show_licenses = true;
+                        self.licenses.open = true;
                         ui.close();
                     }
                     if ui.button(strings.menu_help_about).clicked() {
@@ -5557,12 +5555,7 @@ impl eframe::App for SimLogixApp {
         }
 
         crate::help::show(ui.ctx(), strings, &mut self.show_shortcuts);
-        crate::licenses::show(
-            ui.ctx(),
-            strings,
-            &mut self.show_licenses,
-            &mut self.licenses_tab,
-        );
+        crate::licenses::show(ui.ctx(), strings, &mut self.licenses);
 
         egui::Window::new(strings.about_title)
             .open(&mut self.show_about)
@@ -5598,7 +5591,7 @@ impl eframe::App for SimLogixApp {
                         // out here: About says what this is, the licence
                         // window says what you may do with it.
                         if ui.link(strings.about_license).clicked() {
-                            self.show_licenses = true;
+                            self.licenses.open = true;
                         }
                     });
                     ui.add_space(4.0);

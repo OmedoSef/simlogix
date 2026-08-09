@@ -101,6 +101,12 @@ pub struct Strings {
     pub licenses_own: &'static str,
     pub licenses_third_party: &'static str,
     pub licenses_third_party_intro: &'static str,
+    pub licenses_filter: &'static str,
+    pub licenses_count: &'static str,
+    pub licenses_texts: &'static str,
+    pub licenses_texts_intro: &'static str,
+    pub licenses_no_file: &'static str,
+    pub licenses_no_file_intro: &'static str,
     pub shortcuts_title: &'static str,
     pub help_sections: &'static [HelpSection],
 
@@ -350,6 +356,12 @@ static ENGLISH: Strings = Strings {
     licenses_own: "SimLogix",
     licenses_third_party: "Third-party",
     licenses_third_party_intro: "SimLogix is built on the work below. Each entry is listed with the terms it is offered under.",
+    licenses_filter: "Find",
+    licenses_count: "{} of {total} shown",
+    licenses_texts: "Licence texts",
+    licenses_texts_intro: "Identical texts are grouped. A crate's own copyright line is part of its attribution, which is why the MIT text appears many times over.",
+    licenses_no_file: "Shipping no licence file",
+    licenses_no_file_intro: "These declare their terms in their manifest — listed above — but ship no copy of the text with their source.",
     shortcuts_title: "Shortcuts and gestures",
     help_sections: &[
         HelpSection {
@@ -594,6 +606,12 @@ static FRENCH: Strings = Strings {
     licenses_own: "SimLogix",
     licenses_third_party: "Composants tiers",
     licenses_third_party_intro: "SimLogix s'appuie sur les travaux ci-dessous. Chaque entrée est accompagnée des termes sous lesquels elle est proposée.",
+    licenses_filter: "Rechercher",
+    licenses_count: "{} sur {total} affichés",
+    licenses_texts: "Textes des licences",
+    licenses_texts_intro: "Les textes identiques sont regroupés. La ligne de copyright d'un composant fait partie de son attribution : c'est pourquoi le texte MIT revient tant de fois.",
+    licenses_no_file: "Sans fichier de licence",
+    licenses_no_file_intro: "Ces composants déclarent leurs termes dans leur manifeste — listés ci-dessus — mais ne joignent pas de copie du texte à leurs sources.",
     shortcuts_title: "Raccourcis et gestes",
     help_sections: &[
         HelpSection {
@@ -838,6 +856,12 @@ static ITALIAN: Strings = Strings {
     licenses_own: "SimLogix",
     licenses_third_party: "Componenti di terzi",
     licenses_third_party_intro: "SimLogix si basa sui lavori elencati di seguito. Ogni voce riporta i termini con cui è offerta.",
+    licenses_filter: "Cerca",
+    licenses_count: "{} di {total} mostrati",
+    licenses_texts: "Testi delle licenze",
+    licenses_texts_intro: "I testi identici sono raggruppati. La riga di copyright di un componente fa parte della sua attribuzione: per questo il testo MIT ricorre molte volte.",
+    licenses_no_file: "Senza file di licenza",
+    licenses_no_file_intro: "Questi dichiarano i termini nel manifesto — elencati sopra — ma non allegano una copia del testo ai sorgenti.",
     shortcuts_title: "Scorciatoie e gesti",
     help_sections: &[
         HelpSection {

@@ -60,11 +60,11 @@ ship it in something of your own — keep the copyright notice with it.
 
 It is built on a good deal of other people's work, listed with the terms
 each part is offered under in [THIRD-PARTY.md](THIRD-PARTY.md). The same
-list is in the application, under **? → Licences**. That file is generated;
-after changing a dependency, run:
+list is in the application, under **? → Licences**, searchable. Both are
+generated; after changing a dependency, run:
 
 ```bash
-cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md
+cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-party.json
 ```
 
 ## Documentation
