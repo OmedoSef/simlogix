@@ -126,6 +126,122 @@ pub struct PanelResult {
     pub change_kind: Option<ComponentKind>,
 }
 
+/// The swatches offered wherever a colour is chosen.
+///
+/// A fixed set rather than a wheel, because the thing colour is *for* here
+/// is telling two wires apart at a crossing — which needs a handful of hues
+/// that are obviously different, not sixteen million that mostly aren't. It
+/// also makes a colour reusable: the same swatch is the same bytes, where
+/// two trips through a wheel never land on quite the same place.
+///
+/// Chosen to stay legible on either theme, so nothing is very dark or very
+/// pale.
+const SWATCHES: [[u8; 3]; 12] = [
+    [0xE0, 0x3B, 0x3B], // red
+    [0xE8, 0x7A, 0x22], // orange
+    [0xE0, 0xB0, 0x21], // amber
+    [0x8B, 0xC3, 0x2E], // lime
+    [0x35, 0xA8, 0x53], // green
+    [0x1F, 0xA8, 0x9E], // teal
+    [0x2E, 0x9B, 0xD8], // sky
+    [0x3B, 0x62, 0xD0], // blue
+    [0x7A, 0x4F, 0xD0], // violet
+    [0xC0, 0x48, 0xC0], // magenta
+    [0xD0, 0x5A, 0x8A], // pink
+    [0x8A, 0x6F, 0x5A], // brown
+];
+
+/// Side of one swatch.
+const SWATCH_SIZE: f32 = 20.0;
+
+fn to_hex(color: [u8; 3]) -> String {
+    format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2])
+}
+
+/// Reads `#RRGGBB`, or `RRGGBB` — a code pasted from somewhere else arrives
+/// spelled either way, and refusing one of them would be pedantry.
+fn from_hex(text: &str) -> Option<[u8; 3]> {
+    let text = text.trim().trim_start_matches('#');
+    if text.len() != 6 || !text.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(&text[at..at + 2], 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
+/// A colour control: the swatches, the hex code, and the full picker behind
+/// a button for anything the swatches don't cover.
+///
+/// Returns `true` when the colour changed this frame.
+fn color_control(ui: &mut Ui, strings: &Strings, color: &mut [u8; 3]) -> bool {
+    let mut changed = false;
+
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+        for swatch in SWATCHES {
+            let (rect, response) =
+                ui.allocate_exact_size(egui::Vec2::splat(SWATCH_SIZE), egui::Sense::click());
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if ui.is_rect_visible(rect) {
+                let fill = egui::Color32::from_rgb(swatch[0], swatch[1], swatch[2]);
+                ui.painter().rect_filled(rect, 3.0, fill);
+                // The one in use is ringed rather than ticked: a tick would
+                // have to be drawn in a colour that reads against every
+                // swatch, and there isn't one.
+                let stroke = if *color == swatch {
+                    egui::Stroke::new(2.0, ui.visuals().strong_text_color())
+                } else {
+                    egui::Stroke::new(1.0, ui.visuals().weak_text_color())
+                };
+                ui.painter()
+                    .rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Outside);
+            }
+            if response.on_hover_text(to_hex(swatch)).clicked() {
+                *color = swatch;
+                changed = true;
+            }
+        }
+    });
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        // The field keeps its own text while it is being typed into, so a
+        // half-finished code like "#1a" survives the frames before it parses.
+        // Out of focus it is rewritten from the colour, which is what keeps
+        // it honest when a swatch or the wheel changes it instead.
+        let id = ui.id().with("hex");
+        let mut text = ui
+            .data_mut(|data| data.get_temp::<String>(id))
+            .unwrap_or_else(|| to_hex(*color));
+
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .desired_width(74.0)
+                .font(egui::TextStyle::Monospace),
+        );
+        if field.has_focus() {
+            if let Some(parsed) = from_hex(&text) {
+                if parsed != *color {
+                    *color = parsed;
+                    changed = true;
+                }
+            }
+        } else {
+            text = to_hex(*color);
+        }
+        ui.data_mut(|data| data.insert_temp(id, text));
+
+        if ui.color_edit_button_srgb(color).changed() {
+            changed = true;
+        }
+        ui.label(egui::RichText::new(strings.property_color_more).weak());
+    });
+
+    changed
+}
+
 /// Draws the panel for the symbol as a whole — what there is to set when
 /// nothing in particular is picked.
 pub fn show_symbol(ui: &mut Ui, strings: &Strings, appearance: &mut Appearance) -> PanelResult {
@@ -439,17 +555,16 @@ pub fn show(
         ComponentKind::Led => {
             ui.add_space(8.0);
             ui.label(strings.property_color);
+            let mut color = properties.color.unwrap_or(DEFAULT_LED_COLOR);
+            // One undo step per change rather than per editing session: a
+            // swatch click is one discrete change and lands as one step, but
+            // the wheel behind the button still gives no "started" signal to
+            // hang a snapshot on, so dragging through it leaves a few behind.
+            if color_control(ui, strings, &mut color) {
+                edit_started = true;
+                properties.color = Some(color);
+            }
             ui.horizontal(|ui| {
-                let mut color = properties.color.unwrap_or(DEFAULT_LED_COLOR);
-                // One undo step per change here rather than per editing
-                // session: the picker gives no "started" signal to hang a
-                // snapshot on, so dragging through the wheel leaves a few
-                // steps behind. Accepted -- the alternative is losing the
-                // ability to undo the colour at all.
-                if ui.color_edit_button_srgb(&mut color).changed() {
-                    edit_started = true;
-                    properties.color = Some(color);
-                }
                 if properties.color.is_some() && ui.button(strings.property_reset).clicked() {
                     edit_started = true;
                     properties.color = None;
@@ -516,11 +631,11 @@ pub fn show_wire(
     ui.add_space(8.0);
 
     ui.label(strings.property_color);
+    let mut picked = color.unwrap_or(DEFAULT_WIRE_COLOR);
+    if color_control(ui, strings, &mut picked) {
+        edited = Some(Some(picked));
+    }
     ui.horizontal(|ui| {
-        let mut picked = color.unwrap_or(DEFAULT_WIRE_COLOR);
-        if ui.color_edit_button_srgb(&mut picked).changed() {
-            edited = Some(Some(picked));
-        }
         if color.is_some() && ui.button(strings.property_reset).clicked() {
             edited = Some(None);
         }
@@ -552,6 +667,42 @@ mod tests {
         let json = serde_json::to_string(&Properties::default()).expect("serializes");
         assert_eq!(json, "{}");
         assert!(Properties::default().is_empty());
+    }
+
+    #[test]
+    fn a_hex_code_round_trips() {
+        for color in SWATCHES {
+            assert_eq!(from_hex(&to_hex(color)), Some(color));
+        }
+    }
+
+    #[test]
+    fn a_pasted_code_is_read_with_or_without_its_hash() {
+        // Both spellings turn up when a code is copied from somewhere else,
+        // and refusing one of them would be pedantry.
+        assert_eq!(from_hex("#1A2B3C"), Some([0x1A, 0x2B, 0x3C]));
+        assert_eq!(from_hex("1a2b3c"), Some([0x1A, 0x2B, 0x3C]));
+        assert_eq!(from_hex("  #1a2b3c  "), Some([0x1A, 0x2B, 0x3C]));
+    }
+
+    #[test]
+    fn a_half_typed_code_is_not_read_as_a_colour() {
+        // The field is edited a character at a time, so most of what it
+        // holds mid-typing is not yet a colour — and guessing at one would
+        // make the value jump around while it is being entered.
+        for text in ["", "#", "#1a2", "#1a2b3", "#1a2b3c4", "#gggggg", "hello"] {
+            assert_eq!(from_hex(text), None, "{text:?} should not parse");
+        }
+    }
+
+    #[test]
+    fn no_two_swatches_are_the_same_colour() {
+        // A duplicate would be a slot that says nothing, on a palette whose
+        // whole job is telling things apart.
+        let mut seen = SWATCHES.to_vec();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), SWATCHES.len());
     }
 
     #[test]

@@ -92,7 +92,11 @@ conductor across a crossing, and it costs nothing when you're not doing it.
 
 **Give a net a colour** for something you keep coming back to. Select a
 wire and pick a colour in the properties panel on the right; *Reset* takes
-it off again. The colour is drawn as a casing *around* the wire, so the
+it off again. The panel offers a dozen swatches and shows the code as
+`#RRGGBB`, which you can also type or paste into — so the same colour can be
+given to another net in another circuit without having to find it on a wheel
+twice. The wheel is still there, behind the button, for anything the
+swatches don't cover. The colour is drawn as a casing *around* the wire, so the
 signal colour keeps the middle — what's changing during simulation stays
 what you read first.
 
