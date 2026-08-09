@@ -155,12 +155,33 @@ than assuming it shouldn't.
 
 ### Both ways at once
 
-The `Bus transceiver` in the Buses category joins two buses and passes
+The Buses category has a transceiver, which joins two buses and passes
 traffic one way at a time. `DIR` picks the direction — high sends the left
-side (`A`) to the right (`B`), low sends it back — and `OE` switches the
-whole thing off, letting go of both buses at once.
+side (`A`) to the right (`B`), low sends it back — and the enable switches
+the whole thing off, letting go of both buses at once.
+
+It comes in two flavours, differing only in which way round that enable is:
+
+| Entry | Enable | On when |
+|---|---|---|
+| **(EN)** | `EN`, plain | high |
+| **(OE)** | `OE`, with a bubble on the pin | low |
+
+The bubble is what tells them apart on the canvas — it's the standard mark
+for an inverted input, and `(OE)` matches the polarity of the real 74x245.
+Pick whichever suits the logic you already have; you can also switch an
+existing one from **Type** in the properties panel.
 
 The side that is *listening* drives nothing, so it never fights the bus it
 is reading. Flipping `DIR` while both buses are being driven produces one
 tick of crossover, the same turnaround a real transceiver has; bus protocols
 leave a spare cycle there for exactly that reason.
+
+## Changing a component's type
+
+Some components come in pairs that differ by one setting — a transistor's
+channel, a transceiver's enable polarity. Select one and the properties
+panel offers **Type**; switching it redraws the symbol and keeps everything
+attached, wires and routes included.
+
+It's an ordinary edit, so `Ctrl+Z` puts it back.
