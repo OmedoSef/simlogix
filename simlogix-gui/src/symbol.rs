@@ -48,16 +48,29 @@ impl TextLayer {
             .ctx()
             .layer_transform_to_global(ui.layer_id())
             .unwrap_or_default();
+
+        // A **sublayer of the canvas**, which is how it gets to sit directly
+        // on top of the drawing while still belonging to it.
+        //
+        // It was `Order::Foreground` at first, and that put it above every
+        // floating window: the About box had circuit labels printed across
+        // it. Foreground is where menus and popups go — this is neither. The
+        // order is inherited from the canvas (`Scene` does the same thing for
+        // its own layer, for the same reason), so windows, which are
+        // `Order::Middle`, are above it again.
+        let layer = egui::LayerId::new(
+            ui.layer_id().order,
+            egui::Id::new(("symbol_text", ui.layer_id().id)),
+        );
+        ui.ctx().set_sublayer(ui.layer_id(), layer);
+
         Self {
             // Clipped to the same region as the caller: a layer of its own
             // is not bounded by the panel the canvas sits in, and labels
             // would otherwise spill over the panels beside it.
             painter: ui
                 .ctx()
-                .layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new(("symbol_text", ui.layer_id().id)),
-                ))
+                .layer_painter(layer)
                 .with_clip_rect(to_screen * ui.clip_rect()),
             to_screen,
         }
