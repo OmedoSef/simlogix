@@ -5916,9 +5916,12 @@ mod tests {
         app.switch_view(toolbar::View::Appearance);
 
         let framed = app.content_rect().expect("a symbol always has an extent");
-        // Centred on the origin: the schematic is 600 away, and framing on
-        // *it* is what would put the symbol off screen.
-        assert_eq!(framed.center(), egui::Pos2::ZERO);
+        // Around the origin, where a symbol is drawn — not on the schematic
+        // 600 away, which is what would put the symbol off screen. Not
+        // exactly *on* the origin: a box with a pin down one side only is
+        // not symmetric about it, and needn't be.
+        assert!(framed.center().to_vec2().length() < canvas::BOX_SIZE.x);
+        assert!(!framed.contains(egui::pos2(600.0, 600.0)));
     }
 
     #[test]

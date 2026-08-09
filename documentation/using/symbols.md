@@ -126,6 +126,18 @@ and the name is all that identifies it. A symbol you drew often says what it
 is by its shape, or carries a label you put where you wanted it — and then a
 name floating above is in the way.
 
+## How big the symbol is
+
+The box you hover and click — and the outline you see around a selected
+instance — is the extent of what you actually drew, shapes and pins
+together. Text is left out of it, because its drawn size changes with the
+zoom and the clickable area shouldn't.
+
+There is a floor: a symbol smaller than one component box is treated as that
+size, so two short lines are still something you can hit. The floor is a
+minimum *size*, applied around the drawing where it sits — a symbol drawn
+entirely to one side of its origin claims no space on the other.
+
 ## What isn't stored
 
 **Colour.** Symbols take theirs from the theme, so one saved in a light grey

@@ -475,12 +475,13 @@ impl Appearance {
     /// Never smaller than one component box, so a symbol of two short lines
     /// is still something you can hit.
     pub fn bounds(&self) -> egui::Rect {
-        let mut bounds = egui::Rect::from_center_size(Pos2::ZERO, canvas::BOX_SIZE);
+        let mut bounds: Option<egui::Rect> = None;
         let mut include = |x: f32, y: f32| {
-            bounds.min.x = bounds.min.x.min(x);
-            bounds.min.y = bounds.min.y.min(y);
-            bounds.max.x = bounds.max.x.max(x);
-            bounds.max.y = bounds.max.y.max(y);
+            let point = pos2(x, y);
+            bounds = Some(match bounds {
+                Some(rect) => rect.union(egui::Rect::from_min_max(point, point)),
+                None => egui::Rect::from_min_max(point, point),
+            });
         };
         for shape in &self.shapes {
             match shape {
@@ -513,7 +514,27 @@ impl Appearance {
         for pin in &self.pins {
             include(pin.at.0, pin.at.1);
         }
-        bounds
+
+        // Nothing drawn at all: one component box on the origin, so a symbol
+        // with no shapes and no pins is still somewhere you can click.
+        let Some(bounds) = bounds else {
+            return egui::Rect::from_center_size(Pos2::ZERO, canvas::BOX_SIZE);
+        };
+
+        // The minimum is a minimum *size*, grown about the drawing's own
+        // centre. It used to be a box on the origin that the drawing was
+        // merged with, which is a different thing: a symbol drawn to one
+        // side of its origin — as one naturally is once a pin has been
+        // dragged out — had the box reach back across the origin and out the
+        // far side, so its hover outline and its click area extended well
+        // past anything visible.
+        egui::Rect::from_center_size(
+            bounds.center(),
+            egui::vec2(
+                bounds.width().max(canvas::BOX_SIZE.x),
+                bounds.height().max(canvas::BOX_SIZE.y),
+            ),
+        )
     }
 }
 
@@ -582,6 +603,56 @@ mod tests {
         assert_eq!(bounds.height(), instance_height(&ports(3, 3)));
         // The generated box *is* symmetric, so it still sits on its centre.
         assert_eq!(bounds.center(), Pos2::ZERO);
+    }
+
+    #[test]
+    fn a_symbol_drawn_to_one_side_of_its_origin_claims_no_space_on_the_other() {
+        // What Romain saw: a hover outline reaching well past the right of a
+        // symbol he had drawn to the left of its origin. The minimum size
+        // used to be a box *on the origin* that the drawing was merged with,
+        // so it reached back across the origin and out the far side.
+        let symbol = Appearance {
+            shapes: vec![Shape::Polyline {
+                points: vec![(-140.0, -60.0), (-20.0, -60.0), (-20.0, 20.0)],
+                closed: true,
+            }],
+            pins: Vec::new(),
+            show_name: false,
+        };
+
+        let bounds = symbol.bounds();
+        assert_eq!(bounds.min.x, -140.0);
+        assert_eq!(bounds.max.x, -20.0, "nothing is drawn to the right of this");
+    }
+
+    #[test]
+    fn a_symbol_smaller_than_a_component_box_is_still_something_you_can_hit() {
+        // The minimum is a minimum *size*, grown about the drawing's own
+        // centre rather than snapped back to the origin.
+        let symbol = Appearance {
+            shapes: vec![Shape::Polyline {
+                points: vec![(100.0, 100.0), (110.0, 100.0)],
+                closed: false,
+            }],
+            pins: Vec::new(),
+            show_name: false,
+        };
+
+        let bounds = symbol.bounds();
+        assert_eq!(bounds.width(), canvas::BOX_SIZE.x);
+        assert_eq!(bounds.height(), canvas::BOX_SIZE.y);
+        assert_eq!(bounds.center(), pos2(105.0, 100.0), "grown where it sits");
+    }
+
+    #[test]
+    fn a_symbol_with_nothing_in_it_falls_back_to_a_box_on_the_origin() {
+        let blank = Appearance {
+            shapes: Vec::new(),
+            pins: Vec::new(),
+            show_name: false,
+        };
+        assert_eq!(blank.bounds().center(), Pos2::ZERO);
+        assert_eq!(blank.bounds().width(), canvas::BOX_SIZE.x);
     }
 
     #[test]
