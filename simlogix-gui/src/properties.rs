@@ -10,13 +10,16 @@
 //! a per-kind enum, because a property tends to start on one kind and turn
 //! out to make sense on several.
 
-use egui::Ui;
+use egui::{RichText, Ui};
 use serde::{Deserialize, Serialize};
 
 use simlogix_core::PortLevel;
 
+use crate::appearance::{Appearance, Facing, PinSlot, Shape, TextAlign};
+use crate::canvas;
 use crate::i18n::Strings;
 use crate::palette::ComponentKind;
+use crate::placed_component::InstancePort;
 
 /// What the user has set on one component.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -99,6 +102,16 @@ const VARIANTS: [[ComponentKind; 2]; 2] = [
     ],
 ];
 
+/// Bounds on a label's size: small enough to annotate, large enough to
+/// title a symbol, and never zero — which would be a shape you can't see and
+/// can't get back.
+const MIN_TEXT_SIZE: f32 = 5.0;
+const MAX_TEXT_SIZE: f32 = 32.0;
+
+/// A lead longer than this stops being part of the symbol and starts being a
+/// wire the user didn't draw.
+const MAX_PIN_LEAD: f32 = 40.0;
+
 fn siblings(kind: &ComponentKind) -> Option<[ComponentKind; 2]> {
     VARIANTS.into_iter().find(|pair| pair.contains(kind))
 }
@@ -111,6 +124,244 @@ pub struct PanelResult {
     pub edit_started: bool,
     /// Turn this component into its sibling kind.
     pub change_kind: Option<ComponentKind>,
+}
+
+/// Draws the panel for the symbol as a whole — what there is to set when
+/// nothing in particular is picked.
+pub fn show_symbol(ui: &mut Ui, strings: &Strings, appearance: &mut Appearance) -> PanelResult {
+    let mut result = PanelResult::default();
+
+    ui.heading(strings.properties_heading);
+    ui.add_space(4.0);
+    ui.label(strings.symbol_selected);
+    ui.add_space(8.0);
+
+    if ui
+        .checkbox(&mut appearance.show_name, strings.symbol_show_name)
+        .changed()
+    {
+        result.edit_started = true;
+    }
+
+    ui.add_space(8.0);
+    ui.label(RichText::new(strings.shape_none_selected).weak());
+
+    result
+}
+
+/// Draws the panel for a selected pin of a symbol.
+///
+/// The direction is **set here, not worked out from where the pin sits.** It
+/// used to be taken from the nearest edge of the line art on every drop,
+/// which reads well on a rectangle and fights you on anything else — a pin
+/// beside a curve, or one deliberately pointing across the body, kept being
+/// turned back. Romain's call after using it, and the right one: guessing is
+/// only worth it when it is right nearly always.
+pub fn show_pin(
+    ui: &mut Ui,
+    strings: &Strings,
+    pin: &mut PinSlot,
+    port: Option<&InstancePort>,
+) -> PanelResult {
+    let mut result = PanelResult::default();
+
+    ui.heading(strings.properties_heading);
+    ui.add_space(4.0);
+    // Which pin this is, said by name rather than left to be worked out from
+    // its position — that is the whole reason a port has a name, and on a
+    // symbol with four identical-looking pins it is the only way to tell.
+    match port
+        .map(|port| port.name.as_str())
+        .filter(|name| !name.is_empty())
+    {
+        Some(name) => ui.label(format!("{} — {name}", strings.pin_selected)),
+        None => ui.label(format!(
+            "{} — {}",
+            strings.pin_selected, strings.pin_unnamed
+        )),
+    };
+    if let Some(port) = port {
+        ui.label(RichText::new(port_kind_label(strings, &port.kind)).weak());
+    }
+    ui.add_space(8.0);
+
+    ui.label(strings.pin_facing);
+    ui.horizontal_wrapped(|ui| {
+        for (facing, label) in [
+            (Facing::Left, strings.pin_facing_left),
+            (Facing::Right, strings.pin_facing_right),
+            (Facing::Up, strings.pin_facing_up),
+            (Facing::Down, strings.pin_facing_down),
+        ] {
+            if ui.selectable_label(pin.facing == facing, label).clicked() {
+                result.edit_started = true;
+                pin.facing = facing;
+            }
+        }
+    });
+
+    ui.add_space(8.0);
+    ui.label(strings.shape_position);
+    // A pin has to land on a grid dot, so its fields step by a whole one —
+    // unlike a shape's, which are free. Typing an off-grid value is still
+    // possible and is the user's business; the step is what a drag gives.
+    result.edit_started |= point_row(ui, &mut pin.at, canvas::GRID_SPACING);
+
+    ui.add_space(8.0);
+    ui.label(strings.pin_lead);
+    let response = ui.add(egui::Slider::new(&mut pin.lead, 0.0..=MAX_PIN_LEAD));
+    if response.drag_started() || response.gained_focus() {
+        result.edit_started = true;
+    }
+
+    ui.add_space(8.0);
+    if ui
+        .checkbox(&mut pin.show_name, strings.pin_show_name)
+        .changed()
+    {
+        result.edit_started = true;
+    }
+
+    result
+}
+
+fn port_kind_label(strings: &Strings, kind: &ComponentKind) -> &'static str {
+    match kind {
+        ComponentKind::OutputPort => strings.component_output_port,
+        ComponentKind::InOutPort => strings.component_inout_port,
+        _ => strings.component_input_port,
+    }
+}
+
+/// One `X` / `Y` pair. Reports whether an editing session began this frame.
+fn point_row(ui: &mut Ui, point: &mut (f32, f32), step: f32) -> bool {
+    let mut started = false;
+    ui.horizontal(|ui| {
+        for (axis, value) in [("X", &mut point.0), ("Y", &mut point.1)] {
+            ui.label(axis);
+            let response = ui.add(
+                egui::DragValue::new(value)
+                    .speed(step / 4.0)
+                    .fixed_decimals(1),
+            );
+            if response.drag_started() || response.gained_focus() {
+                started = true;
+            }
+        }
+    });
+    started
+}
+
+/// Draws the panel for a selected shape of a symbol.
+///
+/// Every shape shows the points it is made of, editable by hand. Dragging is
+/// how you sketch one; typing is how you make it exact — and the drawing step
+/// deliberately doesn't apply here, so a curve can sit off the grid when
+/// that is what it takes to look right.
+pub fn show_shape(ui: &mut Ui, strings: &Strings, shape: &mut Shape) -> PanelResult {
+    let mut result = PanelResult::default();
+
+    ui.heading(strings.properties_heading);
+    ui.add_space(4.0);
+    ui.label(shape_kind_label(strings, shape));
+    ui.add_space(8.0);
+
+    let step = crate::appearance::SHAPE_SNAP;
+    match shape {
+        Shape::Polyline { points, closed } => {
+            if ui.checkbox(closed, strings.shape_closed).changed() {
+                result.edit_started = true;
+            }
+            ui.add_space(8.0);
+            ui.label(strings.shape_points);
+            for (index, point) in points.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{}", index + 1)).weak());
+                    result.edit_started |= point_row(ui, point, step);
+                });
+            }
+        }
+        Shape::Circle { center, radius } => {
+            ui.label(strings.shape_center);
+            result.edit_started |= point_row(ui, center, step);
+
+            ui.add_space(8.0);
+            ui.label(strings.shape_radius);
+            let response = ui.add(
+                egui::DragValue::new(radius)
+                    .speed(step / 4.0)
+                    .fixed_decimals(1)
+                    // Never zero: a circle you can't see is one you can't
+                    // select either, and there'd be no way back to it.
+                    .range(0.5..=f32::INFINITY),
+            );
+            if response.drag_started() || response.gained_focus() {
+                result.edit_started = true;
+            }
+        }
+        Shape::Arc { start, mid, end } => {
+            for (label, point) in [
+                (strings.shape_arc_start, start),
+                (strings.shape_arc_mid, mid),
+                (strings.shape_arc_end, end),
+            ] {
+                ui.label(label);
+                result.edit_started |= point_row(ui, point, step);
+            }
+        }
+        Shape::Text {
+            at,
+            align,
+            size,
+            text,
+        } => {
+            ui.label(strings.shape_text_content);
+            // The snapshot is taken when the session *begins*, so a typed
+            // label is one undo step rather than one per keystroke — the same
+            // rule the component name field follows.
+            if ui.text_edit_singleline(text).gained_focus() {
+                result.edit_started = true;
+            }
+
+            ui.add_space(8.0);
+            ui.label(strings.shape_position);
+            result.edit_started |= point_row(ui, at, step);
+
+            ui.add_space(8.0);
+            ui.label(strings.shape_text_size);
+            let response = ui.add(egui::Slider::new(size, MIN_TEXT_SIZE..=MAX_TEXT_SIZE));
+            if response.drag_started() || response.gained_focus() {
+                result.edit_started = true;
+            }
+
+            ui.add_space(8.0);
+            ui.label(strings.shape_text_align);
+            ui.horizontal_wrapped(|ui| {
+                for (option, label) in [
+                    (TextAlign::Left, strings.pin_facing_left),
+                    (TextAlign::Center, strings.shape_align_center),
+                    (TextAlign::Right, strings.pin_facing_right),
+                ] {
+                    if ui.selectable_label(*align == option, label).clicked() {
+                        result.edit_started = true;
+                        *align = option;
+                    }
+                }
+            });
+        }
+    }
+
+    result
+}
+
+fn shape_kind_label(strings: &Strings, shape: &Shape) -> &'static str {
+    match shape {
+        Shape::Polyline { closed: true, .. } => strings.shape_rect,
+        Shape::Polyline { .. } => strings.shape_line,
+        Shape::Circle { .. } => strings.shape_circle,
+        Shape::Arc { .. } => strings.shape_arc,
+        Shape::Text { .. } => strings.shape_text,
+    }
 }
 
 /// Draws the panel for the selected component and applies what's edited.

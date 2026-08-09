@@ -1,6 +1,7 @@
 //! SimLogix GUI entry point.
 
 mod app;
+mod appearance;
 mod canvas;
 mod circuit_tree;
 mod help;

@@ -40,6 +40,87 @@ pub enum Tool {
     Pan,
 }
 
+/// Which side of a circuit is on the canvas.
+///
+/// A circuit has two: the schematic it is made of, and the symbol it shows
+/// when it is used inside another one. Two views of one thing, the way
+/// Logisim splits them — not two documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum View {
+    #[default]
+    Schematic,
+    Appearance,
+}
+
+/// What a click does while drawing a symbol.
+///
+/// Deliberately *not* folded into [`Tool`]: that one answers "what does a
+/// click do on a schematic", and half its answers (wire, place a component)
+/// have no meaning here. One enum per vocabulary keeps the combinations that
+/// can't exist from being representable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShapeTool {
+    /// Click to select a shape or grab a pin, drag to move, Delete to remove.
+    #[default]
+    Select,
+    /// Click by click, like a wire — Enter or a double-click finishes it,
+    /// Escape drops it.
+    Line,
+    /// Drag one corner to the other.
+    Rect,
+    /// Drag from the centre out to the edge.
+    Circle,
+    /// Click each end, then move to bulge it and click again.
+    Arc,
+    /// Click to drop a label, then type it in the panel on the right.
+    Text,
+    /// Drag to move the view — the primary button belongs to the drawing
+    /// here, so a symbol needs its own hand.
+    Pan,
+}
+
+/// Draws the drawing tools. Returns the one clicked, if any.
+pub fn show_shape_tools(ui: &mut Ui, strings: &Strings, active: ShapeTool) -> Option<ShapeTool> {
+    let mut clicked = None;
+    for (tool, label) in [
+        (ShapeTool::Select, strings.tool_select),
+        (ShapeTool::Line, strings.shape_line),
+        (ShapeTool::Rect, strings.shape_rect),
+        (ShapeTool::Circle, strings.shape_circle),
+        (ShapeTool::Arc, strings.shape_arc),
+        (ShapeTool::Text, strings.shape_text),
+        (ShapeTool::Pan, strings.tool_pan),
+    ] {
+        let draw = match tool {
+            ShapeTool::Select => symbol::draw_select_tool,
+            ShapeTool::Line => symbol::draw_line_shape_tool,
+            ShapeTool::Rect => symbol::draw_rect_shape_tool,
+            ShapeTool::Circle => symbol::draw_circle_shape_tool,
+            ShapeTool::Arc => symbol::draw_arc_shape_tool,
+            ShapeTool::Text => symbol::draw_text_shape_tool,
+            ShapeTool::Pan => symbol::draw_pan_tool,
+        };
+        if icon_button(ui, label, active == tool, draw) {
+            clicked = Some(tool);
+        }
+    }
+    clicked
+}
+
+/// Draws the schematic/appearance switch. Returns the view clicked, if any.
+pub fn show_views(ui: &mut Ui, strings: &Strings, active: View) -> Option<View> {
+    let mut clicked = None;
+    for (view, label) in [
+        (View::Schematic, strings.view_schematic),
+        (View::Appearance, strings.view_appearance),
+    ] {
+        if ui.selectable_label(active == view, label).clicked() {
+            clicked = Some(view);
+        }
+    }
+    clicked
+}
+
 /// Side of the square icon buttons.
 const BUTTON_SIZE: f32 = 28.0;
 
@@ -53,7 +134,13 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
             (Tool::Wire, strings.tool_wire),
             (Tool::Pan, strings.tool_pan),
         ] {
-            if tool_button(ui, &tool, label, *active == tool) {
+            let draw = match tool {
+                Tool::Pan => symbol::draw_pan_tool,
+                Tool::Marquee => symbol::draw_marquee_tool,
+                Tool::Wire => symbol::draw_wire_tool,
+                _ => symbol::draw_select_tool,
+            };
+            if icon_button(ui, label, *active == tool, draw) {
                 clicked = Some(tool);
             }
         }
@@ -62,7 +149,16 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
 }
 
 /// One square icon button, labelled by tooltip so the bar stays compact.
-fn tool_button(ui: &mut Ui, tool: &Tool, label: &str, is_active: bool) -> bool {
+///
+/// Shared by both toolbars: the schematic's tools and the symbol editor's are
+/// the same kind of thing to the eye, and a bar of words beside a bar of
+/// icons reads as two unrelated controls.
+fn icon_button(
+    ui: &mut Ui,
+    label: &str,
+    is_active: bool,
+    draw: fn(&egui::Painter, egui::Rect, egui::Color32),
+) -> bool {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(BUTTON_SIZE, BUTTON_SIZE), Sense::click());
     if response.hovered() {
@@ -86,14 +182,7 @@ fn tool_button(ui: &mut Ui, tool: &Tool, label: &str, is_active: bool) -> bool {
                 egui::StrokeKind::Inside,
             );
         }
-
-        let icon = rect.shrink(5.0);
-        match tool {
-            Tool::Pan => symbol::draw_pan_tool(ui.painter(), icon, visuals.fg_stroke.color),
-            Tool::Marquee => symbol::draw_marquee_tool(ui.painter(), icon, visuals.fg_stroke.color),
-            Tool::Wire => symbol::draw_wire_tool(ui.painter(), icon, visuals.fg_stroke.color),
-            _ => symbol::draw_select_tool(ui.painter(), icon, visuals.fg_stroke.color),
-        }
+        draw(ui.painter(), rect.shrink(5.0), visuals.fg_stroke.color);
     }
 
     response.on_hover_text(label).clicked()

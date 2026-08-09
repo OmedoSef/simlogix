@@ -528,6 +528,7 @@ mod tests {
             folder: folder.to_string(),
             components: Vec::new(),
             wires: Vec::new(),
+            appearance: None,
         }
     }
 

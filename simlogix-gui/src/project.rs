@@ -22,6 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::appearance::Appearance;
 use crate::canvas::Rotation;
 use crate::palette::ComponentKind;
 use crate::properties::Properties;
@@ -46,7 +47,7 @@ use crate::properties::Properties;
 ///   such as a button's resting state or a LED's colour). Absent means the
 ///   behaviour that was there before, so nothing needed migrating.
 /// - `8` — a wire can carry a colour of its own.
-pub const CURRENT_VERSION: u32 = 8;
+pub const CURRENT_VERSION: u32 = 9;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";
@@ -120,6 +121,13 @@ pub struct SavedCircuit {
     pub folder: String,
     pub components: Vec<SavedComponent>,
     pub wires: Vec<SavedWire>,
+    /// The symbol this circuit shows when it is placed inside another one.
+    ///
+    /// Absent means the generated box, which is what every circuit had
+    /// before symbols existed — so there is nothing to migrate, and a
+    /// project that never draws one is byte-for-byte what it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<Appearance>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,6 +464,9 @@ impl SavedProject {
                 name: circuit.name,
                 // Folders arrived in v6; everything older is top level.
                 folder: String::new(),
+                // Symbols arrived in v9; anything older shows the generated
+                // box, which is exactly what it always showed.
+                appearance: None,
                 components: circuit.components,
                 wires: circuit
                     .wires
@@ -603,6 +614,32 @@ mod v1 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_circuit_without_a_symbol_writes_no_symbol_at_all() {
+        let mut circuit = SavedCircuit {
+            name: "main".to_string(),
+            folder: String::new(),
+            components: Vec::new(),
+            wires: Vec::new(),
+            appearance: None,
+        };
+        let json = serde_json::to_string(&circuit).expect("serialisable");
+        // The point of the `Option`: a project that never draws a symbol is
+        // byte-for-byte the file it was before symbols existed.
+        assert!(
+            !json.contains("appearance"),
+            "an absent symbol should leave no trace: {json}"
+        );
+
+        circuit.appearance = Some(crate::appearance::Appearance {
+            shapes: Vec::new(),
+            pins: Vec::new(),
+            show_name: true,
+        });
+        let json = serde_json::to_string(&circuit).expect("serialisable");
+        assert!(json.contains("appearance"));
+    }
+
     /// The last shape the single-document format had. Nothing writes it any
     /// more — this guards the reading path, which still has to work.
     #[test]
@@ -630,6 +667,7 @@ mod tests {
                     },
                     waypoints: vec![(20.0, 20.0), (40.0, 20.0)],
                 }],
+                appearance: None,
             }],
         };
 
@@ -770,6 +808,7 @@ mod tests {
                 properties: Properties::default(),
             }],
             wires: Vec::new(),
+            appearance: None,
         }
     }
 

@@ -16,6 +16,9 @@ use crate::canvas::Rotation;
 use crate::palette::ComponentKind;
 
 const PIN_RADIUS: f32 = 3.0;
+
+/// Segments in the toolbar's arc icon — few, since it is 18 px across.
+const ARC_ICON_SAMPLES: usize = 16;
 /// How far a `Button`'s cap sinks towards its pin while held.
 const CAP_TRAVEL: f32 = 2.5;
 
@@ -602,73 +605,30 @@ pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
 #[allow(clippy::too_many_arguments)]
 pub fn draw_instance(
     painter: &Painter,
-    rect: Rect,
+    center: Pos2,
     rotation: Rotation,
     color: Color32,
     name: &str,
     ports: &[crate::placed_component::InstancePort],
+    appearance: &crate::appearance::Appearance,
     text_layer: &TextLayer,
 ) -> PinPositions {
-    let stroke = Stroke::new(1.6, color);
-    let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
-
-    let body = Rect::from_min_max(
-        pos2(rect.left() + rect.width() * 0.16, rect.top()),
-        pos2(rect.right() - rect.width() * 0.16, rect.bottom()),
-    );
-    let corners = [
-        body.left_top(),
-        body.right_top(),
-        body.right_bottom(),
-        body.left_bottom(),
-        body.left_top(),
-    ];
-    painter.line(corners.into_iter().map(r).collect(), stroke);
-
-    text_layer.text(
-        r(pos2(c.x, rect.top() - 2.0)),
-        Align2::CENTER_BOTTOM,
-        name,
-        10.0,
-        color,
-    );
-
-    // Pins are laid out from the top of the box in whole grid steps, so each
-    // lands on a dot whatever the box's height works out to be.
-    let mut left = 0usize;
-    let mut right = 0usize;
-    let mut positions = Vec::with_capacity(ports.len());
-    for port in ports {
-        let is_output = port.kind == ComponentKind::OutputPort;
-        let slot = if is_output { &mut right } else { &mut left };
-        let y = rect.top() + (*slot as f32 + 1.0) * crate::canvas::GRID_SPACING;
-        *slot += 1;
-
-        let (pin, edge, align) = if is_output {
-            (
-                pos2(rect.right(), y),
-                pos2(body.right(), y),
-                Align2::RIGHT_CENTER,
-            )
-        } else {
-            (
-                pos2(rect.left(), y),
-                pos2(body.left(), y),
-                Align2::LEFT_CENTER,
-            )
-        };
-        painter.line_segment([r(pin), r(edge)], stroke);
-        draw_pin(painter, r(pin), color);
+    // The circuit's own name sits above the symbol rather than inside it: it
+    // belongs to the instance, not to the drawing, and a symbol you drew has
+    // no reason to leave room for it — which is also why it can be turned
+    // off, once the shape says what the name used to have to.
+    if appearance.show_name {
         text_layer.text(
-            r(pos2(edge.x + if is_output { -4.0 } else { 4.0 }, y)),
-            align,
-            &port.name,
-            9.0,
+            rotate(appearance.name_anchor(center), center, rotation),
+            Align2::CENTER_BOTTOM,
+            name,
+            10.0,
             color,
         );
-        positions.push(r(pin));
     }
+
+    let names: Vec<&str> = ports.iter().map(|port| port.name.as_str()).collect();
+    let positions = appearance.draw(painter, center, rotation, color, &names, text_layer);
 
     // All in `inputs`, in port order: the caller maps pin *index* to anchor
     // pin, and splitting them by side here would only make it re-merge them.
@@ -700,6 +660,70 @@ pub fn draw_wire_tool(painter: &Painter, rect: Rect, color: Color32) {
 }
 
 /// The select tool's palette icon: the familiar pointer arrow.
+/// The drawing tools of the appearance editor.
+///
+/// Each icon *is* the shape it draws — a diagonal line, a rectangle, a
+/// circle, an arc — rather than a picture standing for one. There is nothing
+/// to abstract here: the tool and its result are the same object.
+pub fn draw_line_shape_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let inner = rect.shrink(rect.width() * 0.16);
+    painter.line_segment([inner.left_bottom(), inner.right_top()], stroke);
+    for point in [inner.left_bottom(), inner.right_top()] {
+        painter.circle_filled(point, 1.8, color);
+    }
+}
+
+pub fn draw_rect_shape_tool(painter: &Painter, rect: Rect, color: Color32) {
+    painter.rect_stroke(
+        rect.shrink(rect.width() * 0.18),
+        0.0,
+        Stroke::new(1.6, color),
+        egui::StrokeKind::Inside,
+    );
+}
+
+pub fn draw_circle_shape_tool(painter: &Painter, rect: Rect, color: Color32) {
+    painter.circle_stroke(rect.center(), rect.width() * 0.32, Stroke::new(1.6, color));
+}
+
+pub fn draw_arc_shape_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let r = rect.width() * 0.34;
+    // The upper half only, so it reads as an arc rather than as a circle
+    // that failed to close.
+    let points: Vec<Pos2> = (0..=ARC_ICON_SAMPLES)
+        .map(|step| {
+            let angle = std::f32::consts::PI
+                + std::f32::consts::PI * (step as f32 / ARC_ICON_SAMPLES as f32);
+            pos2(c.x + r * angle.cos(), c.y + r * 0.5 + r * angle.sin())
+        })
+        .collect();
+    painter.line(points.clone(), stroke);
+    for point in [points[0], points[points.len() - 1]] {
+        painter.circle_filled(point, 1.8, color);
+    }
+}
+
+/// A capital "A", drawn rather than typed: these icons are painted into the
+/// canvas layer, where a glyph would be resampled by the zoom.
+pub fn draw_text_shape_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let inner = rect.shrink(rect.width() * 0.2);
+    let apex = pos2(inner.center().x, inner.top());
+    painter.line_segment([apex, inner.left_bottom()], stroke);
+    painter.line_segment([apex, inner.right_bottom()], stroke);
+    let bar = inner.top() + inner.height() * 0.62;
+    painter.line_segment(
+        [
+            pos2(inner.left() + inner.width() * 0.2, bar),
+            pos2(inner.right() - inner.width() * 0.2, bar),
+        ],
+        stroke,
+    );
+}
+
 pub fn draw_select_tool(painter: &Painter, rect: Rect, color: Color32) {
     let tip = pos2(
         rect.left() + rect.width() * 0.3,
@@ -729,7 +753,7 @@ pub fn draw_select_tool(painter: &Painter, rect: Rect, color: Color32) {
 /// the same clockwise convention the old edge-based layout used (a point on
 /// the left ends up on top after one quarter-turn, and so on), so a symbol's
 /// canonical `Deg0` geometry keeps its intended orientation under rotation.
-fn rotate(point: Pos2, center: Pos2, rotation: Rotation) -> Pos2 {
+pub fn rotate(point: Pos2, center: Pos2, rotation: Rotation) -> Pos2 {
     let quarters = match rotation {
         Rotation::Deg0 => 0,
         Rotation::Deg90 => 1,
@@ -743,7 +767,7 @@ fn rotate(point: Pos2, center: Pos2, rotation: Rotation) -> Pos2 {
     center + d
 }
 
-fn draw_pin(painter: &Painter, point: Pos2, color: Color32) {
+pub fn draw_pin(painter: &Painter, point: Pos2, color: Color32) {
     painter.circle_filled(point, PIN_RADIUS, color);
 }
 

@@ -10,6 +10,7 @@ use simlogix_core::{
     SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
+use crate::appearance::Appearance;
 use crate::canvas::{self, BOX_SIZE};
 use crate::circuit_tree::{self, RenameTarget, TreeAction};
 use crate::i18n::{Language, Strings};
@@ -34,6 +35,50 @@ const CLOCK_PERIOD_TICKS: u64 = 60;
 /// while still being generous enough for a modest chain of gates to fully
 /// propagate in one go.
 pub(crate) const SETTLE_TICKS: u64 = 32;
+
+/// What is picked while a symbol is being drawn.
+///
+/// Shapes and pins are held apart rather than in one list of an enum: they
+/// are edited by different panels and moved by different steps — a pin has
+/// to land on a grid dot, a shape only on a quarter of one — so every reader
+/// wants one or the other anyway.
+///
+/// Indices, not ids: shapes are a plain drawing order and pins follow the
+/// ports, so there is nothing an id would keep stable that matters. The two
+/// are cleared together whenever either list can shift.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SymbolSelection {
+    pub shapes: Vec<usize>,
+    pub pins: Vec<usize>,
+}
+
+impl SymbolSelection {
+    fn is_empty(&self) -> bool {
+        self.shapes.is_empty() && self.pins.is_empty()
+    }
+
+    /// Adds or removes one, for a shift-click.
+    fn toggle(list: &mut Vec<usize>, index: usize) {
+        if let Some(at) = list.iter().position(|held| *held == index) {
+            list.remove(at);
+        } else {
+            list.push(index);
+        }
+    }
+}
+
+/// Side of the square grab area on a pin in the appearance view.
+const APPEARANCE_PIN_HANDLE: f32 = 14.0;
+
+/// How near a click has to land to pick a shape.
+const SHAPE_PICK_RADIUS: f32 = 6.0;
+
+/// Size a label is dropped at, before the panel is used to change it.
+const DEFAULT_SHAPE_TEXT_SIZE: f32 = 10.0;
+
+/// Marks a clipboard payload as shapes of a symbol, so pasting a URL or a
+/// stretch of prose does nothing rather than being half-read.
+const SYMBOL_CLIPBOARD_TAG: &str = "simlogix_symbol:";
 /// How many undo steps are kept. Each one is a whole `SavedProject`, so this
 /// bounds memory rather than letting a long session grow without limit.
 const MAX_UNDO_STEPS: usize = 64;
@@ -393,6 +438,38 @@ pub struct SimLogixApp {
     /// zooms to. Everything else (component centres, waypoints) is stored
     /// in scene coordinates too, so nothing else has to know about zoom.
     scene_rect: egui::Rect,
+    /// Which side of the circuit is on the canvas — its schematic, or the
+    /// symbol it shows when used inside another circuit.
+    view: toolbar::View,
+    /// What a click does in the appearance view.
+    shape_tool: toolbar::ShapeTool,
+    /// What is picked in the appearance view.
+    symbol_selection: SymbolSelection,
+    /// The polyline being drawn click by click, in symbol coordinates.
+    drawing: Option<Vec<(f32, f32)>>,
+    /// Where a drag in the appearance view began, in symbol coordinates —
+    /// the far corner of a rectangle, or the centre of a circle.
+    shape_drag: Option<(f32, f32)>,
+    /// Where a selection sweep in the appearance view began, in scene
+    /// coordinates.
+    shape_band: Option<egui::Pos2>,
+    /// Where the pointer was last seen while a shape is being moved, in
+    /// *scene* coordinates.
+    ///
+    /// Not the raw pointer delta: that one is in screen pixels, so a zoomed
+    /// view moved the shape by the wrong amount and it drifted away from the
+    /// cursor. Being `Some` also means the move began with a press on the
+    /// canvas, which is what stops a drag on the panel's size slider from
+    /// dragging the shape along with it.
+    ///
+    /// The flag is whether it has actually moved yet, as opposed to merely
+    /// being held: a click that never moves must not snapshot for undo, and
+    /// must not snap anything on release either.
+    moving_shape: Option<(egui::Pos2, bool)>,
+    /// The camera belonging to the view that *isn't* showing. Swapped on
+    /// switch: the two views look at unrelated places, so carrying one
+    /// camera between them would drop you somewhere arbitrary.
+    idle_scene_rect: egui::Rect,
 }
 
 impl Default for SimLogixApp {
@@ -435,6 +512,7 @@ impl Default for SimLogixApp {
                 folder: String::new(),
                 components: Vec::new(),
                 wires: Vec::new(),
+                appearance: None,
             }],
             folders: Vec::new(),
             active: 0,
@@ -447,6 +525,14 @@ impl Default for SimLogixApp {
             // canvas's own size, which is the only value that gives a zoom
             // of exactly 1. See where it's filled in.
             scene_rect: egui::Rect::ZERO,
+            view: toolbar::View::default(),
+            shape_tool: toolbar::ShapeTool::default(),
+            symbol_selection: SymbolSelection::default(),
+            drawing: None,
+            shape_drag: None,
+            shape_band: None,
+            moving_shape: None,
+            idle_scene_rect: egui::Rect::ZERO,
         }
     }
 }
@@ -714,7 +800,8 @@ impl SimLogixApp {
                     .circuit
                     .add_component(Box::new(CircuitAnchor::new(ports.len())), pins);
                 self.circuit.schedule_now(id);
-                PlacedComponent::instance(id, center, path, ports, inner_groups)
+                let appearance = self.appearance_of(&path, &ports);
+                PlacedComponent::instance(id, center, path, ports, inner_groups, appearance)
             }
             ComponentKind::SrLatch => {
                 let nets = [
@@ -903,6 +990,9 @@ impl SimLogixApp {
             folder: self.circuits[self.active].folder.clone(),
             components,
             wires,
+            // Carried across untouched: the flat live state is the *schematic*
+            // of the open circuit, and its symbol isn't part of that.
+            appearance: self.circuits[self.active].appearance.clone(),
         }
     }
 
@@ -1058,7 +1148,667 @@ impl SimLogixApp {
     /// Components contribute their own box — an instance is taller than one
     /// grid cell — and wires contribute the points that don't follow a pin,
     /// since those can sit well outside every component.
+    /// Puts the other side of the circuit on the canvas.
+    ///
+    /// The two views look at unrelated places — a schematic sits wherever it
+    /// was drawn, a symbol always sits on the origin — so each keeps its own
+    /// camera rather than one being carried across and landing nowhere.
+    fn switch_view(&mut self, view: toolbar::View) {
+        if view == self.view {
+            return;
+        }
+        self.view = view;
+        std::mem::swap(&mut self.scene_rect, &mut self.idle_scene_rect);
+        // Never framed before: `ui()` reads a zero rect as "frame me".
+        if self.scene_rect.width() <= 0.0 {
+            self.refit_view = true;
+        }
+        // Shape indices belong to whichever symbol was showing.
+        self.symbol_selection = SymbolSelection::default();
+        self.drawing = None;
+        self.shape_drag = None;
+        self.shape_band = None;
+        self.moving_shape = None;
+        // Drawing a symbol has nothing to place, wire or select.
+        if view == toolbar::View::Appearance {
+            self.tool = toolbar::Tool::Select;
+            self.wiring_from = None;
+        }
+    }
+
+    /// The symbol the open circuit is currently showing: its own if it has
+    /// been given one, and the generated box otherwise.
+    ///
+    /// Read through `active_circuit()` so the port order is the one
+    /// `port_slots` produces everywhere else — the open circuit's entry in
+    /// `circuits` is stale by construction, and a second ordering rule here
+    /// is exactly how the symbol and the instance would come to disagree.
+    fn active_appearance(&self) -> (Vec<InstancePort>, Appearance) {
+        let saved = self.active_circuit();
+        let ports: Vec<InstancePort> = Self::port_slots(&saved)
+            .into_iter()
+            .map(|(_, port)| port)
+            .collect();
+        let appearance = self.circuits[self.active]
+            .appearance
+            .clone()
+            .unwrap_or_else(|| Appearance::generated(&ports));
+        (ports, appearance)
+    }
+
+    /// The appearance view: the open circuit's symbol, with a handle on
+    /// every pin.
+    ///
+    /// The symbol is drawn on the origin because it has no position of its
+    /// own — where it ends up on a canvas is the instance's business.
+    fn appearance_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        painter: &egui::Painter,
+        pointer: Option<egui::Pos2>,
+    ) {
+        let (ports, mut appearance) = self.active_appearance();
+        let center = egui::Pos2::ZERO;
+        let names: Vec<&str> = ports.iter().map(|port| port.name.as_str()).collect();
+        let pin_positions = appearance.draw(
+            painter,
+            center,
+            canvas::Rotation::Deg0,
+            ui.visuals().strong_text_color(),
+            &names,
+            &crate::symbol::TextLayer::for_ui(ui),
+        );
+
+        // Drawn here too, and not only on an instance: a checkbox whose
+        // effect you can't see while ticking it is a checkbox you have to
+        // guess at.
+        if appearance.show_name {
+            crate::symbol::TextLayer::for_ui(ui).text(
+                appearance.name_anchor(center),
+                egui::Align2::CENTER_BOTTOM,
+                &self.circuits[self.active].name,
+                10.0,
+                ui.visuals().strong_text_color(),
+            );
+        }
+
+        // A circuit with no ports has a symbol with no pins — worth saying,
+        // since the box looks finished and simply can't connect to anything.
+        if ports.is_empty() {
+            let strings = Strings::for_language(self.language);
+            crate::symbol::TextLayer::for_ui(ui).text(
+                egui::pos2(center.x, appearance.rect(center).bottom() + 12.0),
+                egui::Align2::CENTER_TOP,
+                strings.appearance_no_ports,
+                10.0,
+                ui.visuals().weak_text_color(),
+            );
+        }
+
+        let accent = canvas::accent_color(ui.visuals().dark_mode);
+
+        // Everything picked is lit in the accent colour: a shape redrawn over
+        // itself, a pin ringed. A symbol is line art, and a box around a
+        // diagonal line says less than the line lit up.
+        for &index in &self.symbol_selection.shapes {
+            let path = appearance.shape_path(index, center);
+            if path.len() > 1 {
+                painter.line(path, egui::Stroke::new(3.0, accent));
+            }
+        }
+        for &index in &self.symbol_selection.pins {
+            if let Some(at) = pin_positions.get(index) {
+                painter.circle_stroke(*at, 6.0, egui::Stroke::new(2.0, accent));
+            }
+        }
+
+        let changed = self.appearance_edit(
+            ui,
+            painter,
+            pointer,
+            center,
+            &pin_positions,
+            &mut appearance,
+            accent,
+        );
+
+        if changed {
+            // The first edit is also what turns the generated box into a
+            // symbol of this circuit's own — there is nothing else to store,
+            // and nothing was lost, since it is the very box that was on
+            // screen a frame ago.
+            self.circuits[self.active].appearance = Some(appearance);
+        }
+    }
+
+    /// Drawing, picking, moving and deleting what a symbol is made of.
+    /// Reports whether the symbol changed.
+    ///
+    /// **No widget is allocated here.** Press and release are read straight
+    /// off the pointer, because a full-canvas `ui.interact` would cover the
+    /// `Scene`'s own background response — which is what panning goes
+    /// through. That is exactly how the rubber band once broke placement and
+    /// panning at once, and the fix then was the same: add no widget.
+    #[allow(clippy::too_many_arguments)]
+    fn appearance_edit(
+        &mut self,
+        ui: &mut egui::Ui,
+        painter: &egui::Painter,
+        pointer: Option<egui::Pos2>,
+        center: egui::Pos2,
+        pin_positions: &[egui::Pos2],
+        appearance: &mut Appearance,
+        accent: egui::Color32,
+    ) -> bool {
+        let (pressed, released, double_clicked, shift) = ui.ctx().input(|i| {
+            (
+                i.pointer.button_pressed(egui::PointerButton::Primary),
+                i.pointer.button_released(egui::PointerButton::Primary),
+                i.pointer
+                    .button_double_clicked(egui::PointerButton::Primary),
+                i.modifiers.shift,
+            )
+        });
+        // Snapped in symbol coordinates, which are centre-relative — the
+        // same space the shapes themselves are stored in.
+        let aimed = pointer.map(|at| {
+            let snap = |v: f32| {
+                (v / crate::appearance::SHAPE_SNAP).round() * crate::appearance::SHAPE_SNAP
+            };
+            (snap(at.x - center.x), snap(at.y - center.y))
+        });
+        let preview = egui::Stroke::new(1.6, accent.gamma_multiply(0.7));
+        let world = |(x, y): (f32, f32)| egui::pos2(center.x + x, center.y + y);
+        let typing = ui.ctx().text_edit_focused();
+        let mut changed = false;
+
+        // Escape backs out of a shape in progress first, then the selection —
+        // one step at a time, as it does on the schematic.
+        if !typing && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.drawing.take().is_none() {
+                self.symbol_selection = SymbolSelection::default();
+            }
+            self.shape_drag = None;
+        }
+
+        changed |= self.appearance_keys(ui, appearance, typing);
+
+        match self.shape_tool {
+            toolbar::ShapeTool::Pan => {}
+            toolbar::ShapeTool::Select => {
+                changed |= self.appearance_select(
+                    ui,
+                    painter,
+                    pointer,
+                    center,
+                    pin_positions,
+                    appearance,
+                    accent,
+                    (pressed, released, shift),
+                );
+            }
+            toolbar::ShapeTool::Text => {
+                if let (Some(at), true) = (aimed, pressed) {
+                    self.record_edit();
+                    let strings = Strings::for_language(self.language);
+                    appearance.shapes.push(crate::appearance::Shape::Text {
+                        at,
+                        align: crate::appearance::TextAlign::Center,
+                        size: DEFAULT_SHAPE_TEXT_SIZE,
+                        // Placed with something readable on it rather than
+                        // empty: an empty label draws nothing, so it would
+                        // land invisible and there would be no way to tell a
+                        // missed click from a placed one.
+                        text: strings.shape_text_default.to_string(),
+                    });
+                    self.symbol_selection = SymbolSelection {
+                        shapes: vec![appearance.shapes.len() - 1],
+                        pins: Vec::new(),
+                    };
+                    // Back to Select so the label just dropped can be typed
+                    // and moved straight away, instead of the next click
+                    // dropping a second one.
+                    self.shape_tool = toolbar::ShapeTool::Select;
+                    changed = true;
+                }
+            }
+            toolbar::ShapeTool::Line => {
+                // A double-click lands as a press as well, so whether this
+                // click ends the line is settled before another point can be
+                // added to it.
+                let finish = double_clicked
+                    || (!typing && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)));
+
+                if let Some(at) = aimed {
+                    if let Some(points) = &self.drawing {
+                        let mut path: Vec<egui::Pos2> = points.iter().map(|&p| world(p)).collect();
+                        path.push(world(at));
+                        painter.line(path, preview);
+                    }
+                    if pressed && !finish {
+                        self.drawing.get_or_insert_with(Vec::new).push(at);
+                    }
+                }
+
+                if finish {
+                    if let Some(points) = self.drawing.take() {
+                        // One point is a click, not a line.
+                        if points.len() > 1 {
+                            self.record_edit();
+                            appearance.shapes.push(crate::appearance::Shape::Polyline {
+                                points,
+                                closed: false,
+                            });
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            toolbar::ShapeTool::Arc => {
+                // Click the two ends, then move to bulge it and click again.
+                // The middle point is the one being chosen in that last step,
+                // which is exactly what the shape stores.
+                if let Some(at) = aimed {
+                    match self.drawing.as_deref() {
+                        Some([start]) => {
+                            painter.line(vec![world(*start), world(at)], preview);
+                        }
+                        Some([start, end]) => {
+                            let arc = crate::appearance::Shape::Arc {
+                                start: *start,
+                                mid: at,
+                                end: *end,
+                            };
+                            appearance.shapes.push(arc);
+                            let index = appearance.shapes.len() - 1;
+                            let path = appearance.shape_path(index, center);
+                            appearance.shapes.pop();
+                            painter.line(path, preview);
+                        }
+                        _ => {}
+                    }
+                    if pressed {
+                        let points = self.drawing.get_or_insert_with(Vec::new);
+                        points.push(at);
+                        if points.len() == 3 {
+                            let (start, end, mid) = (points[0], points[1], points[2]);
+                            self.drawing = None;
+                            self.record_edit();
+                            appearance.shapes.push(crate::appearance::Shape::Arc {
+                                start,
+                                mid,
+                                end,
+                            });
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            toolbar::ShapeTool::Rect | toolbar::ShapeTool::Circle => {
+                if pressed {
+                    self.shape_drag = aimed;
+                }
+                if let (Some(from), Some(to)) = (self.shape_drag, aimed) {
+                    let shape = if self.shape_tool == toolbar::ShapeTool::Rect {
+                        crate::appearance::Shape::Polyline {
+                            // A rectangle is a closed four-point polyline —
+                            // no shape of its own, because it isn't one.
+                            points: vec![from, (to.0, from.1), to, (from.0, to.1)],
+                            closed: true,
+                        }
+                    } else {
+                        crate::appearance::Shape::Circle {
+                            center: from,
+                            radius: (to.0 - from.0).hypot(to.1 - from.1),
+                        }
+                    };
+                    if released {
+                        self.shape_drag = None;
+                        // A click that never moved is a miss, not an empty
+                        // shape nobody can see or select.
+                        if from != to {
+                            self.record_edit();
+                            appearance.shapes.push(shape);
+                            changed = true;
+                        }
+                    } else {
+                        appearance.shapes.push(shape);
+                        let index = appearance.shapes.len() - 1;
+                        let path = appearance.shape_path(index, center);
+                        appearance.shapes.pop();
+                        painter.line(path, preview);
+                    }
+                }
+            }
+        }
+        changed
+    }
+
+    /// Picking, moving and sweeping a band — everything the Select tool does.
+    #[allow(clippy::too_many_arguments)]
+    fn appearance_select(
+        &mut self,
+        ui: &mut egui::Ui,
+        painter: &egui::Painter,
+        pointer: Option<egui::Pos2>,
+        center: egui::Pos2,
+        pin_positions: &[egui::Pos2],
+        appearance: &mut Appearance,
+        accent: egui::Color32,
+        (pressed, released, shift): (bool, bool, bool),
+    ) -> bool {
+        let mut changed = false;
+
+        if let (Some(at), true) = (pointer, pressed) {
+            // A pin wins a tie with a shape: its target is the smaller of
+            // the two, so aiming at one is the more deliberate act.
+            let pin = pin_positions
+                .iter()
+                .enumerate()
+                .map(|(index, position)| (index, position.distance(at)))
+                .filter(|(_, distance)| *distance <= APPEARANCE_PIN_HANDLE / 2.0)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(index, _)| index);
+            let shape = pin.is_none().then(|| {
+                (0..appearance.shapes.len())
+                    .map(|index| (index, appearance.distance_to_shape(index, at, center)))
+                    .filter(|(_, distance)| *distance <= SHAPE_PICK_RADIUS)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(index, _)| index)
+            });
+            let shape = shape.flatten();
+
+            changed |= self.drop_emptied_labels(appearance, shape);
+
+            match (pin, shape) {
+                (Some(index), _) if shift => {
+                    SymbolSelection::toggle(&mut self.symbol_selection.pins, index)
+                }
+                (Some(index), _) => {
+                    if !self.symbol_selection.pins.contains(&index) {
+                        self.symbol_selection = SymbolSelection {
+                            shapes: Vec::new(),
+                            pins: vec![index],
+                        };
+                    }
+                }
+                (None, Some(index)) if shift => {
+                    SymbolSelection::toggle(&mut self.symbol_selection.shapes, index)
+                }
+                (None, Some(index)) => {
+                    if !self.symbol_selection.shapes.contains(&index) {
+                        self.symbol_selection = SymbolSelection {
+                            shapes: vec![index],
+                            pins: Vec::new(),
+                        };
+                    }
+                }
+                // Nothing under the pointer: a press on empty canvas starts
+                // a band, and only clears the selection if it stays a click.
+                (None, None) => self.shape_band = Some(at),
+            }
+        }
+
+        // Moving whatever is picked, by the pointer's position in *scene*
+        // coordinates. Not by the raw pointer delta: that one is in screen
+        // pixels, so a zoomed view moved things by the wrong amount and they
+        // drifted away from the cursor. Requiring the pointer to be over the
+        // canvas is also what stops a drag on the panel's size slider from
+        // dragging the selection along with it.
+        let held = ui.ctx().input(|i| i.pointer.primary_down());
+        if let (Some(now), true, None) = (pointer, held, self.shape_band) {
+            if !self.symbol_selection.is_empty() {
+                let (from, moved_before) = *self.moving_shape.get_or_insert((now, false));
+                let by = now - from;
+                if by != egui::Vec2::ZERO {
+                    // Snapshotted on the first movement rather than on the
+                    // press: picking something up to look at it isn't an
+                    // edit, and taking it here still catches the state before
+                    // anything has moved, since the translation is next.
+                    if !moved_before {
+                        self.record_edit();
+                    }
+                    self.translate_selection(appearance, by);
+                    self.moving_shape = Some((now, true));
+                    changed = true;
+                }
+            }
+        }
+
+        if let (Some(origin), Some(now)) = (self.shape_band, pointer) {
+            let rect = egui::Rect::from_two_pos(origin, now);
+            painter.rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(1.0, accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        if released {
+            if let Some(origin) = self.shape_band.take() {
+                let now = pointer.unwrap_or(origin);
+                let rect = egui::Rect::from_two_pos(origin, now);
+                if rect.width() > 1.0 || rect.height() > 1.0 {
+                    // Anything the band touched at all, not only what it
+                    // swallowed whole: a long line drawn across the symbol
+                    // would otherwise be impossible to catch.
+                    self.symbol_selection = SymbolSelection {
+                        shapes: (0..appearance.shapes.len())
+                            .filter(|&index| {
+                                appearance
+                                    .shape_path(index, center)
+                                    .iter()
+                                    .any(|point| rect.contains(*point))
+                            })
+                            .collect(),
+                        pins: pin_positions
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, at)| rect.contains(**at))
+                            .map(|(index, _)| index)
+                            .collect(),
+                    };
+                } else if !shift {
+                    // A press that never became a sweep is a click on empty
+                    // canvas, which is how you deselect.
+                    self.symbol_selection = SymbolSelection::default();
+                }
+            }
+            if matches!(self.moving_shape, Some((_, true))) {
+                self.snap_selection(appearance);
+                changed = true;
+            }
+            self.moving_shape = None;
+        }
+
+        changed
+    }
+
+    /// Keyboard: nudging, deleting, and copy/paste of shapes.
+    fn appearance_keys(
+        &mut self,
+        ui: &mut egui::Ui,
+        appearance: &mut Appearance,
+        typing: bool,
+    ) -> bool {
+        if typing {
+            return false;
+        }
+        let mut changed = false;
+
+        // Arrow keys move by one step of whatever the thing snaps to, so a
+        // nudge lands where a drag would have — the point of having them is
+        // to place something exactly, not to place it slightly off.
+        let nudge = ui.ctx().input(|i| {
+            let mut by = egui::Vec2::ZERO;
+            for (key, step) in [
+                (egui::Key::ArrowLeft, egui::vec2(-1.0, 0.0)),
+                (egui::Key::ArrowRight, egui::vec2(1.0, 0.0)),
+                (egui::Key::ArrowUp, egui::vec2(0.0, -1.0)),
+                (egui::Key::ArrowDown, egui::vec2(0.0, 1.0)),
+            ] {
+                if i.key_pressed(key) {
+                    by += step;
+                }
+            }
+            by
+        });
+        if nudge != egui::Vec2::ZERO && !self.symbol_selection.is_empty() {
+            self.record_edit();
+            for &index in &self.symbol_selection.shapes {
+                appearance.translate_shape(index, nudge * crate::appearance::SHAPE_SNAP);
+            }
+            for &index in &self.symbol_selection.pins {
+                if let Some(pin) = appearance.pins.get_mut(index) {
+                    let by = nudge * canvas::GRID_SPACING;
+                    pin.at = (pin.at.0 + by.x, pin.at.1 + by.y);
+                }
+            }
+            changed = true;
+        }
+
+        if ui
+            .ctx()
+            .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+            && !self.symbol_selection.shapes.is_empty()
+        {
+            self.record_edit();
+            // Removed from the back so the earlier indices stay valid.
+            let mut doomed = self.symbol_selection.shapes.clone();
+            doomed.sort_unstable();
+            for index in doomed.into_iter().rev() {
+                if index < appearance.shapes.len() {
+                    appearance.shapes.remove(index);
+                }
+            }
+            self.symbol_selection = SymbolSelection::default();
+            changed = true;
+        }
+
+        // Only shapes travel. A pin belongs to a port, so there is nothing
+        // for a copy of one to be a pin *of*.
+        let (copy, paste) = ui.ctx().input(|i| {
+            let mut copy = false;
+            let mut paste = None;
+            for event in &i.events {
+                match event {
+                    egui::Event::Copy | egui::Event::Cut => copy = true,
+                    egui::Event::Paste(text) => paste = Some(text.clone()),
+                    _ => {}
+                }
+            }
+            (copy, paste)
+        });
+        if copy && !self.symbol_selection.shapes.is_empty() {
+            let picked: Vec<&crate::appearance::Shape> = self
+                .symbol_selection
+                .shapes
+                .iter()
+                .filter_map(|&index| appearance.shapes.get(index))
+                .collect();
+            if let Ok(json) = serde_json::to_string(&picked) {
+                ui.ctx().copy_text(format!("{SYMBOL_CLIPBOARD_TAG}{json}"));
+            }
+        }
+        if let Some(text) = paste {
+            if let Some(json) = text.strip_prefix(SYMBOL_CLIPBOARD_TAG) {
+                if let Ok(shapes) = serde_json::from_str::<Vec<crate::appearance::Shape>>(json) {
+                    if !shapes.is_empty() {
+                        self.record_edit();
+                        let first = appearance.shapes.len();
+                        appearance.shapes.extend(shapes);
+                        // Offset so the copy is visibly its own thing rather
+                        // than hidden exactly beneath the original.
+                        for index in first..appearance.shapes.len() {
+                            appearance.translate_shape(
+                                index,
+                                egui::Vec2::splat(crate::appearance::SHAPE_SNAP * 2.0),
+                            );
+                        }
+                        self.symbol_selection = SymbolSelection {
+                            shapes: (first..appearance.shapes.len()).collect(),
+                            pins: Vec::new(),
+                        };
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        changed
+    }
+
+    /// Moves everything picked by the same amount.
+    fn translate_selection(&self, appearance: &mut Appearance, by: egui::Vec2) {
+        for &index in &self.symbol_selection.shapes {
+            appearance.translate_shape(index, by);
+        }
+        for &index in &self.symbol_selection.pins {
+            if let Some(pin) = appearance.pins.get_mut(index) {
+                pin.at = (pin.at.0 + by.x, pin.at.1 + by.y);
+            }
+        }
+    }
+
+    /// Puts everything picked back on its own step, once a drag has ended.
+    ///
+    /// A pin snaps to the *whole* grid and a shape to a quarter of it: a pin
+    /// is what a wire attaches to and has to land on a dot.
+    fn snap_selection(&self, appearance: &mut Appearance) {
+        for &index in &self.symbol_selection.shapes {
+            appearance.snap_shape(index);
+        }
+        for &index in &self.symbol_selection.pins {
+            if let Some(pin) = appearance.pins.get_mut(index) {
+                let snapped = canvas::snap_to_grid(egui::pos2(pin.at.0, pin.at.1));
+                pin.at = (snapped.x, snapped.y);
+            }
+        }
+    }
+
+    /// Drops any selected label whose text was cleared, now that the click
+    /// has moved on from it.
+    ///
+    /// An empty label draws nothing, so leaving it would put an invisible
+    /// shape on the symbol that you'd have to remember the position of to
+    /// ever select again — and moving on is the point at which "I didn't
+    /// want it" is actually settled.
+    fn drop_emptied_labels(&mut self, appearance: &mut Appearance, keeping: Option<usize>) -> bool {
+        let emptied: Vec<usize> = self
+            .symbol_selection
+            .shapes
+            .iter()
+            .copied()
+            .filter(|index| Some(*index) != keeping)
+            .filter(|index| {
+                matches!(
+                    appearance.shapes.get(*index),
+                    Some(crate::appearance::Shape::Text { text, .. }) if text.trim().is_empty()
+                )
+            })
+            .collect();
+        if emptied.is_empty() {
+            return false;
+        }
+        let mut doomed = emptied;
+        doomed.sort_unstable();
+        for index in doomed.into_iter().rev() {
+            appearance.shapes.remove(index);
+        }
+        // Indices below the removals have shifted; rather than repair them,
+        // the selection is dropped — the click that got here is about to set
+        // a new one anyway.
+        self.symbol_selection = SymbolSelection::default();
+        true
+    }
+
     fn content_rect(&self) -> Option<egui::Rect> {
+        if self.view == toolbar::View::Appearance {
+            let (_, appearance) = self.active_appearance();
+            return Some(appearance.rect(egui::Pos2::ZERO));
+        }
+
         let mut bounds: Option<egui::Rect> = None;
         let mut include = |rect: egui::Rect| {
             bounds = Some(match bounds {
@@ -1085,7 +1835,19 @@ impl SimLogixApp {
 
     /// Whether a left drag on empty canvas moves the view right now — the
     /// hand tool always, and the arrow when the preference says so.
+    ///
+    /// False while a symbol is being drawn, along with its mirror below:
+    /// there the primary button belongs to the drawing, and the middle one
+    /// still pans. Gating it in these two is what makes it hold everywhere —
+    /// the selection band is started from the scene's *background response*,
+    /// well outside the appearance view's own code, so it went on sweeping a
+    /// rectangle underneath every line being traced.
     fn pans_on_left_drag(&self) -> bool {
+        if self.view == toolbar::View::Appearance {
+            // The only tool there that gives the primary button back to the
+            // view: every other one is drawing with it.
+            return self.shape_tool == toolbar::ShapeTool::Pan;
+        }
         self.tool == Tool::Pan || (self.tool == Tool::Select && self.left_drag_pans)
     }
 
@@ -1093,7 +1855,8 @@ impl SimLogixApp {
     /// separate rather than one negated, because most tools do neither — a
     /// left drag while wiring is not a band and not a pan.
     fn bands_on_left_drag(&self) -> bool {
-        self.tool == Tool::Marquee || (self.tool == Tool::Select && !self.left_drag_pans)
+        self.view == toolbar::View::Schematic
+            && (self.tool == Tool::Marquee || (self.tool == Tool::Select && !self.left_drag_pans))
     }
 
     /// Copies the selection.
@@ -1114,6 +1877,20 @@ impl SimLogixApp {
     /// `Rc<Cell<…>>` handles go with them, which is exactly right: a switch
     /// inside a sub-circuit isn't yours to click from out here, and the
     /// engine component keeps its own clone of the cell.
+    /// The symbol a circuit shows when it is placed: its own if it has been
+    /// given one, and the generated box otherwise.
+    ///
+    /// Resolved once, when the instance is built — the same moment its
+    /// innards are flattened, so a symbol and the circuit behind it are
+    /// always the pair that was read together.
+    fn appearance_of(&self, path: &str, ports: &[InstancePort]) -> Appearance {
+        self.circuits
+            .iter()
+            .find(|circuit| circuit.path() == path)
+            .and_then(|circuit| circuit.appearance.clone())
+            .unwrap_or_else(|| Appearance::generated(ports))
+    }
+
     fn flatten(&mut self, path: &str) -> Option<InstanceWiring> {
         // A circuit that contains itself, however indirectly, would flatten
         // forever. The stack is the whole guard.
@@ -2178,11 +2955,17 @@ impl SimLogixApp {
         let redo_stack = std::mem::take(&mut self.redo_stack);
         let window_title = std::mem::take(&mut self.window_title);
         // The camera is view state, not document state -- undoing an edit
-        // shouldn't also throw away where you were looking.
+        // shouldn't also throw away where you were looking. Which *view* is
+        // showing is the same kind of thing, and matters more: undo goes
+        // through here, so without this, undoing a line you just drew would
+        // also throw you out of the appearance view and back to the
+        // schematic.
         let scene_rect = self.scene_rect;
+        let view = (self.view, self.idle_scene_rect, self.shape_tool);
 
         *self = Self::from_project(project, open);
         self.scene_rect = scene_rect;
+        (self.view, self.idle_scene_rect, self.shape_tool) = view;
         self.dirty = dirty;
 
         (self.language, self.language_chosen, self.left_drag_pans) = preferences;
@@ -2222,6 +3005,7 @@ impl SimLogixApp {
             folder: in_folder,
             components: Vec::new(),
             wires: Vec::new(),
+            appearance: None,
         });
         let open = project.circuits.len() - 1;
         self.reopen(&project, open);
@@ -3150,6 +3934,13 @@ impl eframe::App for SimLogixApp {
         // below, snapshot first.
         let mut pending_properties: Option<(ComponentId, Properties, bool)> = None;
         let mut pending_wire_color: Option<(u64, Option<[u8; 3]>)> = None;
+        // The panel edits a copy, as it does for a component: `record_edit`
+        // can't run while `self` is borrowed by it, and editing in place
+        // would snapshot the state *after* the change for the first frame of
+        // every edit.
+        let mut pending_shape: Option<(usize, crate::appearance::Shape, bool)> = None;
+        let mut pending_pin: Option<(usize, crate::appearance::PinSlot, bool)> = None;
+        let mut pending_symbol: Option<(bool, bool)> = None;
         let mut pending_kind: Option<(ComponentId, ComponentKind)> = None;
         egui::Panel::right("properties")
             .resizable(true)
@@ -3160,6 +3951,52 @@ impl eframe::App for SimLogixApp {
                     .id_salt("properties_scroll")
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
+                        // A symbol's shapes are what's selectable while the
+                        // appearance is showing; components and wires belong
+                        // to the other view and aren't even on screen.
+                        if self.view == toolbar::View::Appearance {
+                            let (ports, mut appearance) = self.active_appearance();
+                            let lone_shape = match self.symbol_selection.shapes.as_slice() {
+                                [only] if self.symbol_selection.pins.is_empty() => Some(*only),
+                                _ => None,
+                            };
+                            let lone_pin = match self.symbol_selection.pins.as_slice() {
+                                [only] if self.symbol_selection.shapes.is_empty() => Some(*only),
+                                _ => None,
+                            };
+                            if let Some(index) = lone_shape {
+                                if let Some(shape) = appearance.shapes.get_mut(index) {
+                                    let before = shape.clone();
+                                    let outcome = properties::show_shape(ui, strings, shape);
+                                    if outcome.edit_started || *shape != before {
+                                        pending_shape =
+                                            Some((index, shape.clone(), outcome.edit_started));
+                                    }
+                                }
+                            } else if let Some(index) = lone_pin {
+                                if let Some(pin) = appearance.pins.get_mut(index) {
+                                    let before = *pin;
+                                    let outcome =
+                                        properties::show_pin(ui, strings, pin, ports.get(index));
+                                    if outcome.edit_started || *pin != before {
+                                        pending_pin = Some((index, *pin, outcome.edit_started));
+                                    }
+                                }
+                            } else if self.symbol_selection.is_empty() {
+                                let before = appearance.show_name;
+                                let outcome = properties::show_symbol(ui, strings, &mut appearance);
+                                if outcome.edit_started || appearance.show_name != before {
+                                    pending_symbol =
+                                        Some((appearance.show_name, outcome.edit_started));
+                                }
+                            } else {
+                                // Several things picked: no one set of
+                                // properties to show.
+                                ui.label(strings.shape_none_selected);
+                            }
+                            return;
+                        }
+
                         // Only a lone selection has properties to show: with
                         // several picked there is no one set to edit.
                         let selected_wire = self
@@ -3196,6 +4033,37 @@ impl eframe::App for SimLogixApp {
                         }
                     });
             });
+
+        if let Some((show_name, edit_started)) = pending_symbol {
+            if edit_started {
+                self.record_edit();
+            }
+            let (_, mut appearance) = self.active_appearance();
+            appearance.show_name = show_name;
+            self.circuits[self.active].appearance = Some(appearance);
+        }
+
+        if let Some((index, pin, edit_started)) = pending_pin {
+            if edit_started {
+                self.record_edit();
+            }
+            let (_, mut appearance) = self.active_appearance();
+            if let Some(slot) = appearance.pins.get_mut(index) {
+                *slot = pin;
+                self.circuits[self.active].appearance = Some(appearance);
+            }
+        }
+
+        if let Some((index, shape, edit_started)) = pending_shape {
+            if edit_started {
+                self.record_edit();
+            }
+            let (_, mut appearance) = self.active_appearance();
+            if let Some(slot) = appearance.shapes.get_mut(index) {
+                *slot = shape;
+                self.circuits[self.active].appearance = Some(appearance);
+            }
+        }
 
         if let Some((id, kind)) = pending_kind {
             self.record_edit();
@@ -3238,9 +4106,39 @@ impl eframe::App for SimLogixApp {
         // only the canvas, not the whole window: panels claim their space in
         // declaration order, and this bar acts on the canvas alone.
         egui::Panel::top("toolbar").show(ui, |ui| {
-            if let Some(tool) = toolbar::show(ui, strings, &self.tool) {
-                self.tool = tool;
-            }
+            // Which side of the circuit you're on comes first, and the tools
+            // follow from it. Showing both sets at once left half the bar
+            // inert: a wire tool means nothing while drawing a symbol, and a
+            // rectangle tool means nothing on a schematic.
+            ui.horizontal(|ui| {
+                if let Some(view) = toolbar::show_views(ui, strings, self.view) {
+                    self.switch_view(view);
+                }
+                ui.separator();
+                match self.view {
+                    toolbar::View::Schematic => {
+                        if let Some(tool) = toolbar::show(ui, strings, &self.tool) {
+                            self.tool = tool;
+                        }
+                    }
+                    toolbar::View::Appearance => {
+                        if let Some(tool) = toolbar::show_shape_tools(ui, strings, self.shape_tool)
+                        {
+                            self.shape_tool = tool;
+                            self.drawing = None;
+                        }
+                        ui.separator();
+                        if ui
+                            .button(strings.appearance_reset)
+                            .on_hover_text(strings.appearance_reset_hint)
+                            .clicked()
+                        {
+                            self.record_edit();
+                            self.circuits[self.active].appearance = None;
+                        }
+                    }
+                }
+            });
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -3380,6 +4278,15 @@ impl eframe::App for SimLogixApp {
                         canvas_rect,
                         ui.visuals().weak_text_color().gamma_multiply(0.55),
                     );
+
+                    // The appearance view shares the grid, the camera and the
+                    // pointer mapping and nothing else: no components, no
+                    // wires, no simulation. Branching here rather than at the
+                    // panel keeps all of that in one place.
+                    if self.view == toolbar::View::Appearance {
+                        self.appearance_ui(ui, &painter, pointer_scene);
+                        return;
+                    }
 
                     // Rotation applies to everything selected. Each turns on
                     // its own centre rather than the group's: a component's
@@ -4519,20 +5426,18 @@ impl eframe::App for SimLogixApp {
                                             .collect()
                                     })
                                     .unwrap_or_default();
-                                let rect = egui::Rect::from_center_size(
-                                    at,
-                                    egui::vec2(
-                                        BOX_SIZE.x,
-                                        crate::placed_component::instance_height(&ports),
-                                    ),
-                                );
+                                // Through `appearance_of` like the real
+                                // instance, so the ghost shows the circuit's
+                                // own symbol when it has one.
+                                let appearance = self.appearance_of(path, &ports);
                                 crate::symbol::draw_instance(
                                     &painter,
-                                    rect,
+                                    at,
                                     self.place_rotation,
                                     faint,
                                     path,
                                     &ports,
+                                    &appearance,
                                     &crate::symbol::TextLayer::for_ui(ui),
                                 );
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
@@ -4851,6 +5756,92 @@ mod tests {
         assert_eq!(app.library, "alu");
         app.undo();
         assert_eq!(app.library, "cpu");
+    }
+
+    #[test]
+    fn a_left_drag_does_nothing_schematic_while_a_symbol_is_being_drawn() {
+        let mut app = SimLogixApp {
+            tool: Tool::Marquee,
+            ..Default::default()
+        };
+        assert!(app.bands_on_left_drag());
+
+        app.switch_view(toolbar::View::Appearance);
+
+        // Both false, whatever the tool or the preference was: the primary
+        // button belongs to the drawing here, and the middle one still pans.
+        // The band is started from the scene's background response, outside
+        // the appearance view's own code, so gating it there is what stops a
+        // selection rectangle being swept under every line traced.
+        assert!(!app.bands_on_left_drag());
+        assert!(!app.pans_on_left_drag());
+
+        app.left_drag_pans = true;
+        assert!(!app.pans_on_left_drag());
+    }
+
+    #[test]
+    fn each_view_keeps_its_own_camera() {
+        let mut app = SimLogixApp::default();
+        let schematic =
+            egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(400.0, 300.0));
+        app.scene_rect = schematic;
+
+        app.switch_view(toolbar::View::Appearance);
+        // A symbol always sits on the origin while a schematic sits wherever
+        // it was drawn, so carrying one camera across would land nowhere.
+        assert_ne!(app.scene_rect, schematic);
+
+        app.switch_view(toolbar::View::Schematic);
+        assert_eq!(app.scene_rect, schematic, "and it comes back untouched");
+    }
+
+    #[test]
+    fn the_appearance_view_frames_the_symbol_rather_than_the_drawing() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::InputPort, egui::pos2(600.0, 600.0));
+        app.switch_view(toolbar::View::Appearance);
+
+        let framed = app.content_rect().expect("a symbol always has an extent");
+        // Centred on the origin: the schematic is 600 away, and framing on
+        // *it* is what would put the symbol off screen.
+        assert_eq!(framed.center(), egui::Pos2::ZERO);
+    }
+
+    #[test]
+    fn a_circuit_with_a_symbol_of_its_own_stops_showing_the_generated_box() {
+        let mut app = SimLogixApp::default();
+        app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+        app.rename_circuit(0, "sub");
+        // A symbol reaching further than the generated box would, so the
+        // instance's own rect has to come from the symbol rather than from
+        // the port count.
+        app.circuits[0].appearance = Some(crate::appearance::Appearance {
+            shapes: vec![crate::appearance::Shape::Circle {
+                center: (0.0, 0.0),
+                radius: 90.0,
+            }],
+            pins: vec![crate::appearance::PinSlot {
+                at: (-90.0, 0.0),
+                facing: crate::appearance::Facing::Left,
+                lead: 10.0,
+                show_name: true,
+            }],
+            show_name: true,
+        });
+
+        app.create_circuit(String::new());
+        let instance = app.place(
+            ComponentKind::Circuit("sub".to_string()),
+            egui::pos2(200.0, 200.0),
+        );
+
+        let placed = app
+            .placed
+            .iter()
+            .find(|placed| placed.id() == instance)
+            .expect("just placed");
+        assert_eq!(placed.rect().width(), 180.0, "the symbol decides its size");
     }
 
     #[test]

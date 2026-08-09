@@ -7,6 +7,7 @@ use std::rc::Rc;
 use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
 use simlogix_core::{Circuit, ComponentId, NetId, PortLevel, Signal};
 
+use crate::appearance::Appearance;
 use crate::canvas::{self, Rotation, BOX_SIZE};
 use crate::palette::ComponentKind;
 use crate::properties::{Properties, DEFAULT_LED_COLOR};
@@ -143,6 +144,10 @@ enum Shape {
         /// has to re-apply — it derives everything else from the *open*
         /// drawing, and these wires aren't in it.
         inner_groups: Vec<Vec<(ComponentId, usize)>>,
+        /// What it looks like: the circuit's own symbol if it has one, and
+        /// otherwise the generated box. Resolved once, when the instance is
+        /// built, rather than worked out again on every frame.
+        appearance: Appearance,
     },
     /// A circuit boundary port. `level` is present only on an input, the
     /// one port whose value is set by hand — clicking it *latches*, unlike
@@ -228,6 +233,7 @@ impl PlacedComponent {
         path: String,
         ports: Vec<InstancePort>,
         inner_groups: Vec<Vec<(ComponentId, usize)>>,
+        appearance: Appearance,
     ) -> Self {
         Self::new(
             id,
@@ -236,6 +242,7 @@ impl PlacedComponent {
                 path,
                 ports,
                 inner_groups,
+                appearance,
             },
         )
     }
@@ -268,11 +275,12 @@ impl PlacedComponent {
     /// The box this component occupies. Everything is one grid box except an
     /// instance, which grows downward with the number of pins it must show.
     pub fn rect(&self) -> Rect {
-        let height = match &self.shape {
-            Shape::Instance { ports, .. } => instance_height(ports),
-            _ => BOX_SIZE.y,
-        };
-        Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, height))
+        if let Shape::Instance { appearance, .. } = &self.shape {
+            // A symbol you drew decides its own extent; the generated box
+            // reports exactly what it always did.
+            return appearance.rect(self.center);
+        }
+        Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, BOX_SIZE.y))
     }
 
     pub fn bus_transceiver(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
@@ -611,16 +619,21 @@ impl PlacedComponent {
                     pins,
                 }
             }
-            Shape::Instance { path, ports, .. } => {
-                let rect =
-                    Rect::from_center_size(*center, egui::vec2(BOX_SIZE.x, instance_height(ports)));
+            Shape::Instance {
+                path,
+                ports,
+                appearance,
+                ..
+            } => {
+                let rect = appearance.rect(*center);
                 let pin_positions = symbol::draw_instance(
                     painter,
-                    rect,
+                    *center,
                     *rotation,
                     symbol_color,
                     path,
                     ports,
+                    appearance,
                     &text_layer,
                 );
                 if is_selected {
