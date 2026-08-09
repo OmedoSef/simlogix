@@ -113,6 +113,8 @@ pub struct Strings {
     pub folder_top_level: &'static str,
     /// Base name for a freshly created folder — see `circuit_default_name`.
     pub folder_default_name: &'static str,
+    pub circuit_place: &'static str,
+    pub circuit_place_self: &'static str,
     pub circuit_rename: &'static str,
     pub circuit_delete: &'static str,
     /// Why deleting is refused on the last remaining circuit.
@@ -222,6 +224,8 @@ pub struct Strings {
     pub error_save_failed: &'static str,
     /// Contains a literal `{}` for the underlying error message.
     pub error_open_failed: &'static str,
+    /// Contains a literal `{}` for the circuit that contains itself.
+    pub error_circuit_recursion: &'static str,
 }
 
 impl Strings {
@@ -362,6 +366,8 @@ static ENGLISH: Strings = Strings {
     folder_delete_hint: "What is inside moves up to the folder above.",
     folder_top_level: "Top level",
     folder_default_name: "folder",
+    circuit_place: "Place in this circuit",
+    circuit_place_self: "A circuit can't contain itself.",
     circuit_rename: "Rename",
     circuit_delete: "Delete",
     circuit_delete_last: "A project has to keep at least one circuit.",
@@ -456,6 +462,7 @@ static ENGLISH: Strings = Strings {
     error_title: "Error",
     error_save_failed: "Couldn't save project: {}",
     error_open_failed: "Couldn't open project: {}",
+    error_circuit_recursion: "\"{}\" can't contain itself, directly or through another circuit.",
 };
 
 static FRENCH: Strings = Strings {
@@ -548,6 +555,8 @@ static FRENCH: Strings = Strings {
     folder_delete_hint: "Son contenu remonte dans le dossier parent.",
     folder_top_level: "Racine",
     folder_default_name: "dossier",
+    circuit_place: "Poser dans le circuit ouvert",
+    circuit_place_self: "Un circuit ne peut pas se contenir lui-même.",
     circuit_rename: "Renommer",
     circuit_delete: "Supprimer",
     circuit_delete_last: "Un projet doit conserver au moins un circuit.",
@@ -642,6 +651,7 @@ static FRENCH: Strings = Strings {
     error_title: "Erreur",
     error_save_failed: "Échec de l'enregistrement du projet : {}",
     error_open_failed: "Échec de l'ouverture du projet : {}",
+    error_circuit_recursion: "« {} » ne peut pas se contenir lui-même, ni directement ni via un autre circuit.",
 };
 
 static ITALIAN: Strings = Strings {
@@ -734,6 +744,8 @@ static ITALIAN: Strings = Strings {
     folder_delete_hint: "Il contenuto risale alla cartella superiore.",
     folder_top_level: "Livello principale",
     folder_default_name: "cartella",
+    circuit_place: "Inserisci nel circuito aperto",
+    circuit_place_self: "Un circuito non può contenere se stesso.",
     circuit_rename: "Rinomina",
     circuit_delete: "Elimina",
     circuit_delete_last: "Un progetto deve conservare almeno un circuito.",
@@ -829,6 +841,7 @@ static ITALIAN: Strings = Strings {
     error_title: "Errore",
     error_save_failed: "Impossibile salvare il progetto: {}",
     error_open_failed: "Impossibile aprire il progetto: {}",
+    error_circuit_recursion: "\"{}\" non può contenere se stesso, né direttamente né tramite un altro circuito.",
 };
 
 // -----------------------------------------------------------------------------

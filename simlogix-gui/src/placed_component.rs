@@ -4,13 +4,34 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use egui::{Align2, Color32, FontId, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
+use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
 use simlogix_core::{Circuit, ComponentId, NetId, PortLevel, Signal};
 
 use crate::canvas::{self, Rotation, BOX_SIZE};
 use crate::palette::ComponentKind;
 use crate::properties::{Properties, DEFAULT_LED_COLOR};
 use crate::symbol::{self, SymbolState};
+
+/// A flattened sub-circuit's ports and its own internal connections — what
+/// `SimLogixApp::flatten` hands back and `Shape::Instance` keeps.
+pub type InstanceWiring = (Vec<InstancePort>, Vec<Vec<(ComponentId, usize)>>);
+
+/// The same pair, borrowed — what the net rebuild reads back off an instance.
+pub type InstanceWiringRef<'a> = (&'a [InstancePort], &'a [Vec<(ComponentId, usize)>]);
+
+/// One pin an instance exposes, and where it lands inside the flattened
+/// sub-circuit.
+#[derive(Debug, Clone)]
+pub struct InstancePort {
+    pub name: String,
+    /// `InputPort`, `OutputPort` or `InOutPort` — which side of the box it
+    /// goes on, and which way the arrow points.
+    pub kind: ComponentKind,
+    /// The inner pins this port's net touches. The port component itself is
+    /// never instantiated: its pin was only ever a member of that net, so
+    /// unioning the instance's own pin with these *is* the connection.
+    pub inner: Vec<(ComponentId, usize)>,
+}
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
 /// it is, which net it's on, and whether it was clicked this frame (starts
@@ -107,6 +128,17 @@ enum Shape {
     /// The 1-input mirror of `TwoInputGate` (`Not`/`Buffer`), via
     /// [`PlacedComponent::one_input_gate`].
     OneInputGate(ComponentKind),
+    /// An instance of another circuit: an anchor pin per port, with the
+    /// referenced circuit's own components already built into the engine
+    /// but living outside `placed`.
+    Instance {
+        path: String,
+        ports: Vec<InstancePort>,
+        /// The referenced circuit's own connectivity, which the net rebuild
+        /// has to re-apply — it derives everything else from the *open*
+        /// drawing, and these wires aren't in it.
+        inner_groups: Vec<Vec<(ComponentId, usize)>>,
+    },
     /// A circuit boundary port. `level` is present only on an input, the
     /// one port whose value is set by hand — clicking it *latches*, unlike
     /// a `Button`, because a port stands for what a parent will drive and
@@ -185,6 +217,47 @@ impl PlacedComponent {
         Self::new(id, center, Shape::Port { kind, level })
     }
 
+    pub fn instance(
+        id: ComponentId,
+        center: Pos2,
+        path: String,
+        ports: Vec<InstancePort>,
+        inner_groups: Vec<Vec<(ComponentId, usize)>>,
+    ) -> Self {
+        Self::new(
+            id,
+            center,
+            Shape::Instance {
+                path,
+                ports,
+                inner_groups,
+            },
+        )
+    }
+
+    /// What this instance is made of, when it is one — the net rebuild needs
+    /// both halves.
+    pub fn instance_wiring(&self) -> Option<InstanceWiringRef<'_>> {
+        match &self.shape {
+            Shape::Instance {
+                ports,
+                inner_groups,
+                ..
+            } => Some((ports, inner_groups)),
+            _ => None,
+        }
+    }
+
+    /// The box this component occupies. Everything is one grid box except an
+    /// instance, which grows downward with the number of pins it must show.
+    pub fn rect(&self) -> Rect {
+        let height = match &self.shape {
+            Shape::Instance { ports, .. } => instance_height(ports),
+            _ => BOX_SIZE.y,
+        };
+        Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, height))
+    }
+
     pub fn bus_transceiver(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
         Self::new(id, center, Shape::BusTransceiver(kind))
     }
@@ -238,6 +311,7 @@ impl PlacedComponent {
             Shape::Switch { .. } => ComponentKind::Switch,
             Shape::Led => ComponentKind::Led,
             Shape::Port { kind, .. } => kind.clone(),
+            Shape::Instance { path, .. } => ComponentKind::Circuit(path.clone()),
             Shape::Transistor(kind)
             | Shape::BusTransceiver(kind)
             | Shape::Rail(kind)
@@ -310,17 +384,20 @@ impl PlacedComponent {
         let symbol_color = ui.visuals().strong_text_color();
         let dark_mode = ui.visuals().dark_mode;
         let off_color = ui.visuals().weak_text_color();
+        // Labels are painted outside the canvas's transform so they stay
+        // sharp at any zoom — see `symbol::TextLayer`.
+        let text_layer = symbol::TextLayer::for_ui(ui);
 
         // A name the user set is drawn under the symbol — once here rather
         // than once per arm, since every kind can carry one. This is the
         // deliberate exception to "symbols carry no text": an annotation you
         // wrote is not a label the editor generated for you.
         if let Some(label) = properties.label() {
-            painter.text(
+            text_layer.text(
                 Rect::from_center_size(*center, BOX_SIZE).center_bottom() + egui::vec2(0.0, 2.0),
                 Align2::CENTER_TOP,
                 label,
-                FontId::proportional(11.0),
+                11.0,
                 symbol_color,
             );
         }
@@ -338,6 +415,7 @@ impl PlacedComponent {
                         pressed: pressed.get(),
                         ..Default::default()
                     },
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -388,6 +466,7 @@ impl PlacedComponent {
                         pressed: on.get(),
                         ..Default::default()
                     },
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -429,6 +508,7 @@ impl PlacedComponent {
                     *rotation,
                     color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -458,6 +538,7 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -513,6 +594,53 @@ impl PlacedComponent {
                     pins,
                 }
             }
+            Shape::Instance { path, ports, .. } => {
+                let rect =
+                    Rect::from_center_size(*center, egui::vec2(BOX_SIZE.x, instance_height(ports)));
+                let pin_positions = symbol::draw_instance(
+                    painter,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    path,
+                    ports,
+                    &text_layer,
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center);
+
+                // One anchor pin per port, in the order the box lays them
+                // out, which is the order `flatten` sorted them into.
+                let circuit_pins = circuit.pins(id);
+                let pins = pin_positions
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, at)| {
+                        Some(pin_handle(
+                            ui,
+                            painter,
+                            id,
+                            index,
+                            *at,
+                            circuit_pins.get(index)?.net,
+                        ))
+                    })
+                    .collect();
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins,
+                }
+            }
             Shape::Port { level, .. } => {
                 // Every port shows what its net resolves to, driving or not:
                 // on an output that's the whole point, and on the other two
@@ -547,6 +675,7 @@ impl PlacedComponent {
                         label_color: Some(readout_color),
                         ..Default::default()
                     },
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -586,6 +715,7 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -648,6 +778,7 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -700,6 +831,7 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -749,6 +881,7 @@ impl PlacedComponent {
                         label,
                         ..Default::default()
                     },
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -788,6 +921,7 @@ impl PlacedComponent {
                     *rotation,
                     color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -817,6 +951,7 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -869,6 +1004,7 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState::default(),
+                    &text_layer,
                 );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
@@ -926,6 +1062,24 @@ fn signal_letter(signal: Signal) -> &'static str {
         Signal::HighZ => "Z",
         _ => "?",
     }
+}
+
+/// How tall an instance's box has to be to show its pins, always a whole
+/// number of grid steps so every pin lands on a dot.
+pub fn instance_height(ports: &[InstancePort]) -> f32 {
+    let outputs = ports
+        .iter()
+        .filter(|port| port.kind == ComponentKind::OutputPort)
+        .count();
+    let per_side = outputs.max(ports.len() - outputs);
+
+    // Pins sit whole grid steps below the box's top edge, and that edge is
+    // `centre - height / 2`. So it is *half* the height that has to be a
+    // whole number of steps: an odd count would put the top edge — and every
+    // pin with it — between two dots.
+    let steps = (per_side + 1).max(2);
+    let steps = steps + steps % 2;
+    BOX_SIZE.y.max(steps as f32 * canvas::GRID_SPACING)
 }
 
 /// How far `interact_box` actually moved a component this frame.
@@ -1011,5 +1165,54 @@ fn pin_handle(
         position,
         net,
         clicked: response.clicked(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn port(kind: ComponentKind) -> InstancePort {
+        InstancePort {
+            name: String::new(),
+            kind,
+            inner: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_instance_box_always_puts_its_pins_on_the_grid() {
+        // Pins are placed whole steps below the top edge, which is
+        // `centre - height / 2` -- so half the height has to be a whole
+        // number of steps, or every pin lands between two dots.
+        for count in 1..8 {
+            let ports: Vec<InstancePort> =
+                (0..count).map(|_| port(ComponentKind::InputPort)).collect();
+            let height = instance_height(&ports);
+            let half_steps = height / 2.0 / canvas::GRID_SPACING;
+            assert_eq!(
+                half_steps,
+                half_steps.round(),
+                "{count} ports gave a height of {height}"
+            );
+            // And it has to be tall enough for the last pin to fit inside.
+            assert!(height >= (count as f32 + 1.0) * canvas::GRID_SPACING);
+        }
+    }
+
+    #[test]
+    fn the_two_sides_are_counted_separately() {
+        // Three in and one out needs room for three, not for four.
+        let ports = vec![
+            port(ComponentKind::InputPort),
+            port(ComponentKind::InputPort),
+            port(ComponentKind::InputPort),
+            port(ComponentKind::OutputPort),
+        ];
+        assert_eq!(instance_height(&ports), instance_height(&ports[..3]));
     }
 }

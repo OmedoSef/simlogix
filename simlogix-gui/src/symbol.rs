@@ -19,6 +19,68 @@ const PIN_RADIUS: f32 = 3.0;
 /// How far a `Button`'s cap sinks towards its pin while held.
 const CAP_TRAVEL: f32 = 2.5;
 
+/// Where a symbol's text goes, and at what size.
+///
+/// Labels are painted into a layer that carries **no** transform, at a
+/// position mapped out of the canvas's own coordinates and at a size scaled
+/// by the zoom. That is the only way to keep them sharp: `egui::Scene`
+/// transforms a whole layer, which scales glyphs that have already been
+/// rasterised, so text inside it is resampled at any zoom but 1. Compensating
+/// the font size cannot help — rasterised at `g` and shown at `g × zoom`, the
+/// two agree only at zoom 1. Painting outside the transform makes the
+/// rasterised size *be* the displayed size, at every zoom.
+///
+/// Outside a `Scene` (the palette, for one) the transform is the identity and
+/// this behaves exactly like painting normally.
+pub struct TextLayer {
+    painter: Painter,
+    /// Canvas coordinates to screen coordinates.
+    to_screen: egui::emath::TSTransform,
+}
+
+impl TextLayer {
+    /// Builds one for whatever layer `ui` is currently painting into.
+    pub fn for_ui(ui: &egui::Ui) -> Self {
+        let to_screen = ui
+            .ctx()
+            .layer_transform_to_global(ui.layer_id())
+            .unwrap_or_default();
+        Self {
+            // Clipped to the same region as the caller: a layer of its own
+            // is not bounded by the panel the canvas sits in, and labels
+            // would otherwise spill over the panels beside it.
+            painter: ui
+                .ctx()
+                .layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new(("symbol_text", ui.layer_id().id)),
+                ))
+                .with_clip_rect(to_screen * ui.clip_rect()),
+            to_screen,
+        }
+    }
+
+    /// A plain painter, for callers with no transform to undo.
+    pub fn plain(painter: Painter) -> Self {
+        Self {
+            painter,
+            to_screen: egui::emath::TSTransform::IDENTITY,
+        }
+    }
+
+    /// `size` is in canvas units; the zoom is applied here.
+    pub fn text(&self, at: Pos2, align: Align2, text: &str, size: f32, color: Color32) {
+        let zoom = self.to_screen.scaling;
+        self.painter.text(
+            self.to_screen * at,
+            align,
+            text,
+            FontId::proportional(size * zoom),
+            color,
+        );
+    }
+}
+
 /// Where a drawn component's pins ended up — a wire attaches at these exact
 /// points — in the same order `Circuit::pins` reports them.
 #[derive(Default)]
@@ -60,6 +122,7 @@ pub fn draw(
     rotation: Rotation,
     color: Color32,
     state: SymbolState<'_>,
+    text_layer: &TextLayer,
 ) -> PinPositions {
     let stroke = Stroke::new(1.6, color);
     let label = state.label;
@@ -71,7 +134,9 @@ pub fn draw(
         ComponentKind::PTransistor => draw_transistor(painter, rect, rotation, stroke, false),
         ComponentKind::Ground => draw_ground(painter, rect, rotation, stroke),
         ComponentKind::Power => draw_power(painter, rect, rotation, stroke, color),
-        ComponentKind::Probe => draw_probe(painter, rect, rotation, stroke, color, label),
+        ComponentKind::Probe => {
+            draw_probe(painter, rect, rotation, stroke, color, label, text_layer)
+        }
         ComponentKind::Clock => draw_clock(painter, rect, rotation, stroke),
         ComponentKind::And => draw_and_gate(painter, rect, rotation, stroke, false),
         ComponentKind::Nand => draw_and_gate(painter, rect, rotation, stroke, true),
@@ -81,18 +146,24 @@ pub fn draw(
         ComponentKind::Xnor => draw_or_gate(painter, rect, rotation, stroke, true, true),
         ComponentKind::Buffer => draw_triangle_gate(painter, rect, rotation, stroke, false),
         ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
-        ComponentKind::InputPort => draw_port(painter, rect, rotation, stroke, color, 1, state),
-        ComponentKind::OutputPort => draw_port(painter, rect, rotation, stroke, color, -1, state),
-        ComponentKind::InOutPort => draw_port(painter, rect, rotation, stroke, color, 0, state),
-        ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke),
+        ComponentKind::InputPort => {
+            draw_port(painter, rect, rotation, stroke, color, 1, state, text_layer)
+        }
+        ComponentKind::OutputPort => draw_port(
+            painter, rect, rotation, stroke, color, -1, state, text_layer,
+        ),
+        ComponentKind::InOutPort => {
+            draw_port(painter, rect, rotation, stroke, color, 0, state, text_layer)
+        }
+        ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke, text_layer),
         // A circuit instance draws its own generated box, not a fixed symbol.
         ComponentKind::Circuit(_) => PinPositions::default(),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
         ComponentKind::BusTransceiver => {
-            draw_bus_transceiver(painter, rect, rotation, stroke, false)
+            draw_bus_transceiver(painter, rect, rotation, stroke, false, text_layer)
         }
         ComponentKind::BusTransceiverOe => {
-            draw_bus_transceiver(painter, rect, rotation, stroke, true)
+            draw_bus_transceiver(painter, rect, rotation, stroke, true, text_layer)
         }
     }
 }
@@ -109,12 +180,14 @@ pub fn draw(
 /// it, as a plain `EN`. That bubble is the whole difference on screen, and
 /// it has to be there: the two variants are otherwise identical, and so is
 /// the tri-state buffer's own (active-high, unbubbled) enable.
+#[allow(clippy::too_many_arguments)]
 fn draw_bus_transceiver(
     painter: &Painter,
     rect: Rect,
     rotation: Rotation,
     stroke: Stroke,
     active_low: bool,
+    text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
     let r = |p: Pos2| rotate(p, c, rotation);
@@ -169,19 +242,18 @@ fn draw_bus_transceiver(
     }
 
     // Upright at rotated positions, like every other label here.
-    let font = FontId::proportional(9.0);
-    painter.text(
+    text_layer.text(
         r(pos2(body.left() + 3.0, rect.top() + 7.0)),
         Align2::LEFT_CENTER,
         "DIR",
-        font.clone(),
+        9.0,
         color,
     );
-    painter.text(
+    text_layer.text(
         r(pos2(body.left() + 3.0, rect.bottom() - 7.0)),
         Align2::LEFT_CENTER,
         if active_low { "OE" } else { "EN" },
-        font,
+        9.0,
         color,
     );
 
@@ -309,6 +381,7 @@ fn draw_switch(
 /// readout a `Probe` uses. A fill would have been enough for a switch with
 /// two positions; a port has three it can be *put* in and five it can
 /// *read*, and a letter says all of them.
+#[allow(clippy::too_many_arguments)]
 fn draw_port(
     painter: &Painter,
     rect: Rect,
@@ -317,6 +390,7 @@ fn draw_port(
     color: Color32,
     flow: i32,
     state: SymbolState<'_>,
+    text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
     let r = |p: Pos2| rotate(p, c, rotation);
@@ -342,11 +416,11 @@ fn draw_port(
 
     // Readout on the left, arrow on the right: the value changes constantly
     // and the arrow never does, so the eye should land on the value first.
-    painter.text(
+    text_layer.text(
         r(pos2(body.left() + 8.0, c.y)),
         Align2::CENTER_CENTER,
         state.label,
-        FontId::proportional(11.0),
+        11.0,
         state.label_color.unwrap_or(color),
     );
 
@@ -392,6 +466,7 @@ fn draw_sr_latch(
     rect: Rect,
     rotation: Rotation,
     stroke: Stroke,
+    text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
     let r = |p: Pos2| rotate(p, c, rotation);
@@ -426,10 +501,9 @@ fn draw_sr_latch(
 
     // Drawn upright at rotated positions, the same way a component's own
     // name label is: turning the glyphs would only make them unreadable.
-    let font = FontId::proportional(9.0);
     let pad = 4.0;
     let label = |at: Pos2, align: Align2, text: &str| {
-        painter.text(r(at), align, text, font.clone(), color);
+        text_layer.text(r(at), align, text, 9.0, color);
     };
     label(
         pos2(body.left() + pad, body.top() + pad + 3.0),
@@ -510,6 +584,97 @@ pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
                 stroke,
             );
         }
+    }
+}
+
+/// An instance of another circuit: a named box with a labelled pin per port.
+///
+/// Generated rather than drawn, so it exists the moment a circuit has ports
+/// — the appearance editor on the roadmap will replace it. Inputs go down
+/// the left and outputs down the right, in the order `flatten` sorted them
+/// into, which is where the ports sit in the sub-circuit: move one up there
+/// and its pin moves up here. Bidirectional ports join the inputs, since
+/// they have to be on *a* side and the left is where a reader starts.
+///
+/// Labelled, by the same rule the latch and the transceiver follow: these
+/// pins are not interchangeable and nothing about their position says which
+/// is which.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_instance(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    color: Color32,
+    name: &str,
+    ports: &[crate::placed_component::InstancePort],
+    text_layer: &TextLayer,
+) -> PinPositions {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+
+    let body = Rect::from_min_max(
+        pos2(rect.left() + rect.width() * 0.16, rect.top()),
+        pos2(rect.right() - rect.width() * 0.16, rect.bottom()),
+    );
+    let corners = [
+        body.left_top(),
+        body.right_top(),
+        body.right_bottom(),
+        body.left_bottom(),
+        body.left_top(),
+    ];
+    painter.line(corners.into_iter().map(r).collect(), stroke);
+
+    text_layer.text(
+        r(pos2(c.x, rect.top() - 2.0)),
+        Align2::CENTER_BOTTOM,
+        name,
+        10.0,
+        color,
+    );
+
+    // Pins are laid out from the top of the box in whole grid steps, so each
+    // lands on a dot whatever the box's height works out to be.
+    let mut left = 0usize;
+    let mut right = 0usize;
+    let mut positions = Vec::with_capacity(ports.len());
+    for port in ports {
+        let is_output = port.kind == ComponentKind::OutputPort;
+        let slot = if is_output { &mut right } else { &mut left };
+        let y = rect.top() + (*slot as f32 + 1.0) * crate::canvas::GRID_SPACING;
+        *slot += 1;
+
+        let (pin, edge, align) = if is_output {
+            (
+                pos2(rect.right(), y),
+                pos2(body.right(), y),
+                Align2::RIGHT_CENTER,
+            )
+        } else {
+            (
+                pos2(rect.left(), y),
+                pos2(body.left(), y),
+                Align2::LEFT_CENTER,
+            )
+        };
+        painter.line_segment([r(pin), r(edge)], stroke);
+        draw_pin(painter, r(pin), color);
+        text_layer.text(
+            r(pos2(edge.x + if is_output { -4.0 } else { 4.0 }, y)),
+            align,
+            &port.name,
+            9.0,
+            color,
+        );
+        positions.push(r(pin));
+    }
+
+    // All in `inputs`, in port order: the caller maps pin *index* to anchor
+    // pin, and splitting them by side here would only make it re-merge them.
+    PinPositions {
+        inputs: positions,
+        outputs: vec![],
     }
 }
 
@@ -838,6 +1003,7 @@ fn draw_probe(
     stroke: Stroke,
     color: Color32,
     label: &str,
+    text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
     let r = |p: Pos2| rotate(p, c, rotation);
@@ -847,13 +1013,7 @@ fn draw_probe(
     let pin = pos2(rect.left(), c.y);
     painter.line_segment([r(pin), r(pos2(bulb.x - radius, c.y))], stroke);
     painter.circle_stroke(r(bulb), radius, stroke);
-    painter.text(
-        r(bulb),
-        Align2::CENTER_CENTER,
-        label,
-        FontId::proportional(13.0),
-        color,
-    );
+    text_layer.text(r(bulb), Align2::CENTER_CENTER, label, 13.0, color);
 
     draw_pin(painter, r(pin), color);
     PinPositions {

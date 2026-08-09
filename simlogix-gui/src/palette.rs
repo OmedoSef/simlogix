@@ -312,6 +312,8 @@ fn palette_row(ui: &mut Ui, kind: Option<&ComponentKind>, name: &str, is_active:
                         label: preview_label,
                         ..Default::default()
                     },
+                    // No transform to undo out here in the panel.
+                    &symbol::TextLayer::plain(ui.painter().clone()),
                 );
             }
             None => symbol::draw_wire_tool(ui.painter(), icon_rect, visuals.fg_stroke.color),

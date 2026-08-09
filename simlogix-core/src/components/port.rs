@@ -108,6 +108,31 @@ impl Component for CircuitOutput {
     }
 }
 
+/// The pins an instance of a sub-circuit exposes to the circuit containing
+/// it — one per port, driving nothing.
+///
+/// It exists only to give the parent's wires something to attach to, and to
+/// be a point the net rebuild can union with the sub-circuit's internals.
+/// The sub-circuit's own port components are *not* instantiated: a port's
+/// pin is only ever a member of an inner net, so unioning this pin with that
+/// net is the whole connection — and an input port that stayed alive would
+/// fight whatever the parent drives into it.
+pub struct CircuitAnchor {
+    pins: usize,
+}
+
+impl CircuitAnchor {
+    pub fn new(pins: usize) -> Self {
+        Self { pins }
+    }
+}
+
+impl Component for CircuitAnchor {
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        vec![Signal::HighZ; self.pins]
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
@@ -161,6 +186,17 @@ mod tests {
         // Otherwise a port set to two-state *after* being left undriven
         // would be stuck there with no way to click out of it.
         assert_eq!(PortLevel::Undriven.next(false), PortLevel::High);
+    }
+
+    #[test]
+    fn an_anchor_contributes_nothing_to_any_of_its_pins() {
+        // Every pin is `InOut`, so the engine writes a value back to each;
+        // all of them have to be `HighZ` or the instance would drive its own
+        // ports.
+        assert_eq!(
+            CircuitAnchor::new(3).eval(&[Signal::High, Signal::Low, Signal::Unknown]),
+            vec![Signal::HighZ; 3]
+        );
     }
 
     #[test]

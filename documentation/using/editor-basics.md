@@ -272,3 +272,23 @@ panel offers **Type**; switching it redraws the symbol and keeps everything
 attached, wires and routes included.
 
 It's an ordinary edit, so `Ctrl+Z` puts it back.
+
+## Using a circuit inside another
+
+Give a circuit some ports (see above), then right-click it in the tree and
+choose **Place in this circuit**. A preview follows the pointer, showing the
+box you're about to drop: inputs down the left, outputs down the right, each
+labelled with its port's name.
+
+The pins appear in the order the ports sit **in the sub-circuit**, top to
+bottom. Move a port up in there and its pin moves up on every box out here —
+that's the only ordering there is, and it's one you can see.
+
+An instance is not a snapshot: editing the circuit it refers to changes what
+its instances do, and two instances of the same circuit are two genuinely
+independent copies. A circuit cannot contain itself, directly or through
+another one; the menu entry is greyed out on the circuit you're editing, and
+a longer loop is refused with a message.
+
+The sub-circuit's own switches, buttons and ports aren't yours to click from
+out here — from the parent, the box is driven entirely through its pins.

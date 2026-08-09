@@ -161,6 +161,100 @@ pub enum SavedEndpoint {
     Free(f32, f32),
 }
 
+impl SavedCircuit {
+    /// How another circuit in the same project refers to this one:
+    /// `adder`, or `alu/adder` when it's filed in a folder.
+    pub fn path(&self) -> String {
+        if self.folder.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}/{}", self.folder, self.name)
+        }
+    }
+
+    /// Which `(component index, pin index)` pairs this circuit's wires hold
+    /// together — its connectivity, read straight off the saved drawing.
+    ///
+    /// The same union-find `SimLogixApp::rebuild_nets` runs on the live
+    /// drawing, done here on saved data because instantiating this circuit
+    /// somewhere else needs its internal connections without opening it.
+    /// Groups of one are left out: a lone pin is its own net anyway.
+    pub fn pin_groups(&self) -> Vec<Vec<(usize, usize)>> {
+        let mut parent = std::collections::HashMap::new();
+
+        for (index, wire) in self.wires.iter().enumerate() {
+            let self_node = SavedNode::Wire(index);
+            parent.entry(self_node).or_insert(self_node);
+            for end in [&wire.from, &wire.to] {
+                match *end {
+                    SavedEndpoint::Pin(component, pin) => {
+                        union(&mut parent, self_node, SavedNode::Pin(component, pin));
+                    }
+                    SavedEndpoint::Junction { wire: host, .. } => {
+                        union(&mut parent, self_node, SavedNode::Wire(host));
+                    }
+                    // A loose end connects nothing.
+                    SavedEndpoint::Free(_, _) => {}
+                }
+            }
+        }
+
+        let mut groups: std::collections::HashMap<SavedNode, Vec<(usize, usize)>> =
+            std::collections::HashMap::new();
+        let nodes: Vec<SavedNode> = parent.keys().copied().collect();
+        for node in nodes {
+            if let SavedNode::Pin(component, pin) = node {
+                let root = find(&mut parent, node);
+                groups.entry(root).or_default().push((component, pin));
+            }
+        }
+        groups
+            .into_values()
+            .filter(|group| group.len() > 1)
+            .collect()
+    }
+}
+
+/// A node of a saved circuit's connectivity graph — the same shape
+/// `SimLogixApp::rebuild_nets` uses on the live drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SavedNode {
+    Pin(usize, usize),
+    Wire(usize),
+}
+
+fn find(
+    parent: &mut std::collections::HashMap<SavedNode, SavedNode>,
+    node: SavedNode,
+) -> SavedNode {
+    let mut root = node;
+    while let Some(&next) = parent.get(&root) {
+        if next == root {
+            break;
+        }
+        root = next;
+    }
+    // Path compression, so a long chain of taps doesn't cost a walk each time.
+    let mut walk = node;
+    while let Some(&next) = parent.get(&walk) {
+        if next == walk {
+            break;
+        }
+        parent.insert(walk, root);
+        walk = next;
+    }
+    root
+}
+
+fn union(parent: &mut std::collections::HashMap<SavedNode, SavedNode>, a: SavedNode, b: SavedNode) {
+    parent.entry(a).or_insert(a);
+    parent.entry(b).or_insert(b);
+    let (ra, rb) = (find(parent, a), find(parent, b));
+    if ra != rb {
+        parent.insert(ra, rb);
+    }
+}
+
 impl SavedProject {
     /// Packs the project into its container.
     ///
@@ -608,6 +702,54 @@ mod tests {
         assert!(wires.iter().all(|wire| wire.waypoints.is_empty()));
         assert!(matches!(wires[0].to, SavedEndpoint::Pin(1, 0)));
         assert!(matches!(wires[1].to, SavedEndpoint::Pin(2, 0)));
+    }
+
+    fn wire(from: SavedEndpoint, to: SavedEndpoint) -> SavedWire {
+        SavedWire {
+            from,
+            to,
+            waypoints: Vec::new(),
+            color: None,
+        }
+    }
+
+    #[test]
+    fn pin_groups_follow_a_chain_of_wires_through_a_junction() {
+        let mut circuit = circuit("main");
+        circuit.components = vec![circuit.components[0].clone(); 3];
+        circuit.wires = vec![
+            wire(SavedEndpoint::Pin(0, 0), SavedEndpoint::Pin(1, 0)),
+            // Tapped onto the first wire rather than onto a pin: the third
+            // pin still belongs to the same net, which is the whole reason
+            // this is a union-find and not a scan of endpoints.
+            wire(
+                SavedEndpoint::Junction {
+                    wire: 0,
+                    waypoint: 0,
+                },
+                SavedEndpoint::Pin(2, 0),
+            ),
+        ];
+
+        let groups = circuit.pin_groups();
+
+        assert_eq!(groups.len(), 1);
+        let mut group = groups[0].clone();
+        group.sort();
+        assert_eq!(group, vec![(0, 0), (1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn a_wire_with_a_loose_end_groups_nothing() {
+        let mut circuit = circuit("main");
+        circuit.components = vec![circuit.components[0].clone(); 2];
+        circuit.wires = vec![wire(
+            SavedEndpoint::Pin(0, 0),
+            SavedEndpoint::Free(10.0, 10.0),
+        )];
+
+        // One pin on a wire is not a connection: a group of one is no group.
+        assert!(circuit.pin_groups().is_empty());
     }
 
     #[test]

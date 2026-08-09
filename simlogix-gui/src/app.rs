@@ -5,16 +5,16 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use simlogix_core::{
-    And, Buffer, BusTransceiver, Button, Circuit, CircuitOutput, CircuitPort, Clock, Component,
-    ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, Probe, Rail, SrLatch,
-    Transistor, TriStateBuffer, Xnor, Xor,
+    And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
+    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, Probe, Rail,
+    SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::canvas::{self, BOX_SIZE};
 use crate::circuit_tree::{self, RenameTarget, TreeAction};
 use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
-use crate::placed_component::PlacedComponent;
+use crate::placed_component::{InstancePort, InstanceWiring, PlacedComponent};
 use crate::project::{self, SavedCircuit, SavedComponent, SavedEndpoint, SavedProject, SavedWire};
 use crate::properties::{self, Properties};
 use crate::toolbar::{self, Tool};
@@ -45,6 +45,9 @@ const MAX_ZOOM: f32 = 4.0;
 /// How much one notch of the wheel zooms. Applied as `exp(-scroll * this)`,
 /// so zooming compounds evenly instead of accelerating as you go in.
 const WHEEL_ZOOM_SENSITIVITY: f32 = 0.0015;
+/// How much empty room to leave around the drawing when framing it, so a
+/// component at the edge doesn't sit flush against the panel beside it.
+const FIT_MARGIN: f32 = 3.0 * canvas::GRID_SPACING;
 /// How close a click has to land to a wire to count as hitting it.
 const WIRE_HIT_RADIUS: f32 = 6.0;
 /// How close a dropped loose end has to land to a pin or another wire's
@@ -360,11 +363,22 @@ pub struct SimLogixApp {
     circuits: Vec<SavedCircuit>,
     /// Which of `circuits` is open. Always a valid index.
     active: usize,
+    /// Set when the view should be re-framed on what the open circuit
+    /// actually contains: opening a project, or switching circuits.
+    ///
+    /// Deliberately *not* set by undo. Stepping back through your own edits
+    /// must not move you somewhere else — the camera is view state, and
+    /// that is exactly why `reopen` preserves it.
+    refit_view: bool,
     /// Set for the one frame after the open circuit changes, so the tree
     /// scrolls it into view. Without it, adding a circuit to a list longer
     /// than the panel leaves the new one below the fold — it *is* open, but
     /// nothing on screen says so.
     reveal_active: bool,
+    /// Which circuits are being flattened right now, innermost last. Only
+    /// ever non-empty inside [`SimLogixApp::flatten`], where it is the
+    /// guard against a circuit that contains itself.
+    flattening: Vec<String>,
     /// What is being renamed and the name as typed so far, if any.
     renaming: Option<(RenameTarget, String)>,
     /// The region of the circuit currently framed by the canvas, in scene
@@ -418,11 +432,14 @@ impl Default for SimLogixApp {
             }],
             folders: Vec::new(),
             active: 0,
+            refit_view: false,
             reveal_active: false,
+            flattening: Vec::new(),
             renaming: None,
-            // A plain starting window onto the circuit; `Scene` re-fits this
-            // if it ever ends up degenerate.
-            scene_rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)),
+            // Empty means "not framed yet" — the first frame sets it to the
+            // canvas's own size, which is the only value that gives a zoom
+            // of exactly 1. See where it's filled in.
+            scene_rect: egui::Rect::ZERO,
         }
     }
 }
@@ -670,16 +687,27 @@ impl SimLogixApp {
                 self.circuit.schedule_now(id);
                 PlacedComponent::port(id, center, kind, level)
             }
-            // Placing an instance means flattening the referenced circuit
-            // into this one, which is the next step; nothing offers it yet,
-            // so this arm is unreachable. It exists as an anchor with no
-            // pins rather than a panic, because an unreachable arm that
-            // crashes is still a crash.
-            ComponentKind::Circuit(_) => {
+            ComponentKind::Circuit(path) => {
+                // Refusing (a missing circuit, or one that contains itself)
+                // still places the box, empty: an instance you can see and
+                // delete beats a click that silently does nothing, and
+                // `flatten` has already said why in the status window.
+                let (ports, inner_groups) = self.flatten(&path).unwrap_or_default();
+                let pins = ports
+                    .iter()
+                    .map(|_| Pin {
+                        // `InOut` whatever the port's own direction: the
+                        // anchor drives nothing, and its pin has to be able
+                        // to both carry a value in and read one back out.
+                        direction: PinDirection::InOut,
+                        net: self.circuit.add_net(),
+                    })
+                    .collect();
                 let id = self
                     .circuit
-                    .add_component(Box::new(CircuitOutput), Vec::new());
-                PlacedComponent::led(id, center)
+                    .add_component(Box::new(CircuitAnchor::new(ports.len())), pins);
+                self.circuit.schedule_now(id);
+                PlacedComponent::instance(id, center, path, ports, inner_groups)
             }
             ComponentKind::SrLatch => {
                 let nets = [
@@ -1018,6 +1046,36 @@ impl SimLogixApp {
         ctx.set_theme(egui::ThemePreference::System);
     }
 
+    /// The area the drawing occupies, or `None` when there's nothing in it.
+    ///
+    /// Components contribute their own box — an instance is taller than one
+    /// grid cell — and wires contribute the points that don't follow a pin,
+    /// since those can sit well outside every component.
+    fn content_rect(&self) -> Option<egui::Rect> {
+        let mut bounds: Option<egui::Rect> = None;
+        let mut include = |rect: egui::Rect| {
+            bounds = Some(match bounds {
+                Some(current) => current.union(rect),
+                None => rect,
+            });
+        };
+
+        for placed in &self.placed {
+            include(placed.rect());
+        }
+        for wire in &self.wires {
+            for point in &wire.waypoints {
+                include(egui::Rect::from_center_size(*point, egui::Vec2::ZERO));
+            }
+            for end in [wire.from, wire.to] {
+                if let WireEndpoint::Free(at) = end {
+                    include(egui::Rect::from_center_size(at, egui::Vec2::ZERO));
+                }
+            }
+        }
+        bounds
+    }
+
     /// Whether a left drag on empty canvas moves the view right now — the
     /// hand tool always, and the arrow when the preference says so.
     fn pans_on_left_drag(&self) -> bool {
@@ -1038,6 +1096,133 @@ impl SimLogixApp {
     /// attach, and guessing a loose end for it would paste something you
     /// never selected. So the rule is the predictable one: select the
     /// components and the wires between them.
+    /// Builds `path`'s contents into this circuit's engine, and reports how
+    /// to reach its ports.
+    ///
+    /// The innards end up in the engine but **not** in `placed`: they are
+    /// not part of this drawing and must never be selected, moved or saved
+    /// here. `place` is reused to build them — it knows how to turn a kind
+    /// into a component, and duplicating that match is how the two would
+    /// drift — and the entries it appends are then dropped again. The
+    /// `Rc<Cell<…>>` handles go with them, which is exactly right: a switch
+    /// inside a sub-circuit isn't yours to click from out here, and the
+    /// engine component keeps its own clone of the cell.
+    fn flatten(&mut self, path: &str) -> Option<InstanceWiring> {
+        // A circuit that contains itself, however indirectly, would flatten
+        // forever. The stack is the whole guard.
+        if self.flattening.iter().any(|open| open == path) {
+            let strings = Strings::for_language(self.language);
+            self.error = Some(strings.error_circuit_recursion.replace("{}", path));
+            return None;
+        }
+        let saved = self
+            .circuits
+            .iter()
+            .find(|circuit| circuit.path() == path)?
+            .clone();
+        self.flattening.push(path.to_string());
+
+        let is_port = |kind: &ComponentKind| {
+            matches!(
+                kind,
+                ComponentKind::InputPort | ComponentKind::OutputPort | ComponentKind::InOutPort
+            )
+        };
+
+        // Built in saved order so an index maps straight across; ports are
+        // skipped, so their slot stays empty.
+        let first_inner = self.placed.len();
+        let mut ids: Vec<Option<ComponentId>> = Vec::with_capacity(saved.components.len());
+        for component in &saved.components {
+            if is_port(&component.kind) {
+                ids.push(None);
+                continue;
+            }
+            let id = self.place(component.kind.clone(), egui::pos2(component.x, component.y));
+            if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
+                placed.set_rotation(component.rotation);
+                // Applied before the entry is dropped: this is what puts a
+                // switch's position or a port's resting level into the cell
+                // the engine reads.
+                placed.set_properties(component.properties.clone());
+            }
+            ids.push(Some(id));
+        }
+        self.placed.truncate(first_inner);
+        self.flattening.pop();
+
+        let live = |group: &Vec<(usize, usize)>| -> Vec<(ComponentId, usize)> {
+            group
+                .iter()
+                .filter_map(|&(component, pin)| Some((ids.get(component).copied().flatten()?, pin)))
+                .collect()
+        };
+        let groups = saved.pin_groups();
+
+        let mut ports = Self::port_slots(&saved);
+        for (index, port) in &mut ports {
+            // Whichever group holds this port's pin; the pins in it, minus
+            // the port itself, are what the instance's pin joins.
+            port.inner = groups
+                .iter()
+                .find(|group| group.contains(&(*index, 0)))
+                .map(live)
+                .unwrap_or_default();
+        }
+        let inner_groups = groups.iter().map(live).filter(|g| g.len() > 1).collect();
+        Some((
+            ports.into_iter().map(|(_, port)| port).collect(),
+            inner_groups,
+        ))
+    }
+
+    /// A saved circuit's ports, paired with their index in it, in the order
+    /// a box lays them out.
+    ///
+    /// Read without building anything, so the placement preview can draw the
+    /// right box before a single component exists — and so the preview and
+    /// the real thing can't disagree about which pins there are or in what
+    /// order. `inner` is left empty; only `flatten` can fill it.
+    fn port_slots(saved: &SavedCircuit) -> Vec<(usize, InstancePort)> {
+        let mut ports: Vec<(f32, usize, InstancePort)> = saved
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, component)| {
+                matches!(
+                    component.kind,
+                    ComponentKind::InputPort | ComponentKind::OutputPort | ComponentKind::InOutPort
+                )
+            })
+            .map(|(index, component)| {
+                (
+                    component.y,
+                    index,
+                    InstancePort {
+                        // An unnamed port still needs something on the box.
+                        // Its index is the honest answer — better a number
+                        // you can match to a position than a guess at intent.
+                        name: component
+                            .properties
+                            .label()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| index.to_string()),
+                        kind: component.kind.clone(),
+                        inner: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        // Ordered by where the port sits in the sub-circuit, so moving a port
+        // up there moves its pin up on the box out here — the only ordering
+        // the user can see and control.
+        ports.sort_by(|a, b| a.0.total_cmp(&b.0));
+        ports
+            .into_iter()
+            .map(|(_, index, port)| (index, port))
+            .collect()
+    }
+
     /// Puts the selection on the system clipboard, and keeps a copy.
     ///
     /// The copy is what the Edit menu's Paste uses: a menu item has no way
@@ -1287,6 +1472,7 @@ impl SimLogixApp {
                 let preferences = (self.language, self.language_chosen, self.left_drag_pans);
                 *self = Self::from_project(&project, 0);
                 (self.language, self.language_chosen, self.left_drag_pans) = preferences;
+                self.refit_view = true;
                 self.name_library_after(&path);
                 self.current_path = Some(path);
             }
@@ -1778,6 +1964,37 @@ impl SimLogixApp {
             }
         }
 
+        // An instance's innards are not in this drawing, so what held them
+        // together has to be put back by hand: the sub-circuit's own groups,
+        // and each anchor pin joined to the net its port sat on.
+        for placed in &self.placed {
+            let Some((ports, inner_groups)) = placed.instance_wiring() else {
+                continue;
+            };
+            for group in inner_groups {
+                let mut members = group.iter();
+                let Some(&(first, first_pin)) = members.next() else {
+                    continue;
+                };
+                for &(component, pin) in members {
+                    union(
+                        &mut parent,
+                        Node::Pin(first, first_pin),
+                        Node::Pin(component, pin),
+                    );
+                }
+            }
+            for (index, port) in ports.iter().enumerate() {
+                for &(component, pin) in &port.inner {
+                    union(
+                        &mut parent,
+                        Node::Pin(placed.id(), index),
+                        Node::Pin(component, pin),
+                    );
+                }
+            }
+        }
+
         let mut groups: HashMap<Node, Vec<(ComponentId, usize)>> = HashMap::new();
         let nodes: Vec<Node> = parent.keys().copied().collect();
         for node in nodes {
@@ -1978,6 +2195,7 @@ impl SimLogixApp {
         let project = self.to_project();
         self.reopen(&project, index);
         self.reveal_active = true;
+        self.refit_view = true;
     }
 
     /// Adds an empty circuit to the project and opens it, filed in
@@ -1999,6 +2217,7 @@ impl SimLogixApp {
         let open = project.circuits.len() - 1;
         self.reopen(&project, open);
         self.reveal_active = true;
+        self.refit_view = true;
     }
 
     /// The path of `path`'s parent folder, empty for a top-level one.
@@ -2183,6 +2402,7 @@ impl SimLogixApp {
         };
         self.reopen(&project, open);
         self.reveal_active = true;
+        self.refit_view = true;
     }
 
     /// Renames a circuit. An empty name, or one another circuit in the same
@@ -2792,6 +3012,14 @@ impl eframe::App for SimLogixApp {
                 None => {}
             },
             Some(TreeAction::CancelRename) => self.renaming = None,
+            Some(TreeAction::Place(index)) => {
+                if let Some(circuit) = self.circuits.get(index) {
+                    // Straight into the placement tool, so dropping an
+                    // instance is the same gesture as dropping any other
+                    // component -- preview included.
+                    self.tool = Tool::Place(ComponentKind::Circuit(circuit.path()));
+                }
+            }
             Some(TreeAction::Delete(index)) => self.delete_circuit(index),
             Some(TreeAction::DeleteFolder(path)) => self.delete_folder(&path),
             Some(TreeAction::MoveCircuit { circuit, folder }) => self.move_circuit(circuit, folder),
@@ -2927,6 +3155,44 @@ impl eframe::App for SimLogixApp {
             // The primary drag belongs to the rubber band unless the hand
             // tool is out; the middle button always pans, so there's a way to
             // move the view whatever the tool — and no preference to set.
+            // The framed region starts equal to the canvas, so the view opens
+            // at 1:1.
+            //
+            // It used to be a fixed 1200x800, which `Scene` then fitted into
+            // whatever space the canvas had — so the circuit opened at
+            // roughly 60% and *stayed* there until someone zoomed. That is
+            // invisible on line art and obvious the moment there is text:
+            // `Scene` applies a layer transform, which scales already-drawn
+            // glyphs as a texture rather than re-rasterising them, so any
+            // factor other than 1 blurs them. No font-size compensation can
+            // fix that — rasterised at `g` and shown at `g × zoom`, the two
+            // agree only at zoom 1 — so opening *at* 1 is the fix.
+            // Assigned to the *local* copy taken just above, not to
+            // `self.scene_rect`: that copy is what `Scene` reads and what
+            // gets written back afterwards, so touching the field here would
+            // be overwritten a few lines later and the framing would be
+            // computed every frame and thrown away every frame.
+            let unframed = scene_rect.width() <= 0.0 || scene_rect.height() <= 0.0;
+            if std::mem::take(&mut self.refit_view) || unframed {
+                let canvas = ui.available_size();
+                scene_rect = match self.content_rect() {
+                    Some(content) => {
+                        let content = content.expand(FIT_MARGIN);
+                        // Never magnify: a circuit smaller than the canvas is
+                        // centred at 1:1 rather than blown up to fill it,
+                        // which would open a two-gate circuit at 4x and blur
+                        // every label. Only a drawing too big to fit zooms
+                        // out.
+                        if content.width() <= canvas.x && content.height() <= canvas.y {
+                            egui::Rect::from_center_size(content.center(), canvas)
+                        } else {
+                            content
+                        }
+                    }
+                    None => egui::Rect::from_min_size(egui::Pos2::ZERO, canvas),
+                };
+            }
+
             let mut pan_buttons = egui::containers::DragPanButtons::MIDDLE;
             if self.pans_on_left_drag() {
                 pan_buttons |= egui::containers::DragPanButtons::PRIMARY;
@@ -3831,8 +4097,10 @@ impl eframe::App for SimLogixApp {
                             self.selection.clear();
                         }
                         for placed in &self.placed {
-                            let box_rect = egui::Rect::from_center_size(placed.center(), BOX_SIZE);
-                            if rect.intersects(box_rect) {
+                            // Its own box: an instance is taller than one
+                            // grid cell, and a band that missed it would be
+                            // the kind of bug nobody thinks to report.
+                            if rect.intersects(placed.rect()) {
                                 self.selection.components.insert(placed.id());
                             }
                         }
@@ -4107,8 +4375,47 @@ impl eframe::App for SimLogixApp {
                         // the grid position it will actually land on -- otherwise
                         // placing is a blind click.
                         if let Some(pos) = hover_pos {
-                            let rect =
-                                egui::Rect::from_center_size(canvas::snap_to_grid(pos), BOX_SIZE);
+                            let at = canvas::snap_to_grid(pos);
+                            let faint = ui.visuals().strong_text_color().gamma_multiply(0.45);
+
+                            // An instance has no fixed symbol: its box is
+                            // generated from the ports of the circuit it
+                            // refers to, so the preview has to be generated
+                            // the same way -- `symbol::draw` has nothing to
+                            // show for one, which is why there was no ghost.
+                            if let Some(path) = kind.circuit_path() {
+                                let ports: Vec<_> = self
+                                    .circuits
+                                    .iter()
+                                    .find(|circuit| circuit.path() == path)
+                                    .map(|saved| {
+                                        Self::port_slots(saved)
+                                            .into_iter()
+                                            .map(|(_, port)| port)
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let rect = egui::Rect::from_center_size(
+                                    at,
+                                    egui::vec2(
+                                        BOX_SIZE.x,
+                                        crate::placed_component::instance_height(&ports),
+                                    ),
+                                );
+                                crate::symbol::draw_instance(
+                                    &painter,
+                                    rect,
+                                    canvas::Rotation::default(),
+                                    faint,
+                                    path,
+                                    &ports,
+                                    &crate::symbol::TextLayer::for_ui(ui),
+                                );
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                                return;
+                            }
+
+                            let rect = egui::Rect::from_center_size(at, BOX_SIZE);
                             crate::symbol::draw(
                                 &painter,
                                 kind,
@@ -4116,6 +4423,7 @@ impl eframe::App for SimLogixApp {
                                 canvas::Rotation::default(),
                                 ui.visuals().strong_text_color().gamma_multiply(0.45),
                                 crate::symbol::SymbolState::default(),
+                                &crate::symbol::TextLayer::for_ui(ui),
                             );
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                         }
@@ -4853,6 +5161,54 @@ mod tests {
         // The line the document draws: what the user set is kept, what the
         // simulation produced is not. A latched switch is the former.
         assert_eq!(reloaded.placed[0].properties().pressed, Some(true));
+    }
+
+    #[test]
+    fn the_framed_area_covers_what_is_actually_drawn() {
+        let mut app = SimLogixApp::default();
+        // Far from the origin, which is exactly the case that used to open
+        // outside the visible area.
+        app.place(ComponentKind::Led, egui::pos2(2000.0, 3000.0));
+
+        let content = app.content_rect().expect("something is placed");
+
+        assert!(content.contains(egui::pos2(2000.0, 3000.0)));
+        assert!(!content.contains(egui::Pos2::ZERO));
+    }
+
+    #[test]
+    fn a_loose_wire_end_is_framed_too() {
+        let mut app = SimLogixApp::default();
+        let led = app.place(ComponentKind::Led, egui::pos2(0.0, 0.0));
+        app.add_wire(
+            WireEndpoint::Pin(led, 0),
+            // Nothing anchors this to a component, so only the wire knows
+            // the drawing reaches out there.
+            WireEndpoint::Free(egui::pos2(900.0, 0.0)),
+            vec![egui::pos2(400.0, 0.0)],
+        );
+
+        let content = app.content_rect().expect("something is placed");
+
+        assert!(content.contains(egui::pos2(900.0, 0.0)));
+    }
+
+    #[test]
+    fn an_empty_circuit_has_nothing_to_frame() {
+        assert!(SimLogixApp::default().content_rect().is_none());
+    }
+
+    #[test]
+    fn switching_circuits_asks_for_a_refit_but_undo_does_not() {
+        let mut app = SimLogixApp::default();
+        app.create_circuit(String::new());
+        app.switch_to(0);
+        assert!(app.refit_view, "the other circuit may be drawn anywhere");
+
+        app.refit_view = false;
+        app.undo();
+        // Stepping back through your own edits must not move the view.
+        assert!(!app.refit_view);
     }
 
     #[test]

@@ -48,6 +48,8 @@ pub enum TreeAction {
     CancelRename,
     Delete(usize),
     DeleteFolder(String),
+    /// Drop an instance of this circuit into the one being edited.
+    Place(usize),
     /// File a circuit somewhere else.
     MoveCircuit {
         circuit: usize,
@@ -442,6 +444,18 @@ fn circuit_row(ui: &mut Ui, view: &View<'_>, name: &str, index: usize) -> Option
     }
 
     response.context_menu(|ui| {
+        // Not offered on the circuit you're already in: a circuit cannot
+        // contain itself, and greying it out here says so before the click
+        // rather than after it.
+        let elsewhere = !is_active;
+        let place = ui.add_enabled(elsewhere, egui::Button::new(view.strings.circuit_place));
+        if !elsewhere {
+            place.on_hover_text(view.strings.circuit_place_self);
+        } else if place.clicked() {
+            action = Some(TreeAction::Place(index));
+            ui.close();
+        }
+        ui.separator();
         if ui.button(view.strings.circuit_rename).clicked() {
             action = Some(TreeAction::BeginRename(RenameTarget::Circuit(index)));
             ui.close();

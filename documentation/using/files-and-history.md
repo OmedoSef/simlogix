@@ -128,9 +128,10 @@ undoes them like anything else.
 
 Two things worth knowing:
 
-- **Circuits are independent.** You can't yet place one inside another as a
-  component; that's the next step, and it's what will turn this list into a
-  real hierarchy.
+- **A circuit can be placed inside another.** Right-click it in the tree and
+  choose *Place in this circuit*, then click the canvas as you would for any
+  component. What you get is a box with one pin per port of that circuit —
+  so give your ports names, because those are the labels on the box.
 - **Only the open circuit runs.** Switching away rebuilds the circuit you
   arrive at from scratch, so it starts cold — a clock in a circuit you left
   is stopped, and begins again from its first tick when you come back. This
