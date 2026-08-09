@@ -138,11 +138,12 @@ Two things to know when editing that file.
 **A double hyphen is illegal inside an XML comment**, so a comment mentioning
 something like `cargo run --bin` makes the whole document malformed.
 
-**Every source path in it is resolved against the current directory**, and
-cargo-wix assumes that directory *is* the package root. So the build runs
-from `simlogix-gui/`, not from the workspace root with `--package`. Run it
-the other way and even `wix\License.rtf` — the path the generated template
-writes for itself — cannot be found.
+**Every source path in it is resolved against the current directory** — the
+process's, not the package cargo-wix was told to build. So the job runs from
+`simlogix-gui/` *and* passes `--package simlogix-gui`: the flag because
+cargo-wix refuses to guess a package once it sees a workspace, and the
+directory because otherwise even `wix\License.rtf` — the path the generated
+template writes for itself — cannot be found.
 
 ## Known gaps
 

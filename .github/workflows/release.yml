@@ -148,18 +148,22 @@ jobs:
           key: wix
       - run: cargo install cargo-wix --locked
 
-      # Run from the package directory, not the workspace root with
-      # `--package`. cargo-wix documents that it assumes the cwd *is* the
-      # package root, and every source path inside main.wxs is resolved
-      # against it -- including `wix\License.rtf`, which the generated
-      # template writes itself. Invoked from the workspace root, even that
-      # default could not be found.
+      # Both settings are needed, and they answer different complaints.
+      #
+      # `--package` is demanded outright: cargo-wix refuses to guess once it
+      # sees a workspace. The working directory is the other half — every
+      # source path inside main.wxs is resolved against the *process* cwd,
+      # not against the package it was told to build. Running from the
+      # workspace root with `--package` alone is what made the first attempt
+      # fail to find `wix\License.rtf`, the path the generated template
+      # writes for itself; that failure is also the evidence that cargo-wix
+      # does not change directory on its own.
       #
       # `wix/main.wxs` is checked in, edited away from that template: one
       # binary instead of three, a Start Menu shortcut, an icon, and no PATH
       # entry. `cargo wix init` would overwrite all of it, so it is
       # deliberately not run here.
-      - run: cargo wix --nocapture --output simlogix.msi
+      - run: cargo wix --package simlogix-gui --nocapture --output simlogix.msi
         working-directory: simlogix-gui
 
       - uses: actions/upload-artifact@v7
