@@ -30,6 +30,19 @@ enum Polarity {
 /// Pins, in the order `Component::eval` expects: `Gate` and `Source` are
 /// inputs, `Drain` is the (sole) output.
 ///
+/// # An undriven source is not a level
+///
+/// A conducting transistor whose source net has no driver reports `HighZ`,
+/// not `Unknown`. It used to pass the `Unknown` through, and that broke every
+/// structure with transistors in series: in a CMOS NAND with `A` high and `B`
+/// low, the lower NMOS is off, so the node between the two is undriven --
+/// and the upper NMOS, which *is* conducting, put that `Unknown` onto the
+/// output where it met the `High` from the PMOS and resolved to `Error`. A
+/// correct gate reported a fault.
+///
+/// An `Error` on the source still reaches the drain: a fault is a fault, and
+/// unlike an absence it is something to carry.
+///
 /// Simplified from a real transistor: current only ever flows Source -> Drain
 /// here, never the other way. That's enough for ordinary switching logic
 /// (e.g. a CMOS inverter), but not for a true bidirectional pass-gate — see
@@ -74,6 +87,14 @@ impl Transistor {
     /// The level as it arrives at the drain: full strength in the direction
     /// this polarity pulls well, weakened in the other.
     fn pass(&self, source: Signal) -> Signal {
+        // A switch connected to nothing conducts nothing. `Unknown` here
+        // means precisely that: it is what a net with no driver resolves to.
+        // So the honest answer at the drain is `HighZ` -- "I am not driving
+        // either" -- rather than passing the uncertainty on as though it
+        // were a level for the net to weigh against a real one.
+        if matches!(source, Signal::Unknown | Signal::HighZ) {
+            return Signal::HighZ;
+        }
         let weak_direction = match self.polarity {
             Polarity::NType => Signal::High,
             Polarity::PType => Signal::Low,
@@ -124,16 +145,32 @@ mod tests {
     }
 
     #[test]
-    fn uncertainty_passes_through_unweakened() {
-        // Weakening applies to a *level*; there is no such thing as a weak
-        // "don't know".
-        let transistor = Transistor::n_type();
+    fn an_undriven_source_leaves_the_drain_undriven_too() {
+        // A switch connected to nothing conducts nothing. Passing the
+        // `Unknown` through instead made the transistor claim to drive its
+        // drain, and that claim then fought the real driver on the net --
+        // which is how a correct CMOS NAND came to report `Error`.
+        for source in [Signal::Unknown, Signal::HighZ] {
+            assert_eq!(
+                Transistor::n_type().eval(&[Signal::High, source]),
+                vec![Signal::HighZ],
+                "an n-type conducting from {source:?}"
+            );
+            assert_eq!(
+                Transistor::p_type().eval(&[Signal::Low, source]),
+                vec![Signal::HighZ],
+                "a p-type conducting from {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fault_on_the_source_still_reaches_the_drain() {
+        // Unlike an absence, a fault is something to carry: weakening
+        // applies to a *level*, and there is no such thing as a weak
+        // "something is wrong".
         assert_eq!(
-            transistor.eval(&[Signal::High, Signal::Unknown]),
-            vec![Signal::Unknown]
-        );
-        assert_eq!(
-            transistor.eval(&[Signal::High, Signal::Error]),
+            Transistor::n_type().eval(&[Signal::High, Signal::Error]),
             vec![Signal::Error]
         );
     }
