@@ -123,6 +123,7 @@ pub struct Strings {
     /// wherever a name has to be distinct — a circuit within its folder, a
     /// folder within its parent.
     pub circuit_name_taken: &'static str,
+    pub circuit_in_use: &'static str,
     /// Base name for a freshly created circuit — a number is appended when
     /// that name is already in use. Saved into the project file as typed,
     /// like any other name, so switching the UI language later doesn't
@@ -372,6 +373,7 @@ static ENGLISH: Strings = Strings {
     circuit_delete: "Delete",
     circuit_delete_last: "A project has to keep at least one circuit.",
     circuit_name_taken: "\"{}\" is already taken here.",
+    circuit_in_use: "\"{}\" can't be deleted: it is used in {}.",
     circuit_default_name: "circuit",
 
     properties_heading: "Properties",
@@ -561,6 +563,7 @@ static FRENCH: Strings = Strings {
     circuit_delete: "Supprimer",
     circuit_delete_last: "Un projet doit conserver au moins un circuit.",
     circuit_name_taken: "« {} » est déjà utilisé ici.",
+    circuit_in_use: "« {} » ne peut pas être supprimé : il est utilisé dans {}.",
     circuit_default_name: "circuit",
 
     properties_heading: "Propriétés",
@@ -750,6 +753,7 @@ static ITALIAN: Strings = Strings {
     circuit_delete: "Elimina",
     circuit_delete_last: "Un progetto deve conservare almeno un circuito.",
     circuit_name_taken: "\"{}\" è già in uso qui.",
+    circuit_in_use: "\"{}\" non può essere eliminato: è usato in {}.",
     circuit_default_name: "circuito",
 
     properties_heading: "Proprietà",

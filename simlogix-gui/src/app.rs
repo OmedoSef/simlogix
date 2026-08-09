@@ -1168,15 +1168,13 @@ impl SimLogixApp {
 
         let mut ports = Self::port_slots(&saved);
         for (index, port) in &mut ports {
-            // Whichever group holds this port's pin; the pins in it, minus
-            // the port itself, are what the instance's pin joins.
-            port.inner = groups
-                .iter()
-                .find(|group| group.contains(&(*index, 0)))
-                .map(live)
-                .unwrap_or_default();
+            port.group = groups.iter().position(|g| g.contains(&(*index, 0)));
         }
-        let inner_groups = groups.iter().map(live).filter(|g| g.len() > 1).collect();
+        // Kept whole — not filtered down to the groups that have live pins —
+        // so a port's index still lands on the right one. A group with no
+        // live pins at all is not noise: it's a net that exists only to join
+        // ports to each other.
+        let inner_groups = groups.iter().map(live).collect();
         Some((
             ports.into_iter().map(|(_, port)| port).collect(),
             inner_groups,
@@ -1215,7 +1213,8 @@ impl SimLogixApp {
                             .map(str::to_string)
                             .unwrap_or_else(|| index.to_string()),
                         kind: component.kind.clone(),
-                        inner: Vec::new(),
+                        // Only `flatten` knows the sub-circuit's nets.
+                        group: None,
                     },
                 )
             })
@@ -1911,6 +1910,9 @@ impl SimLogixApp {
         enum Node {
             Pin(ComponentId, usize),
             Wire(u64),
+            /// One of an instance's internal nets, which has no pin of this
+            /// drawing's own to stand for it.
+            Inner(ComponentId, usize),
         }
 
         let mut parent: HashMap<Node, Node> = HashMap::new();
@@ -1978,25 +1980,25 @@ impl SimLogixApp {
             let Some((ports, inner_groups)) = placed.instance_wiring() else {
                 continue;
             };
-            for group in inner_groups {
-                let mut members = group.iter();
-                let Some(&(first, first_pin)) = members.next() else {
-                    continue;
-                };
+            // Each internal net gets a node of its own, and everything on it
+            // — the innards' pins, and the instance's pins standing in for
+            // the ports — is declared a member. One rule instead of two, and
+            // it still holds when a net has no pins to link together.
+            for (group, members) in inner_groups.iter().enumerate() {
                 for &(component, pin) in members {
                     union(
                         &mut parent,
-                        Node::Pin(first, first_pin),
+                        Node::Inner(placed.id(), group),
                         Node::Pin(component, pin),
                     );
                 }
             }
             for (index, port) in ports.iter().enumerate() {
-                for &(component, pin) in &port.inner {
+                if let Some(group) = port.group {
                     union(
                         &mut parent,
+                        Node::Inner(placed.id(), group),
                         Node::Pin(placed.id(), index),
-                        Node::Pin(component, pin),
                     );
                 }
             }
@@ -2276,9 +2278,14 @@ impl SimLogixApp {
             }
         };
         self.folders.iter_mut().for_each(repath);
-        self.circuits
-            .iter_mut()
-            .for_each(|circuit| repath(&mut circuit.folder));
+        // Every circuit filed under this folder changes path, so every
+        // instance of any of them has to follow — including ones sitting in
+        // a part of the project this rename never went near.
+        self.repointing_paths(|app| {
+            app.circuits
+                .iter_mut()
+                .for_each(|circuit| repath(&mut circuit.folder));
+        });
     }
 
     /// Removes a folder, moving what was in it up into the folder that held
@@ -2308,10 +2315,15 @@ impl SimLogixApp {
         };
         self.folders.retain(|folder| folder != path);
         self.folders.iter_mut().for_each(lift);
-        self.circuits
-            .iter_mut()
-            .for_each(|circuit| lift(&mut circuit.folder));
-        self.resolve_name_clashes();
+        // Lifting re-paths the contents, and a name that collides on arrival
+        // is renamed — two path changes for one gesture, both of which
+        // instances have to follow.
+        self.repointing_paths(|app| {
+            app.circuits
+                .iter_mut()
+                .for_each(|circuit| lift(&mut circuit.folder));
+            app.resolve_name_clashes();
+        });
     }
 
     /// Gives a free name to any circuit that has just landed in a folder
@@ -2365,7 +2377,7 @@ impl SimLogixApp {
         }
 
         self.record_edit();
-        self.circuits[index].folder = folder;
+        self.repointing_paths(|app| app.circuits[index].folder = folder);
     }
 
     /// A folder path inside `parent` that isn't taken yet.
@@ -2395,6 +2407,22 @@ impl SimLogixApp {
         if index >= self.circuits.len() || self.circuits.len() <= 1 {
             return;
         }
+        // Unlike a rename there is no new path to point instances at, so
+        // going ahead would leave them naming a circuit that isn't there.
+        // Refusing keeps the choice with whoever knows what those instances
+        // were for.
+        let doomed = self.circuits[index].path();
+        let users = self.users_of(&doomed, index);
+        if !users.is_empty() {
+            let strings = Strings::for_language(self.language);
+            self.error = Some(
+                strings
+                    .circuit_in_use
+                    .replacen("{}", &self.circuits[index].name, 1)
+                    .replace("{}", &users.join(", ")),
+            );
+            return;
+        }
         self.record_edit();
 
         let mut project = self.to_project();
@@ -2410,6 +2438,82 @@ impl SimLogixApp {
         self.reopen(&project, open);
         self.reveal_active = true;
         self.refit_view = true;
+    }
+
+    /// Runs an edit that may change what circuits are called, then points
+    /// every instance at wherever its circuit ended up.
+    ///
+    /// A reference is a path, so *renaming or re-filing a circuit breaks
+    /// every instance of it* unless they are carried along. Doing it here,
+    /// around the edit, rather than in each of the four operations that can
+    /// change a path, is what stops the fifth one from forgetting.
+    ///
+    /// Paths are paired by index, which holds because none of these edits
+    /// reorder the list — they rename, re-file, or lift out of a folder.
+    fn repointing_paths(&mut self, edit: impl FnOnce(&mut Self)) {
+        let before: Vec<String> = self.circuits.iter().map(|c| c.path()).collect();
+        edit(self);
+        let after: Vec<String> = self.circuits.iter().map(|c| c.path()).collect();
+        if before.len() != after.len() {
+            return;
+        }
+        for (old, new) in before.iter().zip(&after) {
+            if old != new {
+                self.repoint_instances(old, new);
+            }
+        }
+    }
+
+    /// Rewrites every reference to `from` so it names `to` instead — in the
+    /// circuits held in their saved form, and in the one currently open,
+    /// whose live state isn't in that list.
+    fn repoint_instances(&mut self, from: &str, to: &str) {
+        let (was, now) = (
+            ComponentKind::Circuit(from.to_string()),
+            ComponentKind::Circuit(to.to_string()),
+        );
+        for circuit in &mut self.circuits {
+            for component in &mut circuit.components {
+                if component.kind == was {
+                    component.kind = now.clone();
+                }
+            }
+        }
+        for placed in &mut self.placed {
+            placed.repoint_instance(from, to);
+        }
+    }
+
+    /// The circuits holding an instance of `path`, by name.
+    ///
+    /// Checked before deleting one: unlike a rename there is no new path to
+    /// point at, so the only options are to break the instances or to refuse
+    /// — and refusing is the one that doesn't lose work.
+    /// `ignoring` is the circuit being deleted itself: its own contents go
+    /// with it, so an instance in there isn't a reason to keep it. Skipped
+    /// by index rather than by name, because two folders can each hold a
+    /// circuit called the same thing and only one of them is doomed.
+    fn users_of(&self, path: &str, ignoring: usize) -> Vec<String> {
+        let wanted = ComponentKind::Circuit(path.to_string());
+        let mut users: Vec<String> = self
+            .circuits
+            .iter()
+            .enumerate()
+            .filter(|(index, circuit)| {
+                // The open circuit's saved entry is stale — its live state
+                // is in `placed`, checked below.
+                *index != self.active
+                    && *index != ignoring
+                    && circuit.components.iter().any(|c| c.kind == wanted)
+            })
+            .map(|(_, circuit)| circuit.name.clone())
+            .collect();
+        if self.active != ignoring && self.placed.iter().any(|p| p.kind() == wanted) {
+            if let Some(open) = self.circuits.get(self.active) {
+                users.push(open.name.clone());
+            }
+        }
+        users
     }
 
     /// Renames a circuit. An empty name, or one another circuit in the same
@@ -2436,7 +2540,7 @@ impl SimLogixApp {
         }
 
         self.record_edit();
-        self.circuits[index].name = name.to_string();
+        self.repointing_paths(|app| app.circuits[index].name = name.to_string());
     }
 
     /// `base` if no circuit *in `folder`* is using it, else `base 2`,
@@ -4725,6 +4829,146 @@ mod tests {
         assert_eq!(app.library, "alu");
         app.undo();
         assert_eq!(app.library, "cpu");
+    }
+
+    #[test]
+    fn a_sub_circuit_joining_two_ports_and_nothing_else_still_passes_through() {
+        let mut app = SimLogixApp::default();
+        // The sub-circuit is a plain feed-through: an input port wired
+        // straight to an output port, with no component in between. That
+        // inner net has no pin of its own to hang the connection on, which
+        // is what made this the one shape that silently went dead.
+        let input = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+        let output = app.place(ComponentKind::OutputPort, egui::pos2(120.0, 40.0));
+        app.add_wire(
+            WireEndpoint::Pin(input, 0),
+            WireEndpoint::Pin(output, 0),
+            Vec::new(),
+        );
+        app.rename_circuit(0, "buf");
+
+        app.create_circuit(String::new());
+        let instance = app.place(
+            ComponentKind::Circuit("buf".to_string()),
+            egui::pos2(200.0, 200.0),
+        );
+        app.rebuild_nets();
+
+        let pins = app.circuit.pins(instance);
+        assert_eq!(pins.len(), 2, "one pin per port");
+        assert_eq!(
+            pins[0].net, pins[1].net,
+            "the two sides of a feed-through are one net, so whatever is \
+             wired to one arrives at the other"
+        );
+    }
+
+    /// A project holding a circuit named `sub`, and — open — a second one
+    /// containing an instance of it.
+    fn project_with_an_instance() -> SimLogixApp {
+        let mut app = SimLogixApp::default();
+        app.rename_circuit(0, "sub");
+        app.create_circuit(String::new());
+        app.place(
+            ComponentKind::Circuit("sub".to_string()),
+            egui::pos2(80.0, 80.0),
+        );
+        app
+    }
+
+    /// What the open circuit's single instance names.
+    fn instance_path(app: &SimLogixApp) -> ComponentKind {
+        app.placed[0].kind()
+    }
+
+    #[test]
+    fn renaming_a_circuit_carries_the_instances_of_it_along() {
+        let mut app = project_with_an_instance();
+
+        app.rename_circuit(0, "adder");
+
+        // A reference is a path, so without repointing this instance would
+        // still name a circuit that no longer exists — silently, since
+        // nothing about the drawing changes.
+        assert_eq!(
+            instance_path(&app),
+            ComponentKind::Circuit("adder".to_string())
+        );
+    }
+
+    #[test]
+    fn re_filing_a_circuit_carries_the_instances_of_it_along() {
+        let mut app = project_with_an_instance();
+        app.create_folder("");
+        let folder = app.folders[0].clone();
+
+        app.move_circuit(0, folder.clone());
+
+        // The folder is part of the address, so moving changes the path
+        // exactly as a rename does.
+        assert_eq!(
+            instance_path(&app),
+            ComponentKind::Circuit(format!("{folder}/sub"))
+        );
+    }
+
+    #[test]
+    fn renaming_a_folder_carries_instances_of_everything_inside_it() {
+        let mut app = project_with_an_instance();
+        app.folders = vec!["alu".to_string()];
+        app.circuits[0].folder = "alu".to_string();
+        // The instance was placed before the move, so point it at where the
+        // circuit is now, as a real session would have.
+        app.repoint_instances("sub", "alu/sub");
+
+        app.rename_folder("alu", "arith");
+
+        // Nothing about this instance's own circuit was touched — it is
+        // carried by a rename two levels away from it.
+        assert_eq!(
+            instance_path(&app),
+            ComponentKind::Circuit("arith/sub".to_string())
+        );
+    }
+
+    #[test]
+    fn an_instance_in_a_circuit_that_is_not_open_is_repointed_too() {
+        let mut app = project_with_an_instance();
+        // Close the circuit holding the instance by opening the other one.
+        app.switch_to(0);
+
+        app.rename_circuit(0, "adder");
+
+        assert_eq!(
+            app.circuits[1].components[0].kind,
+            ComponentKind::Circuit("adder".to_string()),
+            "a closed circuit is only in its saved form, and is just as \
+             capable of holding a reference"
+        );
+    }
+
+    #[test]
+    fn deleting_a_circuit_something_still_uses_is_refused() {
+        let mut app = project_with_an_instance();
+
+        app.delete_circuit(0);
+
+        // Unlike a rename there is no new path to offer, so the only
+        // alternative to refusing is leaving the instance naming nothing.
+        assert_eq!(app.circuits.len(), 2);
+        assert!(app.error.is_some());
+    }
+
+    #[test]
+    fn deleting_a_circuit_nothing_uses_is_allowed() {
+        let mut app = project_with_an_instance();
+        app.create_circuit(String::new());
+        let spare = app.circuits.len() - 1;
+
+        app.delete_circuit(spare);
+
+        assert_eq!(app.circuits.len(), 2);
+        assert!(app.error.is_none());
     }
 
     #[test]

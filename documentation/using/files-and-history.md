@@ -105,15 +105,21 @@ Circuits can be filed in folders, nested as deeply as you like:
 | Delete a folder | Right-click → *Delete folder*. **What's inside moves up** to the folder above rather than being deleted with it. |
 
 A folder is **part of a circuit's address**, not just where it's filed: a
-circuit will be referred to as `library:folder/name` once one circuit can
-be placed inside another. So a name only has to be unique **within its own
-folder** — `alu/adder` and `fpu/adder` are two different circuits, and both
-are allowed.
+circuit is referred to as `library:folder/name`. So a name only has to be
+unique **within its own folder** — `alu/adder` and `fpu/adder` are two
+different circuits, and both are allowed.
 
-The other side of that: moving a circuit, or renaming a folder, changes the
-address of everything concerned. Within one project that will be repaired
-for you; a reference from a project that *imported* these circuits will
-have to be pointed at the new address by hand.
+The other side of that: renaming a circuit, moving it, or renaming a folder
+changes the address of everything concerned. **Within one project this is
+repaired for you** — every place that circuit has been used follows it, in
+circuits you don't have open as well as the one you do. A reference from a
+project that *imported* these circuits still has to be pointed at the new
+address by hand.
+
+Deleting is the one case that can't be repaired, because there is no new
+address to point at. So **deleting a circuit that is still used somewhere
+is refused**, and the message names the circuits using it. Delete those
+instances first if you meant it.
 
 One case is resolved rather than refused. Deleting a folder moves its
 contents up, which can bring two circuits of the same name into one place —

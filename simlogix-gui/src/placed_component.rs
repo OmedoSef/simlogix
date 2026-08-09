@@ -27,10 +27,15 @@ pub struct InstancePort {
     /// `InputPort`, `OutputPort` or `InOutPort` — which side of the box it
     /// goes on, and which way the arrow points.
     pub kind: ComponentKind,
-    /// The inner pins this port's net touches. The port component itself is
-    /// never instantiated: its pin was only ever a member of that net, so
-    /// unioning the instance's own pin with these *is* the connection.
-    pub inner: Vec<(ComponentId, usize)>,
+    /// Which of the sub-circuit's internal nets this port sits on, as an
+    /// index into the instance's `inner_groups`.
+    ///
+    /// The port component itself is never instantiated: its pin was only
+    /// ever a *member* of that net, so declaring the instance's own pin a
+    /// member of it too is the whole connection. Membership rather than a
+    /// list of pins to link to, because a net joining two ports and nothing
+    /// else has no pins to offer — and that is exactly a pass-through.
+    pub group: Option<usize>,
 }
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
@@ -233,6 +238,18 @@ impl PlacedComponent {
                 inner_groups,
             },
         )
+    }
+
+    /// Points an instance at a circuit that has moved or been renamed.
+    ///
+    /// Nothing is rebuilt: the circuit's *contents* haven't changed, only
+    /// what it's called, so the flattened innards stay exactly as they are.
+    pub fn repoint_instance(&mut self, from: &str, to: &str) {
+        if let Shape::Instance { path, .. } = &mut self.shape {
+            if path == from {
+                *path = to.to_string();
+            }
+        }
     }
 
     /// What this instance is made of, when it is one — the net rebuild needs
@@ -1180,7 +1197,7 @@ mod tests {
         InstancePort {
             name: String::new(),
             kind,
-            inner: Vec::new(),
+            group: None,
         }
     }
 
