@@ -50,6 +50,45 @@ pub enum View {
     #[default]
     Schematic,
     Appearance,
+    /// The circuit, running, with nothing that can move it.
+    ///
+    /// Not a separate copy of the drawing — the same one, with every gesture
+    /// that edits taken away. Watching a circuit means clicking switches and
+    /// reading probes for minutes at a time, and one dropped drag in the
+    /// middle of that is a change you didn't see happen and won't think to
+    /// undo.
+    Simulation,
+}
+
+/// What a click does while a circuit is being watched rather than built.
+///
+/// Nothing here edits, and nothing here is a placeholder: this row is where
+/// tools for *inspecting* a running circuit will go as they arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SimTool {
+    /// Click switches, buttons and ports; hover to light a net.
+    #[default]
+    Interact,
+    /// Drag to move the view.
+    Pan,
+}
+
+/// Draws the inspection tools. Returns the one clicked, if any.
+pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, active: SimTool) -> Option<SimTool> {
+    let mut clicked = None;
+    for (tool, label) in [
+        (SimTool::Interact, strings.tool_interact),
+        (SimTool::Pan, strings.tool_pan),
+    ] {
+        let draw = match tool {
+            SimTool::Interact => symbol::draw_select_tool,
+            SimTool::Pan => symbol::draw_pan_tool,
+        };
+        if icon_button(ui, label, active == tool, draw) {
+            clicked = Some(tool);
+        }
+    }
+    clicked
 }
 
 /// What a click does while drawing a symbol.
@@ -113,6 +152,7 @@ pub fn show_views(ui: &mut Ui, strings: &Strings, active: View) -> Option<View> 
     for (view, label) in [
         (View::Schematic, strings.view_schematic),
         (View::Appearance, strings.view_appearance),
+        (View::Simulation, strings.view_simulation),
     ] {
         if ui.selectable_label(active == view, label).clicked() {
             clicked = Some(view);

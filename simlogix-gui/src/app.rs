@@ -465,6 +465,8 @@ pub struct SimLogixApp {
     view: toolbar::View,
     /// What a click does in the appearance view.
     shape_tool: toolbar::ShapeTool,
+    /// What a click does while watching a circuit run.
+    sim_tool: toolbar::SimTool,
     /// What is picked in the appearance view.
     symbol_selection: SymbolSelection,
     /// The polyline being drawn click by click, in symbol coordinates.
@@ -551,6 +553,7 @@ impl Default for SimLogixApp {
             scene_rect: egui::Rect::ZERO,
             view: toolbar::View::default(),
             shape_tool: toolbar::ShapeTool::default(),
+            sim_tool: toolbar::SimTool::default(),
             symbol_selection: SymbolSelection::default(),
             drawing: None,
             shape_drag: None,
@@ -1193,8 +1196,9 @@ impl SimLogixApp {
         self.shape_drag = None;
         self.shape_band = None;
         self.moving_shape = None;
-        // Drawing a symbol has nothing to place, wire or select.
-        if view == toolbar::View::Appearance {
+        // Neither drawing a symbol nor watching a circuit has anything to
+        // place, wire or select with.
+        if view != toolbar::View::Schematic {
             self.tool = toolbar::Tool::Select;
             self.wiring_from = None;
         }
@@ -1871,6 +1875,9 @@ impl SimLogixApp {
             // The only tool there that gives the primary button back to the
             // view: every other one is drawing with it.
             return self.shape_tool == toolbar::ShapeTool::Pan;
+        }
+        if self.view == toolbar::View::Simulation {
+            return self.sim_tool == toolbar::SimTool::Pan;
         }
         self.tool == Tool::Pan || (self.tool == Tool::Select && self.left_drag_pans)
     }
@@ -3021,11 +3028,21 @@ impl SimLogixApp {
         // also throw you out of the appearance view and back to the
         // schematic.
         let scene_rect = self.scene_rect;
-        let view = (self.view, self.idle_scene_rect, self.shape_tool);
+        let view = (
+            self.view,
+            self.idle_scene_rect,
+            self.shape_tool,
+            self.sim_tool,
+        );
 
         *self = Self::from_project(project, open);
         self.scene_rect = scene_rect;
-        (self.view, self.idle_scene_rect, self.shape_tool) = view;
+        (
+            self.view,
+            self.idle_scene_rect,
+            self.shape_tool,
+            self.sim_tool,
+        ) = view;
         self.dirty = dirty;
 
         (self.language, self.language_chosen, self.left_drag_pans) = preferences;
@@ -3572,6 +3589,8 @@ impl eframe::App for SimLogixApp {
         // chords into `Event::Copy`/`Event::Paste` and never emits the key
         // press, so matching on the chord silently never fires. It also means
         // this follows whatever the platform's copy chord actually is.
+        // Copy still works while a circuit is only being watched — reading
+        // something out changes nothing. Pasting does, so it doesn't.
         if !ui.ctx().text_edit_focused() {
             let mut copy = false;
             let mut pasted = None;
@@ -3587,7 +3606,7 @@ impl eframe::App for SimLogixApp {
             if copy {
                 self.copy_to_clipboard(ui.ctx());
             }
-            if let Some(text) = pasted {
+            if let Some(text) = pasted.filter(|_| self.view == toolbar::View::Schematic) {
                 self.paste_fragment(&text);
             }
         }
@@ -3897,6 +3916,13 @@ impl eframe::App for SimLogixApp {
                 Some(strings.status_signals_hidden.to_string())
             } else if !self.running {
                 Some(strings.status_paused.to_string())
+            } else if self.view == toolbar::View::Simulation {
+                // Everything below this arm offers an editing gesture, and
+                // this mode has taken them all away. A selection is still
+                // possible here — a component has to answer a click, or a
+                // switch could not be flipped — so those hints would
+                // otherwise appear and name keys that do nothing.
+                Some(strings.hint_simulation.to_string())
             } else if self.wiring_from.is_some() {
                 Some(strings.hint_wiring.to_string())
             } else if let Tool::Place(kind) = &self.tool {
@@ -3970,22 +3996,28 @@ impl eframe::App for SimLogixApp {
                 // the whole window.
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
-                    if let Some(tool) = palette::show(ui, strings, &self.tool) {
-                        // Clicking the active entry again drops back to
-                        // selecting, so the palette doubles as its own
-                        // "never mind" button.
-                        // A different component starts upright; the
-                        // rotation you dialled in belongs to the one you
-                        // were placing, not to the palette.
-                        if self.tool != tool {
-                            self.place_rotation = canvas::Rotation::default();
+                    // Greyed out rather than hidden while the circuit is
+                    // being watched: a palette that comes and goes is one you
+                    // have to re-find, and its being unusable is the point
+                    // being made.
+                    ui.add_enabled_ui(self.view == toolbar::View::Schematic, |ui| {
+                        if let Some(tool) = palette::show(ui, strings, &self.tool) {
+                            // Clicking the active entry again drops back to
+                            // selecting, so the palette doubles as its own
+                            // "never mind" button.
+                            // A different component starts upright; the
+                            // rotation you dialled in belongs to the one you
+                            // were placing, not to the palette.
+                            if self.tool != tool {
+                                self.place_rotation = canvas::Rotation::default();
+                            }
+                            self.tool = if self.tool == tool {
+                                Tool::Select
+                            } else {
+                                tool
+                            };
                         }
-                        self.tool = if self.tool == tool {
-                            Tool::Select
-                        } else {
-                            tool
-                        };
-                    }
+                    });
                 });
             });
 
@@ -4056,86 +4088,107 @@ impl eframe::App for SimLogixApp {
                     .id_salt("properties_scroll")
                     .show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
-                        // A symbol's shapes are what's selectable while the
-                        // appearance is showing; components and wires belong
-                        // to the other view and aren't even on screen.
-                        if self.view == toolbar::View::Appearance {
-                            let (ports, mut appearance) = self.active_appearance();
-                            let lone_shape = match self.symbol_selection.shapes.as_slice() {
-                                [only] if self.symbol_selection.pins.is_empty() => Some(*only),
-                                _ => None,
-                            };
-                            let lone_pin = match self.symbol_selection.pins.as_slice() {
-                                [only] if self.symbol_selection.shapes.is_empty() => Some(*only),
-                                _ => None,
-                            };
-                            if let Some(index) = lone_shape {
-                                if let Some(shape) = appearance.shapes.get_mut(index) {
-                                    let before = shape.clone();
-                                    let outcome = properties::show_shape(ui, strings, shape);
-                                    if outcome.edit_started || *shape != before {
-                                        pending_shape =
-                                            Some((index, shape.clone(), outcome.edit_started));
+                        // Greyed out, not emptied, while a circuit is being
+                        // watched: what a component is set to is worth
+                        // reading, and only changing it is out of bounds. The
+                        // reason sits *outside* the disabled region, or it
+                        // would be greyed out along with everything it
+                        // explains.
+                        let editable = self.view != toolbar::View::Simulation;
+                        if !editable {
+                            ui.label(egui::RichText::new(strings.properties_read_only).weak());
+                            ui.separator();
+                        }
+                        ui.add_enabled_ui(editable, |ui| {
+                            // A symbol's shapes are what's selectable while the
+                            // appearance is showing; components and wires belong
+                            // to the other view and aren't even on screen.
+                            if self.view == toolbar::View::Appearance {
+                                let (ports, mut appearance) = self.active_appearance();
+                                let lone_shape = match self.symbol_selection.shapes.as_slice() {
+                                    [only] if self.symbol_selection.pins.is_empty() => Some(*only),
+                                    _ => None,
+                                };
+                                let lone_pin = match self.symbol_selection.pins.as_slice() {
+                                    [only] if self.symbol_selection.shapes.is_empty() => {
+                                        Some(*only)
                                     }
-                                }
-                            } else if let Some(index) = lone_pin {
-                                if let Some(pin) = appearance.pins.get_mut(index) {
-                                    let before = *pin;
+                                    _ => None,
+                                };
+                                if let Some(index) = lone_shape {
+                                    if let Some(shape) = appearance.shapes.get_mut(index) {
+                                        let before = shape.clone();
+                                        let outcome = properties::show_shape(ui, strings, shape);
+                                        if outcome.edit_started || *shape != before {
+                                            pending_shape =
+                                                Some((index, shape.clone(), outcome.edit_started));
+                                        }
+                                    }
+                                } else if let Some(index) = lone_pin {
+                                    if let Some(pin) = appearance.pins.get_mut(index) {
+                                        let before = *pin;
+                                        let outcome = properties::show_pin(
+                                            ui,
+                                            strings,
+                                            pin,
+                                            ports.get(index),
+                                        );
+                                        if outcome.edit_started || *pin != before {
+                                            pending_pin = Some((index, *pin, outcome.edit_started));
+                                        }
+                                    }
+                                } else if self.symbol_selection.is_empty() {
+                                    let before = appearance.show_name;
                                     let outcome =
-                                        properties::show_pin(ui, strings, pin, ports.get(index));
-                                    if outcome.edit_started || *pin != before {
-                                        pending_pin = Some((index, *pin, outcome.edit_started));
+                                        properties::show_symbol(ui, strings, &mut appearance);
+                                    if outcome.edit_started || appearance.show_name != before {
+                                        pending_symbol =
+                                            Some((appearance.show_name, outcome.edit_started));
+                                    }
+                                } else {
+                                    // Several things picked: no one set of
+                                    // properties to show.
+                                    ui.label(strings.shape_none_selected);
+                                }
+                                return;
+                            }
+
+                            // Only a lone selection has properties to show: with
+                            // several picked there is no one set to edit.
+                            let selected_wire = self
+                                .selection
+                                .lone_wire()
+                                .and_then(|id| self.wires.iter().find(|wire| wire.id == id));
+                            if let Some(wire) = selected_wire {
+                                if let Some(color) = properties::show_wire(ui, strings, wire.color)
+                                {
+                                    pending_wire_color = Some((wire.id, color));
+                                }
+                                return;
+                            }
+
+                            let selected = self
+                                .selection
+                                .lone_component()
+                                .and_then(|id| self.placed.iter().find(|placed| placed.id() == id));
+                            match selected {
+                                Some(placed) => {
+                                    let mut edited = placed.properties().clone();
+                                    let outcome =
+                                        properties::show(ui, strings, &placed.kind(), &mut edited);
+                                    if let Some(kind) = outcome.change_kind {
+                                        pending_kind = Some((placed.id(), kind));
+                                    }
+                                    if outcome.edit_started || edited != *placed.properties() {
+                                        pending_properties =
+                                            Some((placed.id(), edited, outcome.edit_started));
                                     }
                                 }
-                            } else if self.symbol_selection.is_empty() {
-                                let before = appearance.show_name;
-                                let outcome = properties::show_symbol(ui, strings, &mut appearance);
-                                if outcome.edit_started || appearance.show_name != before {
-                                    pending_symbol =
-                                        Some((appearance.show_name, outcome.edit_started));
-                                }
-                            } else {
-                                // Several things picked: no one set of
-                                // properties to show.
-                                ui.label(strings.shape_none_selected);
-                            }
-                            return;
-                        }
-
-                        // Only a lone selection has properties to show: with
-                        // several picked there is no one set to edit.
-                        let selected_wire = self
-                            .selection
-                            .lone_wire()
-                            .and_then(|id| self.wires.iter().find(|wire| wire.id == id));
-                        if let Some(wire) = selected_wire {
-                            if let Some(color) = properties::show_wire(ui, strings, wire.color) {
-                                pending_wire_color = Some((wire.id, color));
-                            }
-                            return;
-                        }
-
-                        let selected = self
-                            .selection
-                            .lone_component()
-                            .and_then(|id| self.placed.iter().find(|placed| placed.id() == id));
-                        match selected {
-                            Some(placed) => {
-                                let mut edited = placed.properties().clone();
-                                let outcome =
-                                    properties::show(ui, strings, &placed.kind(), &mut edited);
-                                if let Some(kind) = outcome.change_kind {
-                                    pending_kind = Some((placed.id(), kind));
-                                }
-                                if outcome.edit_started || edited != *placed.properties() {
-                                    pending_properties =
-                                        Some((placed.id(), edited, outcome.edit_started));
+                                None => {
+                                    ui.label(strings.properties_none_selected);
                                 }
                             }
-                            None => {
-                                ui.label(strings.properties_none_selected);
-                            }
-                        }
+                        });
                     });
             });
 
@@ -4211,36 +4264,39 @@ impl eframe::App for SimLogixApp {
         // only the canvas, not the whole window: panels claim their space in
         // declaration order, and this bar acts on the canvas alone.
         egui::Panel::top("toolbar").show(ui, |ui| {
-            // Which side of the circuit you're on comes first, and the tools
-            // follow from it. Showing both sets at once left half the bar
-            // inert: a wire tool means nothing while drawing a symbol, and a
-            // rectangle tool means nothing on a schematic.
+            // Two rows: which side of the circuit you're on, then the tools
+            // that belong to it. On one line the modes read as three more
+            // tools among the tools, when they are the thing deciding which
+            // tools there are.
             ui.horizontal(|ui| {
                 if let Some(view) = toolbar::show_views(ui, strings, self.view) {
                     self.switch_view(view);
                 }
-                ui.separator();
-                match self.view {
-                    toolbar::View::Schematic => {
-                        if let Some(tool) = toolbar::show(ui, strings, &self.tool) {
-                            self.tool = tool;
-                        }
+            });
+            ui.horizontal(|ui| match self.view {
+                toolbar::View::Schematic => {
+                    if let Some(tool) = toolbar::show(ui, strings, &self.tool) {
+                        self.tool = tool;
                     }
-                    toolbar::View::Appearance => {
-                        if let Some(tool) = toolbar::show_shape_tools(ui, strings, self.shape_tool)
-                        {
-                            self.shape_tool = tool;
-                            self.drawing = None;
-                        }
-                        ui.separator();
-                        if ui
-                            .button(strings.appearance_reset)
-                            .on_hover_text(strings.appearance_reset_hint)
-                            .clicked()
-                        {
-                            self.record_edit();
-                            self.circuits[self.active].appearance = None;
-                        }
+                }
+                toolbar::View::Simulation => {
+                    if let Some(tool) = toolbar::show_sim_tools(ui, strings, self.sim_tool) {
+                        self.sim_tool = tool;
+                    }
+                }
+                toolbar::View::Appearance => {
+                    if let Some(tool) = toolbar::show_shape_tools(ui, strings, self.shape_tool) {
+                        self.shape_tool = tool;
+                        self.drawing = None;
+                    }
+                    ui.separator();
+                    if ui
+                        .button(strings.appearance_reset)
+                        .on_hover_text(strings.appearance_reset_hint)
+                        .clicked()
+                    {
+                        self.record_edit();
+                        self.circuits[self.active].appearance = None;
                     }
                 }
             });
@@ -4393,11 +4449,20 @@ impl eframe::App for SimLogixApp {
                         return;
                     }
 
+                    // The simulation view is the *same* drawing, with every
+                    // gesture that edits taken away rather than a copy of it
+                    // put on screen. One flag, read by each thing that could
+                    // change the document — components stop being draggable,
+                    // pins stop starting wires, waypoints and loose ends stop
+                    // answering at all, and the keyboard stops deleting.
+                    let editing = self.view == toolbar::View::Schematic;
+
                     // Rotation applies to everything selected. Each turns on
                     // its own centre rather than the group's: a component's
                     // pins have to land on the grid, and turning the group as
                     // one body would put them between dots.
-                    let rotate_pressed = !ui.ctx().text_edit_focused()
+                    let rotate_pressed = editing
+                        && !ui.ctx().text_edit_focused()
                         && ui.ctx().input(|i| i.key_pressed(egui::Key::R));
 
                     // While something is queued for placement, `R` turns
@@ -4450,8 +4515,13 @@ impl eframe::App for SimLogixApp {
                     let mut pin_handles = Vec::new();
                     for placed in &mut self.placed {
                         let is_selected = self.selection.components.contains(&placed.id());
-                        let frame =
-                            placed.draw_and_interact(ui, &painter, &mut self.circuit, is_selected);
+                        let frame = placed.draw_and_interact(
+                            ui,
+                            &painter,
+                            &mut self.circuit,
+                            is_selected,
+                            editing,
+                        );
                         if let Some(id) = frame.clicked {
                             self.selection.pick_component(id, extend_selection);
                             click_consumed = true;
@@ -4560,19 +4630,20 @@ impl eframe::App for SimLogixApp {
                     // right there, so a wire can be reshaped in more places than
                     // just its existing points.
                     // Right-clicking a wire cuts the segment under the pointer.
-                    let secondary_click_pos = ui
-                        .ctx()
-                        .input(|i| i.pointer.secondary_clicked())
-                        .then_some(pointer_scene)
-                        .flatten();
-                    let double_click_pos = ui
-                        .ctx()
-                        .input(|i| {
+                    // Both are cut off here rather than at each thing they
+                    // reach: a cut, a waypoint inserted, a waypoint removed —
+                    // one `editing` at the source is one place to be right.
+                    let secondary_click_pos = (editing
+                        && ui.ctx().input(|i| i.pointer.secondary_clicked()))
+                    .then_some(pointer_scene)
+                    .flatten();
+                    let double_click_pos = (editing
+                        && ui.ctx().input(|i| {
                             i.pointer
                                 .button_double_clicked(egui::PointerButton::Primary)
-                        })
-                        .then_some(pointer_scene)
-                        .flatten();
+                        }))
+                    .then_some(pointer_scene)
+                    .flatten();
 
                     let hover_pos = pointer_scene;
 
@@ -4907,10 +4978,16 @@ impl eframe::App for SimLogixApp {
                             }
 
                             painter.circle_stroke(at, 4.0, stroke);
+                            // Still drawn, so a loose end is visible while a
+                            // circuit runs — just not something that answers.
                             let response = ui.interact(
                                 egui::Rect::from_center_size(at, egui::vec2(12.0, 12.0)),
                                 egui::Id::new(("wire_end", wire_id, is_from)),
-                                egui::Sense::click_and_drag(),
+                                if editing {
+                                    egui::Sense::click_and_drag()
+                                } else {
+                                    egui::Sense::hover()
+                                },
                             );
                             if response.hovered() {
                                 painter.circle_stroke(
@@ -5096,7 +5173,11 @@ impl eframe::App for SimLogixApp {
                             let response = ui.interact(
                                 handle_rect,
                                 egui::Id::new(("wire_point", wire_id, waypoint_index)),
-                                egui::Sense::click_and_drag(),
+                                if editing {
+                                    egui::Sense::click_and_drag()
+                                } else {
+                                    egui::Sense::hover()
+                                },
                             );
 
                             // A waypoint doubles as a junction target, so it gets a
@@ -5256,7 +5337,8 @@ impl eframe::App for SimLogixApp {
                         click_consumed = true;
                     }
 
-                    let delete_pressed = !ui.ctx().text_edit_focused()
+                    let delete_pressed = editing
+                        && !ui.ctx().text_edit_focused()
                         && ui.ctx().input(|i| {
                             i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)
                         });
@@ -5869,6 +5951,27 @@ mod tests {
         assert_eq!(app.library, "alu");
         app.undo();
         assert_eq!(app.library, "cpu");
+    }
+
+    #[test]
+    fn the_simulation_view_takes_the_editing_tools_away() {
+        let mut app = SimLogixApp {
+            tool: Tool::Wire,
+            ..Default::default()
+        };
+
+        app.switch_view(toolbar::View::Simulation);
+
+        // A tool that places or wires would be a gesture the mode has just
+        // promised not to have, left armed from before the switch.
+        assert_eq!(app.tool, Tool::Select);
+        assert!(app.selection.is_empty());
+        // The band is a schematic gesture too; only the hand gives the
+        // primary button back to the view here.
+        assert!(!app.bands_on_left_drag());
+        assert!(!app.pans_on_left_drag());
+        app.sim_tool = toolbar::SimTool::Pan;
+        assert!(app.pans_on_left_drag());
     }
 
     #[test]

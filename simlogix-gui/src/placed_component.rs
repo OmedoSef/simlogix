@@ -386,6 +386,9 @@ impl PlacedComponent {
         painter: &Painter,
         circuit: &mut Circuit,
         is_selected: bool,
+        // False while the circuit is being watched rather than built:
+        // nothing may be moved, and no pin may start a wire.
+        movable: bool,
     ) -> FrameResult {
         let id = self.id();
         let kind = self.kind();
@@ -446,7 +449,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
                 // Press/release only counts while not dragging, so moving a
                 // button across the canvas never also toggles it.
                 if !response.dragged() {
@@ -467,7 +470,7 @@ impl PlacedComponent {
                 }
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -497,9 +500,9 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -539,10 +542,10 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -569,7 +572,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 // Pin order is A, B, Dir, Enable; the symbol reports the two
                 // bus sides as its outputs and the two controls as inputs.
@@ -582,6 +585,7 @@ impl PlacedComponent {
                         0,
                         pin_positions.outputs[0],
                         circuit_pins[0].net,
+                        movable,
                     ),
                     pin_handle(
                         ui,
@@ -590,6 +594,7 @@ impl PlacedComponent {
                         1,
                         pin_positions.outputs[1],
                         circuit_pins[1].net,
+                        movable,
                     ),
                     pin_handle(
                         ui,
@@ -598,6 +603,7 @@ impl PlacedComponent {
                         2,
                         pin_positions.inputs[0],
                         circuit_pins[2].net,
+                        movable,
                     ),
                     pin_handle(
                         ui,
@@ -606,6 +612,7 @@ impl PlacedComponent {
                         3,
                         pin_positions.inputs[1],
                         circuit_pins[3].net,
+                        movable,
                     ),
                 ];
 
@@ -640,7 +647,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 // One anchor pin per port, in the order the box lays them
                 // out, which is the order `flatten` sorted them into.
@@ -657,6 +664,7 @@ impl PlacedComponent {
                             index,
                             *at,
                             circuit_pins.get(index)?.net,
+                            movable,
                         ))
                     })
                     .collect();
@@ -711,7 +719,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
                 // Latching: a click advances it and it stays there. Only on
                 // a click, never on a drag, so moving a port across the
                 // canvas can't also change what it carries.
@@ -724,7 +732,7 @@ impl PlacedComponent {
                 }
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -751,7 +759,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let circuit_pins = circuit.pins(id);
                 let pins = vec![
@@ -762,6 +770,7 @@ impl PlacedComponent {
                         0,
                         pin_positions.inputs[0],
                         circuit_pins[0].net,
+                        movable,
                     ),
                     pin_handle(
                         ui,
@@ -770,6 +779,7 @@ impl PlacedComponent {
                         1,
                         pin_positions.inputs[1],
                         circuit_pins[1].net,
+                        movable,
                     ),
                     pin_handle(
                         ui,
@@ -778,6 +788,7 @@ impl PlacedComponent {
                         2,
                         pin_positions.outputs[0],
                         circuit_pins[2].net,
+                        movable,
                     ),
                     pin_handle(
                         ui,
@@ -786,6 +797,7 @@ impl PlacedComponent {
                         3,
                         pin_positions.outputs[1],
                         circuit_pins[3].net,
+                        movable,
                     ),
                 ];
 
@@ -814,7 +826,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let circuit_pins = circuit.pins(id);
                 let gate = pin_handle(
@@ -824,6 +836,7 @@ impl PlacedComponent {
                     0,
                     pin_positions.inputs[0],
                     circuit_pins[0].net,
+                    movable,
                 );
                 let source = pin_handle(
                     ui,
@@ -832,6 +845,7 @@ impl PlacedComponent {
                     1,
                     pin_positions.inputs[1],
                     circuit_pins[1].net,
+                    movable,
                 );
                 let drain = pin_handle(
                     ui,
@@ -840,6 +854,7 @@ impl PlacedComponent {
                     2,
                     pin_positions.outputs[0],
                     circuit_pins[2].net,
+                    movable,
                 );
 
                 FrameResult {
@@ -867,10 +882,10 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -917,10 +932,10 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.inputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -957,10 +972,10 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let net = circuit.pins(id)[0].net;
-                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net);
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net, movable);
 
                 FrameResult {
                     clicked: response.clicked().then_some(id),
@@ -987,7 +1002,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let circuit_pins = circuit.pins(id);
                 let a = pin_handle(
@@ -997,6 +1012,7 @@ impl PlacedComponent {
                     0,
                     pin_positions.inputs[0],
                     circuit_pins[0].net,
+                    movable,
                 );
                 let b = pin_handle(
                     ui,
@@ -1005,6 +1021,7 @@ impl PlacedComponent {
                     1,
                     pin_positions.inputs[1],
                     circuit_pins[1].net,
+                    movable,
                 );
                 let out = pin_handle(
                     ui,
@@ -1013,6 +1030,7 @@ impl PlacedComponent {
                     2,
                     pin_positions.outputs[0],
                     circuit_pins[2].net,
+                    movable,
                 );
 
                 FrameResult {
@@ -1040,7 +1058,7 @@ impl PlacedComponent {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
 
-                let response = interact_box(ui, painter, rect, rect_id, center);
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
                 let circuit_pins = circuit.pins(id);
                 let input = pin_handle(
@@ -1050,6 +1068,7 @@ impl PlacedComponent {
                     0,
                     pin_positions.inputs[0],
                     circuit_pins[0].net,
+                    movable,
                 );
                 let output = pin_handle(
                     ui,
@@ -1058,6 +1077,7 @@ impl PlacedComponent {
                     1,
                     pin_positions.outputs[0],
                     circuit_pins[1].net,
+                    movable,
                 );
 
                 FrameResult {
@@ -1126,18 +1146,33 @@ fn applied_drag(response: &egui::Response) -> Vec2 {
     }
 }
 
+/// `movable` is false while a circuit is being watched rather than built.
+/// The box then senses clicks but not drags, so a button or a switch still
+/// answers one and nothing can be nudged out of place by a click that
+/// travelled a pixel — which is the whole point of the simulation mode.
 fn interact_box(
     ui: &mut Ui,
     painter: &Painter,
     rect: Rect,
     rect_id: Id,
     center: &mut Pos2,
+    movable: bool,
 ) -> egui::Response {
-    let response = ui.interact(
-        rect.shrink(PIN_HIT_MARGIN),
-        rect_id,
-        Sense::click_and_drag(),
-    );
+    let sense = if movable {
+        Sense::click_and_drag()
+    } else {
+        Sense::click()
+    };
+    let response = ui.interact(rect.shrink(PIN_HIT_MARGIN), rect_id, sense);
+
+    if !movable {
+        if response.hovered() {
+            // Outlined, but with no grab cursor: nothing here can be picked
+            // up, and saying otherwise would be a promise the mode breaks.
+            canvas::draw_hover_outline(painter, rect, ui.visuals().weak_text_color());
+        }
+        return response;
+    }
 
     if response.drag_started() {
         // Deliberately no movement on this one frame: the caller snapshots
@@ -1172,13 +1207,17 @@ fn pin_handle(
     pin_index: usize,
     position: Pos2,
     net: NetId,
+    wiring: bool,
 ) -> PinHandle {
     let hit_rect = Rect::from_center_size(position, egui::vec2(14.0, 14.0));
-    let response = ui.interact(
-        hit_rect,
-        Id::new(("pin", component, pin_index)),
-        Sense::click(),
-    );
+    // `hover()` reports nothing clickable, so a pin cannot start a wire
+    // while the circuit is only being watched.
+    let sense = if wiring {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let response = ui.interact(hit_rect, Id::new(("pin", component, pin_index)), sense);
 
     if response.hovered() {
         painter.circle_stroke(

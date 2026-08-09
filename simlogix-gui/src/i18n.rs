@@ -164,6 +164,7 @@ pub struct Strings {
     pub property_wire_color_hint: &'static str,
     pub property_reset: &'static str,
     pub properties_none_selected: &'static str,
+    pub properties_read_only: &'static str,
 
     pub palette_heading: &'static str,
     /// Contains a literal `{}` for the component name — fill it in with
@@ -201,6 +202,8 @@ pub struct Strings {
     pub pin_show_name: &'static str,
     pub shape_none_selected: &'static str,
     pub view_schematic: &'static str,
+    pub view_simulation: &'static str,
+    pub tool_interact: &'static str,
     pub view_appearance: &'static str,
     pub appearance_reset: &'static str,
     pub appearance_reset_hint: &'static str,
@@ -250,6 +253,7 @@ pub struct Strings {
     /// Contains a literal `{}` for how many things are selected.
     pub hint_selection: &'static str,
     pub hint_wiring: &'static str,
+    pub hint_simulation: &'static str,
 
     pub about_title: &'static str,
     pub about_body: &'static str,
@@ -473,6 +477,7 @@ static ENGLISH: Strings = Strings {
     property_wire_color_hint: "Applies to the whole net, as a casing around the signal colour.",
     property_reset: "Reset",
     properties_none_selected: "Select a component to see its properties.",
+    properties_read_only: "Read-only while the simulation view is showing.",
 
     palette_heading: "Palette",
     palette_click_to_place:
@@ -508,6 +513,8 @@ static ENGLISH: Strings = Strings {
     pin_show_name: "Show the port's name",
     shape_none_selected: "Select a shape to edit it.",
     view_schematic: "Schematic",
+    view_simulation: "Simulation",
+    tool_interact: "Interact — click switches and buttons",
     view_appearance: "Appearance",
     appearance_reset: "Reset symbol",
     appearance_reset_hint: "Go back to the generated box.",
@@ -558,6 +565,7 @@ static ENGLISH: Strings = Strings {
     hint_selection: "{} selected — drag to move, Delete to remove, Ctrl+C to copy",
     hint_wiring:
         "Click to add a point, click a pin or wire to finish, Enter to leave the end loose, Esc to cancel",
+    hint_simulation: "Click switches, buttons and ports — nothing here can be moved",
 
     about_title: "About SimLogix",
     about_body: "A cross-platform logic simulator: draw a circuit, watch it run.",
@@ -726,6 +734,7 @@ static FRENCH: Strings = Strings {
     property_wire_color_hint: "S'applique à tout le net, en gaine autour de la couleur de signal.",
     property_reset: "Réinitialiser",
     properties_none_selected: "Sélectionnez un composant pour voir ses propriétés.",
+    properties_read_only: "Lecture seule tant que la vue simulation est affichée.",
 
     palette_heading: "Palette",
     palette_click_to_place:
@@ -761,6 +770,8 @@ static FRENCH: Strings = Strings {
     pin_show_name: "Afficher le nom du port",
     shape_none_selected: "Sélectionne une forme pour la modifier.",
     view_schematic: "Schéma",
+    view_simulation: "Simulation",
+    tool_interact: "Agir — cliquer interrupteurs et boutons",
     view_appearance: "Apparence",
     appearance_reset: "Réinitialiser le symbole",
     appearance_reset_hint: "Revenir à la boîte générée.",
@@ -811,6 +822,7 @@ static FRENCH: Strings = Strings {
     hint_selection: "{} sélectionnés — glisser pour déplacer, Suppr pour retirer, Ctrl+C pour copier",
     hint_wiring:
         "Cliquez pour ajouter un point, une pin ou un fil pour finir, Entrée pour laisser le bout libre, Échap pour annuler",
+    hint_simulation: "Cliquez interrupteurs, boutons et ports — rien ne peut être déplacé ici",
 
     about_title: "À propos de SimLogix",
     about_body: "Un simulateur logique multiplateforme : dessinez un circuit, regardez-le tourner.",
@@ -979,6 +991,7 @@ static ITALIAN: Strings = Strings {
     property_wire_color_hint: "Si applica all'intera rete, come guaina attorno al colore del segnale.",
     property_reset: "Reimposta",
     properties_none_selected: "Seleziona un componente per vederne le proprietà.",
+    properties_read_only: "Sola lettura finché è mostrata la vista simulazione.",
 
     palette_heading: "Tavolozza",
     palette_click_to_place:
@@ -1014,6 +1027,8 @@ static ITALIAN: Strings = Strings {
     pin_show_name: "Mostra il nome della porta",
     shape_none_selected: "Seleziona una forma per modificarla.",
     view_schematic: "Schema",
+    view_simulation: "Simulazione",
+    tool_interact: "Interagire — cliccare interruttori e pulsanti",
     view_appearance: "Aspetto",
     appearance_reset: "Reimposta simbolo",
     appearance_reset_hint: "Torna al riquadro generato.",
@@ -1065,6 +1080,7 @@ static ITALIAN: Strings = Strings {
     hint_selection: "{} selezionati — trascina per spostare, Canc per rimuovere, Ctrl+C per copiare",
     hint_wiring:
         "Clicca per aggiungere un punto, un pin o un filo per finire, Invio per lasciare l'estremità libera, Esc per annullare",
+    hint_simulation: "Clicca interruttori, pulsanti e porte — qui nulla può essere spostato",
 
     about_title: "Informazioni su SimLogix",
     about_body: "Un simulatore logico multipiattaforma: disegna un circuito e guardalo funzionare.",

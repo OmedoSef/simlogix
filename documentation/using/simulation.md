@@ -3,6 +3,38 @@
 The simulation advances continuously in real time, so a `Clock` ticks on its
 own — one toggle per second by default.
 
+## The simulation view
+
+The toolbar has three modes on its top row — **Schematic**, **Appearance**
+and **Simulation** — with the tools belonging to the current one underneath.
+
+*Simulation* shows the same drawing with **every editing gesture taken
+away**. Nothing can be dragged out of place, no pin starts a wire, no
+waypoint moves, `Delete` and `R` do nothing, the palette is greyed out and
+pasting is refused. Watching a circuit means clicking switches and reading
+probes for minutes at a time, and one dropped drag in the middle of that is
+a change you didn't see happen and won't think to undo.
+
+The status bar says what this mode is rather than which keys edit, since
+those keys no longer do.
+
+The properties panel goes **read-only** rather than empty: what a component
+is set to is worth reading while you watch it work, and only changing it is
+out of bounds. Selecting still works, so it can be read.
+
+What still works is everything that *isn't* a change to the drawing: click a
+switch, a button or a port, hover a wire to light its net, pan and zoom, and
+copy — reading something out changes nothing.
+
+Flipping a switch is still recorded as an edit, because a switch's position
+is part of the document: it is how the circuit was left, not something the
+simulation produced. That is the one thing this mode deliberately lets you
+change, since it is the whole reason to be here.
+
+Its tool row holds **Interact** and a hand for the view. It is deliberately
+short — the row exists as the place inspection tools will go as they arrive,
+not as a shelf of buttons that do nothing yet.
+
 ## Running and pausing
 
 **Simulation → Run/Pause**, or `Space`. Editing keeps working while paused;
