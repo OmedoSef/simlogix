@@ -109,3 +109,46 @@ which is now whatever you chose rather than always released.
 Setting a property is an ordinary edit, so `Ctrl+Z` undoes it. Typing a name
 counts as one step from the moment you click into the field; the colour
 picker leaves a step per change while you drag through it.
+
+## Memory
+
+The palette's **Memory** category holds the `SR latch`: `S` sets `Q` high,
+`R` clears it, and with neither asserted it holds what it was last told —
+the simplest thing in the editor that remembers.
+
+Two behaviours worth knowing, because both are deliberate:
+
+- Asserting `S` and `R` together has no defined answer, so both outputs go
+  to the error colour rather than picking one. The same goes for an input
+  that nothing is driving: the latch reports that it no longer knows,
+  instead of assuming the undriven input is low.
+- A freshly placed latch reads as unknown until you set or reset it. Real
+  hardware comes up either way, and inventing a power-on value here would
+  hide bugs that depend on one.
+
+You can also build a latch by hand from two cross-coupled NAND gates — that
+works, and is what the simulator's own tests exercise. Its inputs are
+active *low*, unlike the component's.
+
+## Shared buses
+
+The `Tri-state buffer` in the Gates category is the one component that can
+*stop* driving. While its enable input is high it passes its data input
+through like an ordinary buffer; while the enable is low it lets go of the
+net entirely, so something else can drive it.
+
+That's what lets several outputs share one wire — wire two of them to the
+same net, enable one at a time, and the net carries whichever is speaking.
+
+The states you'll see on a shared net:
+
+| Situation | The net reads |
+|---|---|
+| One buffer enabled | whatever it's passing |
+| None enabled | unknown — a floating wire, not a low one |
+| Two enabled, disagreeing | error — a short between two drivers |
+| Two enabled, agreeing | that value; there's nothing to report |
+
+An enable that nothing drives isn't the same as an enable held low: the
+buffer reports that it doesn't know whether it should be driving, rather
+than assuming it shouldn't.

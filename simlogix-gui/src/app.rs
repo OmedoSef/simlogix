@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 
 use simlogix_core::{
     And, Buffer, Button, Circuit, Clock, Component, ComponentId, Led, Nand, NetId, Nor, Not, Or,
-    Pin, PinDirection, Probe, Rail, Transistor, Xnor, Xor,
+    Pin, PinDirection, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::canvas::{self, BOX_SIZE};
@@ -438,6 +438,62 @@ impl SimLogixApp {
             }
             // The 1-input mirror of the above (see
             // `PlacedComponent::OneInputGate`'s doc comment).
+            ComponentKind::TriStateBuffer => {
+                let data = self.circuit.add_net();
+                let enable = self.circuit.add_net();
+                let out = self.circuit.add_net();
+                let id = self.circuit.add_component(
+                    Box::new(TriStateBuffer),
+                    vec![
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: data,
+                        },
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: enable,
+                        },
+                        Pin {
+                            direction: PinDirection::Output,
+                            net: out,
+                        },
+                    ],
+                );
+                // Two inputs at 0/1 and one output at 2 — the exact shape
+                // `TwoInputGate` already draws and wires generically, so it
+                // needs no variant of its own.
+                PlacedComponent::two_input_gate(id, center, kind)
+            }
+            ComponentKind::SrLatch => {
+                let nets = [
+                    self.circuit.add_net(),
+                    self.circuit.add_net(),
+                    self.circuit.add_net(),
+                    self.circuit.add_net(),
+                ];
+                let id = self.circuit.add_component(
+                    Box::new(SrLatch::new()),
+                    vec![
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: nets[0],
+                        },
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: nets[1],
+                        },
+                        Pin {
+                            direction: PinDirection::Output,
+                            net: nets[2],
+                        },
+                        Pin {
+                            direction: PinDirection::Output,
+                            net: nets[3],
+                        },
+                    ],
+                );
+                PlacedComponent::sr_latch(id, center)
+            }
             ComponentKind::Not | ComponentKind::Buffer => {
                 let input = self.circuit.add_net();
                 let output = self.circuit.add_net();

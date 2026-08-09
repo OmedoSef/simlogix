@@ -54,6 +54,145 @@ pub fn draw(
         ComponentKind::Xnor => draw_or_gate(painter, rect, rotation, stroke, true, true),
         ComponentKind::Buffer => draw_triangle_gate(painter, rect, rotation, stroke, false),
         ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
+        ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke),
+        ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
+    }
+}
+
+/// A tri-state buffer: the buffer triangle, with the enable coming down
+/// onto the middle of its upper edge — the conventional symbol.
+///
+/// Its own geometry rather than [`draw_triangle_gate`]'s, because the
+/// enable dictates it: the triangle is sized so the midpoint of its upper
+/// edge sits directly below the box's top-centre, which is the only grid
+/// point on that edge. That keeps the enable lead vertical and all three
+/// pins on the grid.
+fn draw_tri_state_buffer(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    let color = stroke.color;
+
+    let back_x = rect.left() + rect.width() * 0.1;
+    let tip = pos2(rect.right() - rect.width() * 0.1, c.y);
+    let half_h = rect.height() * 0.45;
+
+    let pin_in = pos2(rect.left(), c.y);
+    let pin_out = pos2(rect.right(), c.y);
+    let pin_enable = pos2(c.x, rect.top());
+
+    painter.line_segment([r(pin_in), r(pos2(back_x, c.y))], stroke);
+    painter.line_segment([r(tip), r(pin_out)], stroke);
+
+    let triangle = vec![
+        pos2(back_x, c.y - half_h),
+        pos2(back_x, c.y + half_h),
+        tip,
+        pos2(back_x, c.y - half_h),
+    ];
+    painter.line(triangle.into_iter().map(r).collect(), stroke);
+
+    // Halfway along the upper edge, which the geometry above puts exactly
+    // at the box's horizontal centre.
+    let on_edge = pos2(c.x, c.y - half_h / 2.0);
+    painter.line_segment([r(pin_enable), r(on_edge)], stroke);
+
+    for pin in [pin_in, pin_enable, pin_out] {
+        draw_pin(painter, r(pin), color);
+    }
+
+    PinPositions {
+        // Data first, enable second — the order `place()` registers the
+        // pins in, and therefore the order a saved wire refers to them by.
+        inputs: vec![r(pin_in), r(pin_enable)],
+        outputs: vec![r(pin_out)],
+    }
+}
+
+/// An SR latch: a plain body with its four pins labelled.
+///
+/// **The one symbol that carries text**, against the standing convention.
+/// A gate can go unlabelled because its shape says which side is which and
+/// its two inputs are interchangeable — swap an AND's inputs and nothing
+/// changes. A latch's are not: `S` and `R` do opposite things, and so do
+/// `Q` and `Q̄`. Four unlabelled pins at four corners would be a guess, and
+/// the box-with-labels *is* this component's recognisable form.
+fn draw_sr_latch(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    let color = stroke.color;
+
+    // Inset horizontally only: the pins have to land on the rect's corners
+    // to stay on the grid, so the body's height is the rect's.
+    let inset = rect.width() * 0.2;
+    let body = Rect::from_min_max(
+        pos2(rect.left() + inset, rect.top()),
+        pos2(rect.right() - inset, rect.bottom()),
+    );
+
+    let set = pos2(rect.left(), rect.top());
+    let reset = pos2(rect.left(), rect.bottom());
+    let q = pos2(rect.right(), rect.top());
+    let q_bar = pos2(rect.right(), rect.bottom());
+
+    painter.line_segment([r(set), r(pos2(body.left(), body.top()))], stroke);
+    painter.line_segment([r(reset), r(pos2(body.left(), body.bottom()))], stroke);
+    painter.line_segment([r(q), r(pos2(body.right(), body.top()))], stroke);
+    painter.line_segment([r(q_bar), r(pos2(body.right(), body.bottom()))], stroke);
+
+    let corners = [
+        pos2(body.left(), body.top()),
+        pos2(body.right(), body.top()),
+        pos2(body.right(), body.bottom()),
+        pos2(body.left(), body.bottom()),
+        pos2(body.left(), body.top()),
+    ];
+    painter.line(corners.into_iter().map(r).collect(), stroke);
+
+    // Drawn upright at rotated positions, the same way a component's own
+    // name label is: turning the glyphs would only make them unreadable.
+    let font = FontId::proportional(9.0);
+    let pad = 4.0;
+    let label = |at: Pos2, align: Align2, text: &str| {
+        painter.text(r(at), align, text, font.clone(), color);
+    };
+    label(
+        pos2(body.left() + pad, body.top() + pad + 3.0),
+        Align2::LEFT_CENTER,
+        "S",
+    );
+    label(
+        pos2(body.left() + pad, body.bottom() - pad - 3.0),
+        Align2::LEFT_CENTER,
+        "R",
+    );
+    label(
+        pos2(body.right() - pad, body.top() + pad + 3.0),
+        Align2::RIGHT_CENTER,
+        "Q",
+    );
+    label(
+        pos2(body.right() - pad, body.bottom() - pad - 3.0),
+        Align2::RIGHT_CENTER,
+        "Q\u{0305}",
+    );
+
+    for pin in [set, reset, q, q_bar] {
+        draw_pin(painter, r(pin), color);
+    }
+
+    PinPositions {
+        inputs: vec![r(set), r(reset)],
+        outputs: vec![r(q), r(q_bar)],
     }
 }
 

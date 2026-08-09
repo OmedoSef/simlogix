@@ -92,6 +92,10 @@ enum Shape {
     /// The 1-input mirror of `TwoInputGate` (`Not`/`Buffer`), via
     /// [`PlacedComponent::one_input_gate`].
     OneInputGate(ComponentKind),
+    /// Two inputs at pin indices 0/1 (`S`, `R`) and *two* outputs at 2/3
+    /// (`Q`, `Q̄`) — the first component with more than one output, which is
+    /// why it doesn't fit `TwoInputGate`.
+    SrLatch,
 }
 
 impl PlacedComponent {
@@ -137,6 +141,10 @@ impl PlacedComponent {
         Self::new(id, center, Shape::OneInputGate(kind))
     }
 
+    pub fn sr_latch(id: ComponentId, center: Pos2) -> Self {
+        Self::new(id, center, Shape::SrLatch)
+    }
+
     pub fn id(&self) -> ComponentId {
         self.id
     }
@@ -169,6 +177,7 @@ impl PlacedComponent {
             | Shape::OneInputGate(kind) => kind,
             Shape::Probe => ComponentKind::Probe,
             Shape::Clock => ComponentKind::Clock,
+            Shape::SrLatch => ComponentKind::SrLatch,
         }
     }
 
@@ -303,6 +312,59 @@ impl PlacedComponent {
                     settled: response.drag_stopped(),
                     input_changed,
                     pins: vec![pin],
+                }
+            }
+            Shape::SrLatch => {
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center);
+
+                let circuit_pins = circuit.pins(id);
+                let pins = vec![
+                    pin_handle(
+                        ui,
+                        painter,
+                        id,
+                        0,
+                        pin_positions.inputs[0],
+                        circuit_pins[0].net,
+                    ),
+                    pin_handle(
+                        ui,
+                        painter,
+                        id,
+                        1,
+                        pin_positions.inputs[1],
+                        circuit_pins[1].net,
+                    ),
+                    pin_handle(
+                        ui,
+                        painter,
+                        id,
+                        2,
+                        pin_positions.outputs[0],
+                        circuit_pins[2].net,
+                    ),
+                    pin_handle(
+                        ui,
+                        painter,
+                        id,
+                        3,
+                        pin_positions.outputs[1],
+                        circuit_pins[3].net,
+                    ),
+                ];
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    pins,
                 }
             }
             Shape::Transistor(_) => {

@@ -45,6 +45,8 @@ pub enum ComponentKind {
     Xnor,
     Not,
     Buffer,
+    SrLatch,
+    TriStateBuffer,
 }
 
 impl ComponentKind {
@@ -53,7 +55,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 16] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 18] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -70,6 +72,8 @@ impl ComponentKind {
         (ComponentKind::Xnor, "Xnor"),
         (ComponentKind::Not, "Not"),
         (ComponentKind::Buffer, "Buffer"),
+        (ComponentKind::SrLatch, "SrLatch"),
+        (ComponentKind::TriStateBuffer, "TriStateBuffer"),
     ];
 
     fn saved_name(self) -> &'static str {
@@ -130,7 +134,7 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
 
     let mut clicked = None;
 
-    let categories: [(&str, &[ComponentKind]); 4] = [
+    let categories: [(&str, &[ComponentKind]); 5] = [
         (
             strings.category_sources,
             &[
@@ -159,8 +163,10 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
                 ComponentKind::Xnor,
                 ComponentKind::Not,
                 ComponentKind::Buffer,
+                ComponentKind::TriStateBuffer,
             ],
         ),
+        (strings.category_memory, &[ComponentKind::SrLatch]),
     ];
 
     for (category_label, kinds) in categories {
