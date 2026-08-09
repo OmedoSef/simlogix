@@ -58,23 +58,65 @@ impl Properties {
     }
 }
 
-/// Draws the panel for the selected component and applies what's edited.
+/// Component kinds that come in two flavours differing only in a setting —
+/// the channel of a transistor, the polarity of a transceiver's enable.
 ///
-/// Returns whether this is the *start* of an edit, which is the moment the
-/// caller should snapshot for undo — not every frame a value changes, or
-/// typing a name would leave one undo step per keystroke.
+/// Which flavour a component is lives in its `ComponentKind`, not in
+/// [`Properties`]: an NMOS and a PMOS really are two components rather than
+/// one with a switch, the symbol is already drawn from the kind, and a saved
+/// `simlogix:PTransistor` says more than a `Transistor` with a flag beside
+/// it. All the panel adds is the ability to change your mind after placing.
+const VARIANTS: [[ComponentKind; 2]; 2] = [
+    [ComponentKind::NTransistor, ComponentKind::PTransistor],
+    [
+        ComponentKind::BusTransceiver,
+        ComponentKind::BusTransceiverOe,
+    ],
+];
+
+fn siblings(kind: ComponentKind) -> Option<[ComponentKind; 2]> {
+    VARIANTS.into_iter().find(|pair| pair.contains(&kind))
+}
+
+/// What the panel wants done, beyond the properties it edited in place.
+#[derive(Default)]
+pub struct PanelResult {
+    /// This frame begins an editing session — the moment to snapshot for
+    /// undo, rather than every frame a value changes.
+    pub edit_started: bool,
+    /// Turn this component into its sibling kind.
+    pub change_kind: Option<ComponentKind>,
+}
+
+/// Draws the panel for the selected component and applies what's edited.
 pub fn show(
     ui: &mut Ui,
     strings: &Strings,
     kind: ComponentKind,
     properties: &mut Properties,
-) -> bool {
+) -> PanelResult {
+    let mut result = PanelResult::default();
     let mut edit_started = false;
 
     ui.heading(strings.properties_heading);
     ui.add_space(4.0);
 
-    ui.label(strings.component_kind_label(kind));
+    match siblings(kind) {
+        // A component with a sibling shows the choice instead of a plain
+        // name, so the name is still there but now says which one it is.
+        Some(pair) => {
+            ui.label(strings.property_variant);
+            for option in pair {
+                let label = strings.component_kind_label(option);
+                if ui.radio(option == kind, label).clicked() && option != kind {
+                    result.change_kind = Some(option);
+                }
+            }
+        }
+        None => {
+            ui.label(strings.component_kind_label(kind));
+        }
+    }
     ui.add_space(8.0);
 
     ui.label(strings.property_name);
@@ -132,7 +174,8 @@ pub fn show(
         _ => {}
     }
 
-    edit_started
+    result.edit_started = edit_started;
+    result
 }
 
 /// Draws the panel for the selected wire. Returns the colour it should now

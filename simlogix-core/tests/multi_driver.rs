@@ -151,7 +151,8 @@ fn two_drivers_agreeing_is_not_an_error() {
 struct Transceiver {
     circuit: Circuit,
     buttons: Vec<ComponentId>,
-    /// `[a_data, a_enable, b_data, b_enable, dir, output_enable]`.
+    /// `[a_data, a_enable, b_data, b_enable, dir, output_enable]` — the
+    /// transceiver's `OE` is active *low*, unlike the tri-state buffers'.
     levers: Vec<Rc<Cell<bool>>>,
     transceiver: ComponentId,
 }
@@ -216,7 +217,7 @@ fn build_transceiver() -> Transceiver {
     let b_source = source(&mut circuit, nets[9], nets[10], nets[11]);
 
     let transceiver = circuit.add_component(
-        Box::new(simlogix_core::BusTransceiver),
+        Box::new(simlogix_core::BusTransceiver::active_low()),
         vec![
             // A and B are `InOut`: each reads the bus it sits on, and drives
             // it only when the direction says to.
@@ -267,7 +268,7 @@ fn a_transceiver_settles_rather_than_re_triggering_itself() {
     // reschedules everything reading that net, and this component reads the
     // very net it just drove. If that didn't converge, nothing else here
     // would matter.
-    bus.drive([true, true, false, false, true, true])
+    bus.drive([true, true, false, false, true, false])
         .expect("an InOut pin must not re-trigger its own component forever");
 }
 
@@ -276,7 +277,7 @@ fn a_transceiver_carries_a_to_b_and_then_b_to_a() {
     let mut bus = build_transceiver();
 
     // A drives High, B's own source is off, direction A to B.
-    bus.drive([true, true, false, false, true, true])
+    bus.drive([true, true, false, false, true, false])
         .expect("settles");
     assert_eq!(bus.bus(1), Signal::High, "B should follow A");
     // The listening side adds nothing to its own net, so bus A is still
@@ -284,7 +285,7 @@ fn a_transceiver_carries_a_to_b_and_then_b_to_a() {
     assert_eq!(bus.bus(0), Signal::High);
 
     // Turn it round: A's source lets go, B drives Low, direction B to A.
-    bus.drive([true, false, false, true, false, true])
+    bus.drive([true, false, false, true, false, false])
         .expect("settles");
     assert_eq!(bus.bus(0), Signal::Low, "A should follow B");
     assert_eq!(bus.bus(1), Signal::Low);
@@ -293,13 +294,13 @@ fn a_transceiver_carries_a_to_b_and_then_b_to_a() {
 #[test]
 fn a_disabled_transceiver_leaves_the_far_bus_floating() {
     let mut bus = build_transceiver();
-    bus.drive([true, true, false, false, true, true])
+    bus.drive([true, true, false, false, true, false])
         .expect("settles");
     assert_eq!(bus.bus(1), Signal::High);
 
-    // Output enable low: both sides let go. Nothing else drives bus B, so it
-    // floats — which reads as unknown, not as low.
-    bus.drive([true, true, false, false, true, false])
+    // `OE` high switches it off — it is active low. Both sides let go, and
+    // nothing else drives bus B, so it floats: unknown, not low.
+    bus.drive([true, true, false, false, true, true])
         .expect("settles");
     assert_eq!(bus.bus(1), Signal::Unknown);
 }
@@ -311,7 +312,7 @@ fn a_transceiver_driving_against_a_live_source_is_reported() {
     // Both of B's drivers on and disagreeing: B's own source says High while
     // the transceiver pushes A's Low across. That is a short, and the point
     // of `InOut` is that it resolves by the same rule as any other net.
-    bus.drive([false, true, true, true, true, true])
+    bus.drive([false, true, true, true, true, false])
         .expect("settles");
     assert_eq!(bus.bus(1), Signal::Error);
 }

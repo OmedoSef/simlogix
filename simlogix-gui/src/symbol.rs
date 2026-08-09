@@ -16,6 +16,8 @@ use crate::canvas::Rotation;
 use crate::palette::ComponentKind;
 
 const PIN_RADIUS: f32 = 3.0;
+/// How far a `Button`'s cap sinks towards its pin while held.
+const CAP_TRAVEL: f32 = 2.5;
 
 /// Where a drawn component's pins ended up — a wire attaches at these exact
 /// points — in the same order `Circuit::pins` reports them.
@@ -24,21 +26,36 @@ pub struct PinPositions {
     pub outputs: Vec<Pos2>,
 }
 
+/// Whatever a symbol needs to draw itself beyond its geometry — the bits of
+/// live state that differ frame to frame. Most kinds use none of it and pass
+/// [`SymbolState::default`].
+///
+/// A struct rather than a growing list of parameters: `label` was already
+/// here for `Probe` alone, and `pressed` would have been the second such
+/// escape hatch. This way the next one costs a field rather than a signature
+/// change at every call site.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SymbolState<'a> {
+    /// `Probe`: the net state it's reading, e.g. `"1"`/`"0"`/`"?"`.
+    pub label: &'a str,
+    /// `Button`: whether its cap is currently down.
+    pub pressed: bool,
+}
+
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
-/// returns where its pins ended up. `label` is only used by `Probe` (the net
-/// state it's reading, e.g. `"1"`/`"0"`/`"?"`) — pass `""` for every other
-/// kind.
+/// returns where its pins ended up.
 pub fn draw(
     painter: &Painter,
     kind: ComponentKind,
     rect: Rect,
     rotation: Rotation,
     color: Color32,
-    label: &str,
+    state: SymbolState<'_>,
 ) -> PinPositions {
     let stroke = Stroke::new(1.6, color);
+    let label = state.label;
     match kind {
-        ComponentKind::Button => draw_button(painter, rect, rotation, stroke, color),
+        ComponentKind::Button => draw_button(painter, rect, rotation, stroke, color, state.pressed),
         ComponentKind::Led => draw_led(painter, rect, rotation, stroke, color),
         ComponentKind::NTransistor => draw_transistor(painter, rect, rotation, stroke, true),
         ComponentKind::PTransistor => draw_transistor(painter, rect, rotation, stroke, false),
@@ -56,22 +73,33 @@ pub fn draw(
         ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
-        ComponentKind::BusTransceiver => draw_bus_transceiver(painter, rect, rotation, stroke),
+        ComponentKind::BusTransceiver => {
+            draw_bus_transceiver(painter, rect, rotation, stroke, false)
+        }
+        ComponentKind::BusTransceiverOe => {
+            draw_bus_transceiver(painter, rect, rotation, stroke, true)
+        }
     }
 }
 
 /// A bus transceiver: a body with a double-headed arrow across it, the two
 /// bus sides on the left and right, and the control pins stacked on the left.
 ///
-/// Labelled, by the same rule as the SR latch: `Dir` and `Enable` do
-/// entirely different things and nothing about their position says which is
-/// which. The arrow carries the rest — `A` is the left side, `B` the right,
-/// and `Dir` high sends A to B.
+/// Labelled, by the same rule as the SR latch: `DIR` and `OE` do entirely
+/// different things and nothing about their position says which is which.
+/// The arrow carries the rest — `A` is the left side, `B` the right, and
+/// `DIR` high sends A to B.
+///
+/// `active_low` draws the enable as `OE` with an inversion bubble; without
+/// it, as a plain `EN`. That bubble is the whole difference on screen, and
+/// it has to be there: the two variants are otherwise identical, and so is
+/// the tri-state buffer's own (active-high, unbubbled) enable.
 fn draw_bus_transceiver(
     painter: &Painter,
     rect: Rect,
     rotation: Rotation,
     stroke: Stroke,
+    active_low: bool,
 ) -> PinPositions {
     let c = rect.center();
     let r = |p: Pos2| rotate(p, c, rotation);
@@ -90,7 +118,15 @@ fn draw_bus_transceiver(
 
     painter.line_segment([r(dir), r(pos2(body.left(), rect.top()))], stroke);
     painter.line_segment([r(a), r(pos2(body.left(), c.y))], stroke);
-    painter.line_segment([r(enable), r(pos2(body.left(), rect.bottom()))], stroke);
+    if active_low {
+        // The bubble sits against the body and the lead stops short of it —
+        // `bubble_end` draws it and hands back where the lead resumes.
+        let bubble_at = pos2(body.left() - BUBBLE_RADIUS * 2.0, rect.bottom());
+        painter.line_segment([r(enable), r(bubble_at)], stroke);
+        bubble_end(painter, bubble_at, r, stroke);
+    } else {
+        painter.line_segment([r(enable), r(pos2(body.left(), rect.bottom()))], stroke);
+    }
     painter.line_segment([r(b), r(pos2(body.right(), c.y))], stroke);
 
     let corners = [
@@ -129,7 +165,7 @@ fn draw_bus_transceiver(
     painter.text(
         r(pos2(body.left() + 3.0, rect.bottom() - 7.0)),
         Align2::LEFT_CENTER,
-        "OE",
+        if active_low { "OE" } else { "EN" },
         font,
         color,
     );
@@ -410,22 +446,37 @@ fn bubble_end(
 }
 
 /// A pushbutton: a round cap with a single lead reaching its output pin.
+/// The cap fills in and sinks towards its pin while held.
+///
+/// Two cues rather than one, because neither carries on its own: the travel
+/// is a couple of pixels, invisible at a glance, and a filled circle alone
+/// reads like a lit LED. Together they say "pushed in". The fill takes the
+/// symbol's own colour rather than a signal colour — the cap being down is a
+/// position, not a level.
 fn draw_button(
     painter: &Painter,
     rect: Rect,
     rotation: Rotation,
     stroke: Stroke,
     color: Color32,
+    pressed: bool,
 ) -> PinPositions {
     let c = rect.center();
     let r = |p: Pos2| rotate(p, c, rotation);
 
     let pin = pos2(rect.right(), c.y);
     let cap_radius = rect.height() * 0.22;
-    let cap_center = pos2(c.x - cap_radius, c.y);
+    let travel = if pressed { CAP_TRAVEL } else { 0.0 };
+    let cap_center = pos2(c.x - cap_radius + travel, c.y);
 
+    // The lead starts at the cap's edge, so it follows the travel and no gap
+    // opens up behind it.
     painter.line_segment([r(pos2(cap_center.x + cap_radius, c.y)), r(pin)], stroke);
-    painter.circle_stroke(r(cap_center), cap_radius, stroke);
+    if pressed {
+        painter.circle_filled(r(cap_center), cap_radius, color);
+    } else {
+        painter.circle_stroke(r(cap_center), cap_radius, stroke);
+    }
     draw_pin(painter, r(pin), color);
 
     PinPositions {

@@ -10,7 +10,7 @@ use simlogix_core::{Circuit, ComponentId, NetId, Signal};
 use crate::canvas::{self, Rotation, BOX_SIZE};
 use crate::palette::ComponentKind;
 use crate::properties::{Properties, DEFAULT_LED_COLOR};
-use crate::symbol;
+use crate::symbol::{self, SymbolState};
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
 /// it is, which net it's on, and whether it was clicked this frame (starts
@@ -95,7 +95,7 @@ enum Shape {
     /// Two `InOut` bus sides at pin indices 0/1 (`A`, `B`) and two control
     /// inputs at 2/3 (`Dir`, `Enable`) — the only component whose pins both
     /// read and drive.
-    BusTransceiver,
+    BusTransceiver(ComponentKind),
     /// Two inputs at pin indices 0/1 (`S`, `R`) and *two* outputs at 2/3
     /// (`Q`, `Q̄`) — the first component with more than one output, which is
     /// why it doesn't fit `TwoInputGate`.
@@ -149,8 +149,8 @@ impl PlacedComponent {
         Self::new(id, center, Shape::SrLatch)
     }
 
-    pub fn bus_transceiver(id: ComponentId, center: Pos2) -> Self {
-        Self::new(id, center, Shape::BusTransceiver)
+    pub fn bus_transceiver(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
+        Self::new(id, center, Shape::BusTransceiver(kind))
     }
 
     pub fn id(&self) -> ComponentId {
@@ -180,13 +180,13 @@ impl PlacedComponent {
             Shape::Button { .. } => ComponentKind::Button,
             Shape::Led => ComponentKind::Led,
             Shape::Transistor(kind)
+            | Shape::BusTransceiver(kind)
             | Shape::Rail(kind)
             | Shape::TwoInputGate(kind)
             | Shape::OneInputGate(kind) => kind,
             Shape::Probe => ComponentKind::Probe,
             Shape::Clock => ComponentKind::Clock,
             Shape::SrLatch => ComponentKind::SrLatch,
-            Shape::BusTransceiver => ComponentKind::BusTransceiver,
         }
     }
 
@@ -256,7 +256,17 @@ impl PlacedComponent {
         match shape {
             Shape::Button { pressed } => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState {
+                        pressed: pressed.get(),
+                        ..Default::default()
+                    },
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -305,7 +315,14 @@ impl PlacedComponent {
                     off_color
                 };
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -323,9 +340,16 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            Shape::BusTransceiver => {
+            Shape::BusTransceiver(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -380,7 +404,14 @@ impl PlacedComponent {
             }
             Shape::SrLatch => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -433,7 +464,14 @@ impl PlacedComponent {
             }
             Shape::Transistor(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -476,7 +514,14 @@ impl PlacedComponent {
             }
             Shape::Rail(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -512,7 +557,17 @@ impl PlacedComponent {
                     Signal::HighZ => "Z",
                 };
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, label);
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    color,
+                    SymbolState {
+                        label,
+                        ..Default::default()
+                    },
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -542,7 +597,14 @@ impl PlacedComponent {
                 // not red.
                 let color = canvas::signal_color(signal, dark_mode);
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -562,7 +624,14 @@ impl PlacedComponent {
             }
             Shape::TwoInputGate(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }
@@ -605,7 +674,14 @@ impl PlacedComponent {
             }
             Shape::OneInputGate(_) => {
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
-                let pin_positions = symbol::draw(painter, kind, rect, *rotation, symbol_color, "");
+                let pin_positions = symbol::draw(
+                    painter,
+                    kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState::default(),
+                );
                 if is_selected {
                     canvas::draw_selection_outline(painter, rect, dark_mode);
                 }

@@ -438,12 +438,17 @@ impl SimLogixApp {
             }
             // The 1-input mirror of the above (see
             // `PlacedComponent::OneInputGate`'s doc comment).
-            ComponentKind::BusTransceiver => {
+            ComponentKind::BusTransceiver | ComponentKind::BusTransceiverOe => {
                 // A and B are `InOut`: each reads the bus it sits on and
                 // drives it only when the direction says to.
                 let nets: Vec<_> = (0..4).map(|_| self.circuit.add_net()).collect();
+                let part = if kind == ComponentKind::BusTransceiverOe {
+                    BusTransceiver::active_low()
+                } else {
+                    BusTransceiver::active_high()
+                };
                 let id = self.circuit.add_component(
-                    Box::new(BusTransceiver),
+                    Box::new(part),
                     vec![
                         Pin {
                             direction: PinDirection::InOut,
@@ -463,7 +468,7 @@ impl SimLogixApp {
                         },
                     ],
                 );
-                PlacedComponent::bus_transceiver(id, center)
+                PlacedComponent::bus_transceiver(id, center, kind)
             }
             ComponentKind::TriStateBuffer => {
                 let data = self.circuit.add_net();
@@ -809,6 +814,43 @@ impl SimLogixApp {
         if let Some(stem) = path.file_stem() {
             self.library = stem.to_string_lossy().into_owned();
         }
+    }
+
+    /// Turns a placed component into its sibling kind — an NMOS into a
+    /// PMOS, a transceiver's enable from `EN` to `OE`.
+    ///
+    /// Done by rewriting the saved form and reopening, rather than by
+    /// swapping the component inside `Circuit`: a component's identity there
+    /// is its `ComponentId`, which every wire endpoint refers to, so
+    /// replacing it in place would mean remapping all of them. Going through
+    /// the document keeps the wires, the routes and everything else exactly
+    /// as they are, since they're stored by *index*. It costs a rebuild —
+    /// the same one undo and switching circuits already pay.
+    ///
+    /// Only valid between kinds with the same pins; `properties::VARIANTS`
+    /// is the list of pairs that qualify.
+    fn change_kind(&mut self, id: ComponentId, kind: ComponentKind) {
+        let Some(index) = self.placed.iter().position(|placed| placed.id() == id) else {
+            return;
+        };
+
+        let mut project = self.to_project();
+        let Some(component) = project
+            .circuits
+            .get_mut(self.active)
+            .and_then(|circuit| circuit.components.get_mut(index))
+        else {
+            return;
+        };
+        component.kind = kind;
+
+        let open = self.active;
+        self.reopen(&project, open);
+        // Ids are handed out afresh by the rebuild, so the selection is
+        // recovered by position — otherwise changing the type would
+        // deselect the thing you're editing.
+        self.selected = self.placed.get(index).map(|placed| placed.id());
+        self.dirty = true;
     }
 
     /// Renames the project's library. Refuses an empty name — every
@@ -2203,6 +2245,7 @@ impl eframe::App for SimLogixApp {
         // below, snapshot first.
         let mut pending_properties: Option<(ComponentId, Properties, bool)> = None;
         let mut pending_wire_color: Option<(u64, Option<[u8; 3]>)> = None;
+        let mut pending_kind: Option<(ComponentId, ComponentKind)> = None;
         egui::Panel::right("properties")
             .resizable(true)
             .default_size(220.0)
@@ -2228,10 +2271,14 @@ impl eframe::App for SimLogixApp {
                         match selected {
                             Some(placed) => {
                                 let mut edited = placed.properties().clone();
-                                let started =
+                                let outcome =
                                     properties::show(ui, strings, placed.kind(), &mut edited);
-                                if started || edited != *placed.properties() {
-                                    pending_properties = Some((placed.id(), edited, started));
+                                if let Some(kind) = outcome.change_kind {
+                                    pending_kind = Some((placed.id(), kind));
+                                }
+                                if outcome.edit_started || edited != *placed.properties() {
+                                    pending_properties =
+                                        Some((placed.id(), edited, outcome.edit_started));
                                 }
                             }
                             None => {
@@ -2240,6 +2287,11 @@ impl eframe::App for SimLogixApp {
                         }
                     });
             });
+
+        if let Some((id, kind)) = pending_kind {
+            self.record_edit();
+            self.change_kind(id, kind);
+        }
 
         if let Some((wire_id, color)) = pending_wire_color {
             self.record_edit();
@@ -3316,7 +3368,7 @@ impl eframe::App for SimLogixApp {
                                 rect,
                                 canvas::Rotation::default(),
                                 ui.visuals().strong_text_color().gamma_multiply(0.45),
-                                "",
+                                crate::symbol::SymbolState::default(),
                             );
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                         }
@@ -3881,6 +3933,43 @@ mod tests {
             .wires
             .iter()
             .all(|wire| wire.color == Some([7, 8, 9])));
+    }
+
+    #[test]
+    fn changing_a_component_to_its_sibling_kind_keeps_its_wires_and_place() {
+        let mut app = SimLogixApp::default();
+        let transistor = app.place(ComponentKind::NTransistor, egui::pos2(60.0, 60.0));
+        let led = app.place(ComponentKind::Led, egui::pos2(200.0, 60.0));
+        app.add_wire(
+            WireEndpoint::Pin(transistor, 2),
+            WireEndpoint::Pin(led, 0),
+            vec![egui::pos2(140.0, 60.0)],
+        );
+
+        app.change_kind(transistor, ComponentKind::PTransistor);
+
+        // The rebuild hands out fresh ids, so what's checked is that the
+        // drawing survived: same components in the same places, same wire,
+        // same route, and the selection still on the thing being edited.
+        assert_eq!(app.placed.len(), 2);
+        assert_eq!(app.placed[0].kind(), ComponentKind::PTransistor);
+        assert_eq!(app.placed[0].center(), egui::pos2(60.0, 60.0));
+        assert_eq!(app.wires.len(), 1);
+        assert_eq!(app.wires[0].waypoints, vec![egui::pos2(140.0, 60.0)]);
+        assert_eq!(app.selected, Some(app.placed[0].id()));
+    }
+
+    #[test]
+    fn changing_a_kind_is_undoable() {
+        let mut app = SimLogixApp::default();
+        let id = app.place(ComponentKind::BusTransceiver, egui::pos2(60.0, 60.0));
+
+        app.record_edit();
+        app.change_kind(id, ComponentKind::BusTransceiverOe);
+        assert_eq!(app.placed[0].kind(), ComponentKind::BusTransceiverOe);
+
+        app.undo();
+        assert_eq!(app.placed[0].kind(), ComponentKind::BusTransceiver);
     }
 
     #[test]

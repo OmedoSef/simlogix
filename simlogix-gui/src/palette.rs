@@ -48,6 +48,7 @@ pub enum ComponentKind {
     SrLatch,
     TriStateBuffer,
     BusTransceiver,
+    BusTransceiverOe,
 }
 
 impl ComponentKind {
@@ -56,7 +57,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 19] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 20] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -76,6 +77,7 @@ impl ComponentKind {
         (ComponentKind::SrLatch, "SrLatch"),
         (ComponentKind::TriStateBuffer, "TriStateBuffer"),
         (ComponentKind::BusTransceiver, "BusTransceiver"),
+        (ComponentKind::BusTransceiverOe, "BusTransceiverOe"),
     ];
 
     fn saved_name(self) -> &'static str {
@@ -169,7 +171,13 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: Tool) -> Option<Tool> {
             ],
         ),
         (strings.category_memory, &[ComponentKind::SrLatch]),
-        (strings.category_buses, &[ComponentKind::BusTransceiver]),
+        (
+            strings.category_buses,
+            &[
+                ComponentKind::BusTransceiver,
+                ComponentKind::BusTransceiverOe,
+            ],
+        ),
     ];
 
     for (category_label, kinds) in categories {
@@ -243,7 +251,10 @@ fn palette_row(ui: &mut Ui, kind: Option<ComponentKind>, name: &str, is_active: 
                     icon_rect,
                     Rotation::Deg0,
                     visuals.fg_stroke.color,
-                    preview_label,
+                    symbol::SymbolState {
+                        label: preview_label,
+                        ..Default::default()
+                    },
                 );
             }
             None => symbol::draw_wire_tool(ui.painter(), icon_rect, visuals.fg_stroke.color),

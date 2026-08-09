@@ -100,6 +100,7 @@ pub struct Strings {
     pub circuit_default_name: &'static str,
 
     pub properties_heading: &'static str,
+    pub property_variant: &'static str,
     pub property_name: &'static str,
     pub property_name_hint: &'static str,
     pub property_pressed: &'static str,
@@ -143,6 +144,7 @@ pub struct Strings {
     pub component_sr_latch: &'static str,
     pub component_tri_state: &'static str,
     pub component_bus_transceiver: &'static str,
+    pub component_bus_transceiver_oe: &'static str,
 
     pub hint_rotate_delete_component: &'static str,
     pub hint_delete_wire: &'static str,
@@ -206,6 +208,7 @@ impl Strings {
             ComponentKind::SrLatch => self.component_sr_latch,
             ComponentKind::TriStateBuffer => self.component_tri_state,
             ComponentKind::BusTransceiver => self.component_bus_transceiver,
+            ComponentKind::BusTransceiverOe => self.component_bus_transceiver_oe,
         }
     }
 }
@@ -247,6 +250,7 @@ static ENGLISH: Strings = Strings {
     circuit_default_name: "circuit",
 
     properties_heading: "Properties",
+    property_variant: "Type",
     property_name: "Name",
     property_name_hint: "shown under the symbol",
     property_pressed: "Pressed at rest",
@@ -287,7 +291,8 @@ static ENGLISH: Strings = Strings {
     component_buffer: "Buffer",
     component_sr_latch: "SR latch",
     component_tri_state: "Tri-state buffer",
-    component_bus_transceiver: "Bus transceiver",
+    component_bus_transceiver: "Bus transceiver (EN)",
+    component_bus_transceiver_oe: "Bus transceiver (OE)",
 
     hint_rotate_delete_component:
         "R to rotate, Delete to remove the selected component, Esc to deselect",
@@ -352,6 +357,7 @@ static FRENCH: Strings = Strings {
     circuit_default_name: "circuit",
 
     properties_heading: "Propriétés",
+    property_variant: "Type",
     property_name: "Nom",
     property_name_hint: "affiché sous le symbole",
     property_pressed: "Enfoncé au repos",
@@ -392,7 +398,8 @@ static FRENCH: Strings = Strings {
     component_buffer: "Tampon",
     component_sr_latch: "Bascule SR",
     component_tri_state: "Tampon 3 états",
-    component_bus_transceiver: "Transceiver de bus",
+    component_bus_transceiver: "Transceiver (EN)",
+    component_bus_transceiver_oe: "Transceiver (OE)",
 
     hint_rotate_delete_component:
         "R pour tourner, Suppr pour supprimer le composant sélectionné, Échap pour désélectionner",
@@ -457,6 +464,7 @@ static ITALIAN: Strings = Strings {
     circuit_default_name: "circuito",
 
     properties_heading: "Proprietà",
+    property_variant: "Tipo",
     property_name: "Nome",
     property_name_hint: "mostrato sotto il simbolo",
     property_pressed: "Premuto a riposo",
@@ -497,7 +505,8 @@ static ITALIAN: Strings = Strings {
     component_buffer: "Buffer",
     component_sr_latch: "Latch SR",
     component_tri_state: "Buffer tri-state",
-    component_bus_transceiver: "Ricetrasmettitore",
+    component_bus_transceiver: "Ricetrasmettitore (EN)",
+    component_bus_transceiver_oe: "Ricetrasmettitore (OE)",
 
     hint_rotate_delete_component:
         "R per ruotare, Canc per eliminare il componente selezionato, Esc per deselezionare",
