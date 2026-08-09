@@ -3541,6 +3541,18 @@ impl eframe::App for SimLogixApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // The frame is unused — every viewport command this app sends goes
+        // through the context. Keeping the body out of the trait method is
+        // what lets a test drive the whole application with nothing but a
+        // `Ui`, which is the only way to reach the bugs that live between
+        // widgets rather than inside them.
+        self.draw(ui);
+    }
+}
+
+impl SimLogixApp {
+    /// One frame of the whole application.
+    pub(crate) fn draw(&mut self, ui: &mut egui::Ui) {
         // Advance the circuit by real elapsed time every frame, not just
         // after an explicit interaction -- this is what lets a placed Clock
         // keep ticking on its own. Requesting continuous repaint is what
@@ -5829,6 +5841,13 @@ impl eframe::App for SimLogixApp {
 // -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
+
+// Tests that drive the assembled application. Declared here rather than as
+// a sibling module so they can see what everything else may not; the file is
+// its own, and its docs say why.
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod ui_tests;
 
 #[cfg(test)]
 mod tests {

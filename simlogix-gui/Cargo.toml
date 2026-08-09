@@ -62,4 +62,5 @@ simlogix-core = { path = "../simlogix-core", features = ["serde"] }
 zip = { version = "8.6.0", default-features = false }
 
 [dev-dependencies]
+egui_kittest = { version = "0.35", default-features = false }
 ron = "0.12.2"

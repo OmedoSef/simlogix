@@ -97,16 +97,22 @@ Not user-visible, but they decide how expensive everything above is.
   The seams are visible enough: the canvas interaction, the menu bar, the
   panels, and the appearance editor are four things sharing one file.
 
-- [ ] **Tests at the interface level**
+- [ ] 🚧 **Tests at the interface level**
 
   A pattern worth naming: the group drag, copy/paste, the view framing, two
   leaks in the simulation mode, and the paint order of the text layer were
   all bugs in the *wiring* between correct pieces — and the unit tests stayed
-  green through all of them.
+  green through all of them. Five occurrences is a category, not bad luck.
 
-  Five occurrences is a category, not bad luck, and it is the one category
-  nothing currently catches. egui ships a harness (`egui_kittest`) that
-  drives a real `Ui`; a handful of tests through it would cover exactly this.
+  `egui_kittest` now drives the real application in `src/ui_tests.rs`, and
+  covers copy/paste and the two gestures the simulation view takes away —
+  each checked to *fail* against the bug it describes, since a regression
+  test that has never failed proves nothing.
+
+  What is left is anything needing canvas **coordinates**: the group drag,
+  moving a wire's waypoint, the rubber band. A test has no way yet to work
+  out where a scene position lands on screen, and that is the piece to build
+  next.
 
 ## Known gaps in what ships
 
