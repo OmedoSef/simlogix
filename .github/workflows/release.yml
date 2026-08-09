@@ -45,7 +45,7 @@ jobs:
             target: x86_64-apple-darwin
             archive: tar.gz
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the libraries eframe builds against
         if: runner.os == 'Linux'
@@ -87,7 +87,7 @@ jobs:
             tar -czf "../$name.tar.gz" "$name"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: archive-${{ matrix.target }}
           path: simlogix-*.*
@@ -97,7 +97,7 @@ jobs:
     name: Debian package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the libraries eframe builds against
         run: |
@@ -128,7 +128,7 @@ jobs:
           test -f /usr/share/applications/simlogix.desktop
           desktop-file-validate /usr/share/applications/simlogix.desktop
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: archive-debian
           path: simlogix.deb
@@ -138,7 +138,7 @@ jobs:
     name: Windows installer
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           key: wix
@@ -148,7 +148,7 @@ jobs:
       # PATH entry. `cargo wix init` would overwrite all of that, so it is
       # deliberately not run here.
       - run: cargo wix --package simlogix-gui --nocapture --output simlogix.msi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: archive-windows-installer
           path: simlogix.msi
@@ -164,9 +164,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: archive-*
           path: artifacts

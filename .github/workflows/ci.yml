@@ -26,7 +26,7 @@ jobs:
     name: Format and lints
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Not the full devcontainer list: nothing in the dependency tree pulls
       # in GTK or OpenSSL any more — `rfd` reaches the desktop portal over
@@ -63,7 +63,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the libraries eframe builds against
         if: runner.os == 'Linux'
