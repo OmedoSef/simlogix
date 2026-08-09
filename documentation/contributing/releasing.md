@@ -62,6 +62,38 @@ run leaves the tree exactly as it found it.
 The tag is the decision; the workflow only carries it out. Nothing in
 `.github/` has to be edited to cut a release.
 
+## The release notes
+
+Written by [`scripts/changelog.sh`](../../scripts/changelog.sh) from the
+commit subjects between the previous tag and this one, grouped into
+**Breaking changes**, **Features**, **Fixes**, **Performance**,
+**Documentation** and **Other changes**, with the Full Changelog link at the
+end. Preview what a release would say before tagging it:
+
+```bash
+scripts/changelog.sh            # from the last tag to HEAD
+scripts/changelog.sh v0.2.3     # what that release said
+```
+
+Only the **subject line** is used, with its Conventional-Commits prefix
+stripped — so `fix(gui): a symbol's box no longer reaches past the drawing`
+becomes one bullet under *Fixes*. The body is where the reasoning lives, and
+release notes are not the place to re-read it.
+
+`chore` and `ci` are left out. They describe work on the project rather than
+changes to the thing being released, and a list padded with them is one
+nobody finishes reading. A type the script doesn't recognise lands under
+*Other changes* rather than being dropped — an unfamiliar prefix in the
+wrong section is better than a change that silently isn't there.
+
+A commit marked breaking with `!` appears at the top **and** in its own
+section: it is still a feature or a fix, and it is also the one thing a
+reader must not miss.
+
+This replaced `gh --generate-notes`, which lists every commit verbatim with
+no way to group or filter them. The script writes the Full Changelog link
+itself, so the notes are one thing decided in one place.
+
 ## What a release contains
 
 | Artefact | Platform |

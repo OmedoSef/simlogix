@@ -182,13 +182,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The whole history, and the tags with it: the notes are written from
+      # the commits since the previous tag, and a shallow clone has neither.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v8
         with:
           pattern: archive-*
           path: artifacts
           merge-multiple: true
+
+      # Written here rather than by `gh --generate-notes`, which lists every
+      # commit verbatim -- housekeeping included -- and offers no way to
+      # group them. The script produces the Full Changelog link too, so the
+      # notes are one thing decided in one place instead of two halves
+      # stitched together by whatever gh does when both are asked for.
+      - name: Write the release notes
+        run: scripts/changelog.sh "${{ github.ref_name }}" | tee notes.md
 
       # The GitHub CLI is on the runner already, so publishing costs no
       # third-party action and nothing to keep up to date.
@@ -198,5 +210,5 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             --title "SimLogix ${{ github.ref_name }}" \
-            --generate-notes \
+            --notes-file notes.md \
             artifacts/*
