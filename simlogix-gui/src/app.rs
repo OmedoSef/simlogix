@@ -363,6 +363,12 @@ pub struct SimLogixApp {
     circuits: Vec<SavedCircuit>,
     /// Which of `circuits` is open. Always a valid index.
     active: usize,
+    /// Which way the component queued for placement is facing.
+    ///
+    /// Reset when a different kind is picked, kept while the same one is
+    /// being dropped repeatedly: having turned a gate once, the next one you
+    /// place almost certainly wants the same orientation.
+    place_rotation: canvas::Rotation,
     /// Set when the view should be re-framed on what the open circuit
     /// actually contains: opening a project, or switching circuits.
     ///
@@ -432,6 +438,7 @@ impl Default for SimLogixApp {
             }],
             folders: Vec::new(),
             active: 0,
+            place_rotation: canvas::Rotation::default(),
             refit_view: false,
             reveal_active: false,
             flattening: Vec::new(),
@@ -2974,6 +2981,12 @@ impl eframe::App for SimLogixApp {
                         // Clicking the active entry again drops back to
                         // selecting, so the palette doubles as its own
                         // "never mind" button.
+                        // A different component starts upright; the
+                        // rotation you dialled in belongs to the one you
+                        // were placing, not to the palette.
+                        if self.tool != tool {
+                            self.place_rotation = canvas::Rotation::default();
+                        }
                         self.tool = if self.tool == tool {
                             Tool::Select
                         } else {
@@ -3018,6 +3031,7 @@ impl eframe::App for SimLogixApp {
                     // instance is the same gesture as dropping any other
                     // component -- preview included.
                     self.tool = Tool::Place(ComponentKind::Circuit(circuit.path()));
+                    self.place_rotation = canvas::Rotation::default();
                 }
             }
             Some(TreeAction::Delete(index)) => self.delete_circuit(index),
@@ -3267,10 +3281,16 @@ impl eframe::App for SimLogixApp {
                     // its own centre rather than the group's: a component's
                     // pins have to land on the grid, and turning the group as
                     // one body would put them between dots.
-                    if !self.selection.components.is_empty()
-                        && !ui.ctx().text_edit_focused()
-                        && ui.ctx().input(|i| i.key_pressed(egui::Key::R))
-                    {
+                    let rotate_pressed = !ui.ctx().text_edit_focused()
+                        && ui.ctx().input(|i| i.key_pressed(egui::Key::R));
+
+                    // While something is queued for placement, `R` turns
+                    // *that* rather than the selection: it is the thing under
+                    // your pointer, and rotating after dropping means placing
+                    // it wrong first on purpose.
+                    if rotate_pressed && matches!(self.tool, Tool::Place(_)) {
+                        self.place_rotation = self.place_rotation.next_clockwise();
+                    } else if rotate_pressed && !self.selection.components.is_empty() {
                         self.record_edit();
                         let chosen = self.selection.components.clone();
                         for placed in &mut self.placed {
@@ -4405,7 +4425,7 @@ impl eframe::App for SimLogixApp {
                                 crate::symbol::draw_instance(
                                     &painter,
                                     rect,
-                                    canvas::Rotation::default(),
+                                    self.place_rotation,
                                     faint,
                                     path,
                                     &ports,
@@ -4420,7 +4440,7 @@ impl eframe::App for SimLogixApp {
                                 &painter,
                                 kind,
                                 rect,
-                                canvas::Rotation::default(),
+                                self.place_rotation,
                                 ui.visuals().strong_text_color().gamma_multiply(0.45),
                                 crate::symbol::SymbolState::default(),
                                 &crate::symbol::TextLayer::for_ui(ui),
@@ -4451,6 +4471,9 @@ impl eframe::App for SimLogixApp {
                     if let Some(pos) = scene_response.response.interact_pointer_pos() {
                         self.record_edit();
                         let id = self.place(kind, canvas::snap_to_grid(pos));
+                        if let Some(placed) = self.placed.iter_mut().find(|p| p.id() == id) {
+                            placed.set_rotation(self.place_rotation);
+                        }
                         self.pending_attach = Some(id);
                         // Holding shift keeps the kind loaded, so a row of
                         // LEDs is one trip to the palette rather than one per

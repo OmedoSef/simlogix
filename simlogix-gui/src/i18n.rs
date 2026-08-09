@@ -396,7 +396,7 @@ static ENGLISH: Strings = Strings {
 
     palette_heading: "Palette",
     palette_click_to_place:
-        "Click the canvas to place a {} — hold Shift to place several",
+        "Click the canvas to place a {} — R turns it, Shift places several",
     tool_select: "Select",
     tool_wire: "Draw wire",
     tool_marquee: "Selection rectangle",
@@ -585,7 +585,7 @@ static FRENCH: Strings = Strings {
 
     palette_heading: "Palette",
     palette_click_to_place:
-        "Cliquez sur le canevas pour placer : {} — maintenez Maj pour en poser plusieurs",
+        "Cliquez sur le canevas pour placer : {} — R le fait tourner, Maj en pose plusieurs",
     tool_select: "Sélection",
     tool_wire: "Tracer un fil",
     tool_marquee: "Rectangle de sélection",
@@ -774,7 +774,7 @@ static ITALIAN: Strings = Strings {
 
     palette_heading: "Tavolozza",
     palette_click_to_place:
-        "Clicca sulla tela per posizionare: {} — tieni premuto Maiusc per posarne più",
+        "Clicca sulla tela per posizionare: {} — R lo ruota, Maiusc ne posa più",
     tool_select: "Selezione",
     tool_wire: "Traccia un filo",
     tool_marquee: "Rettangolo di selezione",
