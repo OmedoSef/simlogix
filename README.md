@@ -67,6 +67,15 @@ generated; after changing a dependency, run:
 cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-party.json
 ```
 
+## Installing
+
+Each release carries portable archives for Linux, Windows and macOS, a
+`.deb` for Debian and Ubuntu, and an `.msi` installer for Windows — see the
+[releases page](https://github.com/OmedoSef/simlogix/releases).
+
+Neither the macOS nor the Windows artefacts are signed, so both systems will
+warn on first run.
+
 ## Documentation
 
 - Using the editor, architecture, and contributor conventions: the

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=SimLogix
+GenericName=Logic Simulator
+Comment=Design and simulate digital logic circuits
+Exec=simlogix %f
+Icon=simlogix
+Terminal=false
+Categories=Development;Electronics;Engineering;
+Keywords=logic;circuit;simulator;digital;electronics;
+MimeType=application/x-simlogix-project;
+StartupWMClass=simlogix-gui

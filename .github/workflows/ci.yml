@@ -1,0 +1,86 @@
+# Runs on every push and pull request.
+#
+# The local pre-commit hook already runs `fmt` and `clippy`, but it runs on
+# Romain's machine only — a contributor's checkout has no hook, which is the
+# whole reason this exists. It also does what the hook can't: build and test
+# on the three platforms the application claims to support.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Formatting and lints once, on Linux: they are platform-independent, and
+  # running them three times would only ever say the same thing three times.
+  lint:
+    name: Format and lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Not the full devcontainer list: nothing in the dependency tree pulls
+      # in GTK or OpenSSL any more — `rfd` reaches the desktop portal over
+      # D-Bus (ashpd/zbus) rather than through GTK. If a build ever fails for
+      # want of a library, adding it back here is a one-line fix, and CI
+      # saying so is exactly what CI is for.
+      - name: Install the libraries eframe builds against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxext-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+
+      # The toolchain is pinned in rust-toolchain.toml, so there is nothing to
+      # choose here — rustup reads it. Pinning is also what makes `-D warnings`
+      # safe: a new compiler release cannot turn the build red on its own.
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all -- --check
+
+      # Blocking here, unlike the local hook where it is informational. The
+      # hook must not stop a commit mid-thought; a pull request is exactly
+      # where an unaddressed lint should be caught.
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing is a fact worth having about the others too.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the libraries eframe builds against
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxext-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - run: cargo test --all-features
+
+      # The tests never open a window, so a green test run says nothing about
+      # whether the GUI still links. Building it is what says that.
+      - run: cargo build --all-targets

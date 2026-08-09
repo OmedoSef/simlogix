@@ -1,0 +1,184 @@
+# Builds the downloadable artefacts and publishes them against a tag.
+#
+# Triggered by pushing a tag like `v0.1.0`. The tag is the decision; this
+# workflow only carries it out, which is why nothing here has to be edited to
+# cut a release.
+#
+# `workflow_dispatch` builds the same artefacts without publishing, so the
+# pipeline can be tried on a branch before a tag exists to spend.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux (x86_64)
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - label: Windows (x86_64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          # macOS runners are Apple silicon now, so the Intel build is a
+          # cross-compile. Both are shipped: an Intel Mac cannot run the
+          # arm64 binary, and Rosetta is not something to make a user find
+          # out about from a crash.
+          - label: macOS (Apple silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - label: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the libraries eframe builds against
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxext-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - run: cargo build --release --target ${{ matrix.target }} --bin simlogix-gui
+
+      # The licence and the third-party notices go in the archive, not just
+      # in the repository: attribution has to reach whoever ends up with a
+      # copy, and a download is exactly that.
+      - name: Stage the archive
+        shell: bash
+        run: |
+          name="simlogix-${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}-${{ matrix.target }}"
+          mkdir -p "staging/$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/simlogix-gui.exe" "staging/$name/SimLogix.exe"
+          else
+            cp "target/${{ matrix.target }}/release/simlogix-gui" "staging/$name/simlogix"
+          fi
+          cp LICENSE THIRD-PARTY.md README.md "staging/$name/"
+          cd staging
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "../$name.zip" "$name"
+          else
+            tar -czf "../$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.target }}
+          path: simlogix-*.*
+          if-no-files-found: error
+
+  debian:
+    name: Debian package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the libraries eframe builds against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxext-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: deb
+
+      - run: cargo install cargo-deb --locked
+
+      # Run from the GUI crate: the package is the application, and the
+      # engine crate is a library with nothing to install.
+      - run: cargo deb -p simlogix-gui --output simlogix.deb
+
+      # A package that installs is the only evidence that matters, and it is
+      # cheap to get here rather than from the first person to try it.
+      - name: Check that it installs and lists what it claims
+        run: |
+          sudo apt-get install -y ./simlogix.deb
+          dpkg -L simlogix
+          test -x /usr/bin/simlogix
+          test -f /usr/share/applications/simlogix.desktop
+          desktop-file-validate /usr/share/applications/simlogix.desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-debian
+          path: simlogix.deb
+          if-no-files-found: error
+
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wix
+      - run: cargo install cargo-wix --locked
+      # `wix/main.wxs` is checked in, edited away from the generated template:
+      # one binary instead of three, a Start Menu shortcut, an icon, and no
+      # PATH entry. `cargo wix init` would overwrite all of that, so it is
+      # deliberately not run here.
+      - run: cargo wix --package simlogix-gui --nocapture --output simlogix.msi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-windows-installer
+          path: simlogix.msi
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    # Only a tag is a decision to publish; a manual run just proves the
+    # pipeline works.
+    if: github.ref_type == 'tag'
+    needs: [build, debian, windows-installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: artifacts
+          merge-multiple: true
+
+      # The GitHub CLI is on the runner already, so publishing costs no
+      # third-party action and nothing to keep up to date.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "SimLogix ${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*

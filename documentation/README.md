@@ -20,6 +20,7 @@ This folder holds the documentation for users and contributors. It's a work in p
   - [Code conventions](contributing/code-conventions.md) — language, error handling, panics, formatting, tests, module layout.
   - [Commit conventions](contributing/commit-conventions.md) — Conventional Commits format, types, scopes, enforcement hook.
   - [Dev tooling](contributing/dev-tooling.md) — toolchain pinning, editorconfig, pre-commit hook, dependency auditing.
+  - [CI and releases](contributing/releasing.md) — what runs when, cutting a release, and how each installer is built.
   - [Project scope](contributing/project-scope.md) — what's in and out of scope for v1.
 
 For the project's internal decision log, rationale, and progress tracking, see [CLAUDE.md](../CLAUDE.md) at the repo root (kept for project continuity across sessions/machines, not aimed at outside readers).

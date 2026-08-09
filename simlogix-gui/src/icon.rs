@@ -202,6 +202,40 @@ pub fn paint(painter: &egui::Painter, rect: egui::Rect) {
 /// A module of its own because only the `write-icon` tool calls it, and that
 /// tool includes this file by path: without the blanket allow, building the
 /// application itself would warn about every function here being unused.
+/// Wraps the PNG as a Windows `.ico`, which the installer needs for the
+/// Start Menu shortcut and the entry in Add/Remove Programs.
+///
+/// An icon file is a six-byte header, one sixteen-byte directory entry, and
+/// the image — and since Vista that image may be a PNG rather than a BMP.
+/// So there is no second rasteriser and no second encoder here: the same
+/// bytes, in a different envelope.
+pub mod ico {
+    #![allow(dead_code)]
+
+    use super::{png, SIZE};
+
+    pub fn encode() -> Vec<u8> {
+        let image = png::encode();
+        let mut out = Vec::with_capacity(image.len() + 22);
+
+        // ICONDIR: reserved, type 1 (icon), one image.
+        out.extend_from_slice(&[0, 0, 1, 0, 1, 0]);
+        // ICONDIRENTRY. Width and height are one byte each, and zero is how
+        // 256 is written — the field cannot hold 256 itself.
+        let side = if SIZE >= 256 { 0 } else { SIZE as u8 };
+        out.push(side);
+        out.push(side);
+        out.push(0); // no colour palette
+        out.push(0); // reserved
+        out.extend_from_slice(&1u16.to_le_bytes()); // colour planes
+        out.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+        out.extend_from_slice(&(image.len() as u32).to_le_bytes());
+        out.extend_from_slice(&22u32.to_le_bytes()); // offset: past this header
+        out.extend_from_slice(&image);
+        out
+    }
+}
+
 pub mod png {
     #![allow(dead_code)]
 

@@ -1,0 +1,30 @@
+# Checks the dependency tree against the RustSec advisory database.
+#
+# Deliberately *not* part of CI. The advisory database changes daily and the
+# code does not, so an advisory published overnight would turn a pull request
+# red without anything in it having changed — which teaches people to ignore
+# a red mark. On a schedule it says the same thing at a moment when it is
+# information rather than an obstacle.
+name: Audit
+
+on:
+  schedule:
+    # Monday morning, so it lands at the start of a week rather than during
+    # one.
+    - cron: "0 7 * * 1"
+  # Anything that could change what is in the tree.
+  push:
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: RustSec advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit

@@ -10,6 +10,48 @@ rust-version.workspace = true
 # Two binaries now: the app, and the tool that writes its icon out as a PNG.
 default-run = "simlogix-gui"
 
+# Debian/Ubuntu packaging, read by `cargo deb`. Paths are relative to this
+# manifest's directory, hence the `../` out to the workspace root.
+[package.metadata.deb]
+name = "simlogix"
+maintainer = "Romain VOLPI <romain.volpi@omedo.net>"
+copyright = "2026 Romain VOLPI"
+license-file = ["../LICENSE", "0"]
+section = "electronics"
+priority = "optional"
+extended-description = """
+SimLogix is a digital logic simulator: draw a circuit, run it, and watch the \
+signals move. Its engine is discrete-event with propagation delays, so a \
+combinational feedback loop settles or oscillates the way hardware does \
+instead of hanging, and one that never settles is reported rather than \
+freezing the interface."""
+
+# `$auto` alone reports only libc: everything else is opened with `dlopen` at
+# run time, so it leaves no NEEDED entry to be read off the binary. A package
+# that installs and then won't start is worse than one that refuses to
+# install, hence the explicit list -- taken from the `.so` names in the
+# binary itself, not from memory.
+depends = "$auto, libx11-6, libx11-xcb1, libxcb1, libxcursor1, libxi6, libxkbcommon0, libxkbcommon-x11-0, libegl1, libwayland-client0, libwayland-egl1"
+
+# Vulkan is preferred and not required -- there is a GL path behind it. The
+# portal is what the save/open dialog talks to; without one the application
+# runs, and only that dialog is missing.
+recommends = "libvulkan1, xdg-desktop-portal"
+
+# Listed explicitly, which also settles what must *not* ship: with no list,
+# cargo-deb installs every binary in the crate, and `write-icon` and
+# `write-licenses` are build tools that have no business on a user's PATH.
+assets = [
+    ["target/release/simlogix-gui", "usr/bin/simlogix", "755"],
+    ["../packaging/simlogix.desktop", "usr/share/applications/simlogix.desktop", "644"],
+    ["../packaging/simlogix.xml", "usr/share/mime/packages/simlogix.xml", "644"],
+    ["../assets/icon.png", "usr/share/icons/hicolor/256x256/apps/simlogix.png", "644"],
+    ["../README.md", "usr/share/doc/simlogix/README.md", "644"],
+    # Shipped with the package because the notices have to travel with the
+    # binary, not merely exist in a repository somewhere.
+    ["../THIRD-PARTY.md", "usr/share/doc/simlogix/THIRD-PARTY.md", "644"],
+]
+
 [dependencies]
 eframe = { version = "0.35", features = ["persistence"] }
 egui = "0.35"

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Teaches the desktop what a .slgx file is, so double-clicking one opens
+     SimLogix and the file gets an icon of its own rather than a blank page. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-simlogix-project">
+    <comment>SimLogix project</comment>
+    <glob pattern="*.slgx"/>
+    <!-- The container is a zip; without this, the sniffer would call it one. -->
+    <sub-class-of type="application/zip"/>
+    <icon name="simlogix"/>
+  </mime-type>
+</mime-info>
