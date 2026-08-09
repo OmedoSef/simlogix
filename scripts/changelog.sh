@@ -11,9 +11,9 @@
 # reasoning lives, and release notes are not the place to re-read it; anyone
 # who wants it has the Full Changelog link at the end.
 #
-# Housekeeping is left out. `chore` and `ci` describe work on the project
-# rather than changes to the thing being released, and a list padded with
-# them is one nobody finishes reading.
+# Housekeeping is left out. `chore`, `ci` and `test` describe work on the
+# project rather than changes to the thing being released, and a list padded
+# with them is one nobody finishes reading.
 
 set -euo pipefail
 
@@ -38,7 +38,7 @@ section_of() {
         fix)                    echo "Fixes" ;;
         perf)                   echo "Performance" ;;
         docs)                   echo "Documentation" ;;
-        chore|ci)               echo "" ;;
+        chore|ci|test)          echo "" ;;
         *)                      echo "Other changes" ;;
     esac
 }

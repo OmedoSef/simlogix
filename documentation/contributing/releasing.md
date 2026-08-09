@@ -80,11 +80,13 @@ stripped — so `fix(gui): a symbol's box no longer reaches past the drawing`
 becomes one bullet under *Fixes*. The body is where the reasoning lives, and
 release notes are not the place to re-read it.
 
-`chore` and `ci` are left out. They describe work on the project rather than
-changes to the thing being released, and a list padded with them is one
-nobody finishes reading. A type the script doesn't recognise lands under
-*Other changes* rather than being dropped — an unfamiliar prefix in the
-wrong section is better than a change that silently isn't there.
+`chore`, `ci` and `test` are left out. They describe work on the project
+rather than changes to the thing being released, and a list padded with them
+is one nobody finishes reading. A type the script doesn't recognise lands
+under *Other changes* rather than being dropped — an unfamiliar prefix in the
+wrong section is better than a change that silently isn't there, which also
+means `build`, `style` and `refactor` still show up there if you'd rather
+they didn't.
 
 A commit marked breaking with `!` appears at the top **and** in its own
 section: it is still a feature or a fix, and it is also the one thing a
