@@ -14,6 +14,8 @@ This folder holds the documentation for users and contributors. It's a work in p
 - **Architecture**
   - [Overview](architecture/overview.md) — workspace layout, crate responsibilities, GUI toolkit choice.
   - [Simulation engine](architecture/simulation-engine.md) — discrete-event model, signal states, feedback-loop handling.
+- **Licensing**
+  - [Licences](licensing.md) — SimLogix's own terms, third-party notices, and how the notice file is regenerated.
 - **Contributing**
   - [Code conventions](contributing/code-conventions.md) — language, error handling, panics, formatting, tests, module layout.
   - [Commit conventions](contributing/commit-conventions.md) — Conventional Commits format, types, scopes, enforcement hook.

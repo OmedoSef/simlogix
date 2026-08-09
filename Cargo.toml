@@ -1,3 +1,13 @@
 [workspace]
 resolver = "2"
 members = ["simlogix-core", "simlogix-gui"]
+
+# Shared by both crates so the two can never claim different licences or
+# point at different repositories.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Romain VOLPI"]
+license = "MIT"
+repository = "https://github.com/OmedoSef/simlogix"
+rust-version = "1.97"

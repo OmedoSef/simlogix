@@ -53,6 +53,20 @@ the binary lands in `target/release/simlogix-gui`, which is bind-mounted:
 cargo build --release
 ```
 
+## Licence
+
+SimLogix is offered under the [MIT licence](LICENSE): reuse it, change it,
+ship it in something of your own — keep the copyright notice with it.
+
+It is built on a good deal of other people's work, listed with the terms
+each part is offered under in [THIRD-PARTY.md](THIRD-PARTY.md). The same
+list is in the application, under **? → Licences**. That file is generated;
+after changing a dependency, run:
+
+```bash
+cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md
+```
+
 ## Documentation
 
 - Using the editor, architecture, and contributor conventions: the

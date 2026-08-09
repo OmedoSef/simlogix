@@ -95,6 +95,12 @@ pub struct Strings {
     pub menu_help: &'static str,
     pub menu_help_about: &'static str,
     pub menu_help_shortcuts: &'static str,
+    pub menu_help_licenses: &'static str,
+    pub about_license: &'static str,
+    pub licenses_title: &'static str,
+    pub licenses_own: &'static str,
+    pub licenses_third_party: &'static str,
+    pub licenses_third_party_intro: &'static str,
     pub shortcuts_title: &'static str,
     pub help_sections: &'static [HelpSection],
 
@@ -338,6 +344,12 @@ static ENGLISH: Strings = Strings {
     menu_help: "?",
     menu_help_about: "About",
     menu_help_shortcuts: "Shortcuts and gestures",
+    menu_help_licenses: "Licences",
+    about_license: "MIT licence — and the licences it is built on",
+    licenses_title: "Licences",
+    licenses_own: "SimLogix",
+    licenses_third_party: "Third-party",
+    licenses_third_party_intro: "SimLogix is built on the work below. Each entry is listed with the terms it is offered under.",
     shortcuts_title: "Shortcuts and gestures",
     help_sections: &[
         HelpSection {
@@ -576,6 +588,12 @@ static FRENCH: Strings = Strings {
     menu_help: "?",
     menu_help_about: "À propos",
     menu_help_shortcuts: "Raccourcis et gestes",
+    menu_help_licenses: "Licences",
+    about_license: "Licence MIT — et celles des composants utilisés",
+    licenses_title: "Licences",
+    licenses_own: "SimLogix",
+    licenses_third_party: "Composants tiers",
+    licenses_third_party_intro: "SimLogix s'appuie sur les travaux ci-dessous. Chaque entrée est accompagnée des termes sous lesquels elle est proposée.",
     shortcuts_title: "Raccourcis et gestes",
     help_sections: &[
         HelpSection {
@@ -814,6 +832,12 @@ static ITALIAN: Strings = Strings {
     menu_help: "?",
     menu_help_about: "Informazioni",
     menu_help_shortcuts: "Scorciatoie e gesti",
+    menu_help_licenses: "Licenze",
+    about_license: "Licenza MIT — e quelle dei componenti usati",
+    licenses_title: "Licenze",
+    licenses_own: "SimLogix",
+    licenses_third_party: "Componenti di terzi",
+    licenses_third_party_intro: "SimLogix si basa sui lavori elencati di seguito. Ogni voce riporta i termini con cui è offerta.",
     shortcuts_title: "Scorciatoie e gesti",
     help_sections: &[
         HelpSection {

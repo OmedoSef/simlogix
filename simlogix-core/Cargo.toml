@@ -1,7 +1,12 @@
 [package]
 name = "simlogix-core"
-version = "0.1.0"
-edition = "2021"
+description = "Circuit model and discrete-event simulation engine behind SimLogix."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 
 [features]
 # Off by default: the on-disk format lives in the GUI, and this crate has no

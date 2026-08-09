@@ -1,7 +1,12 @@
 [package]
 name = "simlogix-gui"
-version = "0.1.0"
-edition = "2021"
+description = "SimLogix — a cross-platform digital logic simulator."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 # Two binaries now: the app, and the tool that writes its icon out as a PNG.
 default-run = "simlogix-gui"
 
