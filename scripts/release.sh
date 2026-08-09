@@ -65,8 +65,16 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
     && die "$tag already exists here"
 
-if git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
-    die "$tag already exists on origin — a published tag is not one to move"
+# Asked, rather than assumed. The earlier form treated any failure as "not
+# there", so inside the devcontainer — which has no ssh — the check quietly
+# passed every time. A check that cannot run must say so, not read as a
+# clear result.
+if remote_tags="$(git ls-remote --tags origin 2>/dev/null)"; then
+    printf '%s\n' "$remote_tags" | grep -q "refs/tags/$tag\$" \
+        && die "$tag already exists on origin — a published tag is not one to move"
+else
+    printf '\033[33mwarning:\033[0m could not reach origin; not checking whether %s is already published\n' \
+        "$tag" >&2
 fi
 
 current="$(git show HEAD:Cargo.toml | sed -n '/^\[workspace\.package\]/,/^\[/p' \

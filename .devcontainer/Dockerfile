@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr-dev \
     libxext-dev \
     libgl1-mesa-dev \
+    # For `desktop-file-validate`, which the release docs ask you to run on
+    # the .desktop entry before shipping a Debian package.
+    desktop-file-utils \
     && rm -rf /var/lib/apt/lists/*
 
 ARG USERNAME=vscode

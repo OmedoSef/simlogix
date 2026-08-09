@@ -133,9 +133,16 @@ The icon comes from `assets/icon.ico`, written by the same `write-icon` tool
 as the PNG — an `.ico` is a twenty-two byte header around a PNG, so there is
 no second rasteriser and no second encoder.
 
-One thing to know when editing that file: **a double hyphen is illegal inside
-an XML comment**, so a comment mentioning something like `cargo run --bin`
-makes the whole document malformed.
+Two things to know when editing that file.
+
+**A double hyphen is illegal inside an XML comment**, so a comment mentioning
+something like `cargo run --bin` makes the whole document malformed.
+
+**Every source path in it is resolved against the current directory**, and
+cargo-wix assumes that directory *is* the package root. So the build runs
+from `simlogix-gui/`, not from the workspace root with `--package`. Run it
+the other way and even `wix\License.rtf` — the path the generated template
+writes for itself — cannot be found.
 
 ## Known gaps
 

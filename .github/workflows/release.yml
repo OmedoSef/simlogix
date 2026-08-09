@@ -99,6 +99,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # `desktop-file-utils` is here for the check further down, not for the
+      # build. It isn't on the runner by default -- which is how this job
+      # failed the first time it ran.
       - name: Install the libraries eframe builds against
         run: |
           sudo apt-get update
@@ -106,7 +109,8 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxext-dev \
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            desktop-file-utils
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -143,15 +147,25 @@ jobs:
         with:
           key: wix
       - run: cargo install cargo-wix --locked
-      # `wix/main.wxs` is checked in, edited away from the generated template:
-      # one binary instead of three, a Start Menu shortcut, an icon, and no
-      # PATH entry. `cargo wix init` would overwrite all of that, so it is
+
+      # Run from the package directory, not the workspace root with
+      # `--package`. cargo-wix documents that it assumes the cwd *is* the
+      # package root, and every source path inside main.wxs is resolved
+      # against it -- including `wix\License.rtf`, which the generated
+      # template writes itself. Invoked from the workspace root, even that
+      # default could not be found.
+      #
+      # `wix/main.wxs` is checked in, edited away from that template: one
+      # binary instead of three, a Start Menu shortcut, an icon, and no PATH
+      # entry. `cargo wix init` would overwrite all of it, so it is
       # deliberately not run here.
-      - run: cargo wix --package simlogix-gui --nocapture --output simlogix.msi
+      - run: cargo wix --nocapture --output simlogix.msi
+        working-directory: simlogix-gui
+
       - uses: actions/upload-artifact@v7
         with:
           name: archive-windows-installer
-          path: simlogix.msi
+          path: simlogix-gui/simlogix.msi
           if-no-files-found: error
 
   publish:
