@@ -1,0 +1,14 @@
+# No blank issues: the two forms exist so that a report arrives with the
+# things that decide whether it can be reproduced.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/OmedoSef/simlogix/security/advisories/new
+    about: >-
+      Do not open a public issue for security vulnerabilities — use private
+      reporting instead.
+  - name: Ask a question or suggest an idea
+    url: https://github.com/OmedoSef/simlogix/discussions
+    about: >-
+      For anything that isn't yet a bug or a definite request. An issue is a
+      thing to be done; a question is not.

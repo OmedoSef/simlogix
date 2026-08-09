@@ -1,0 +1,4 @@
+# Required by the "require_code_owner_review" rule on the main branch
+# ruleset. Single global owner for now; split this by path once there are
+# other contributors with distinct areas of responsibility.
+* @OmedoSef

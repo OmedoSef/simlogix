@@ -1,0 +1,67 @@
+name: Feature request
+description: Suggest a component, a gesture, or a capability SimLogix doesn't have
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Some things are deliberately out of scope for now — multi-bit buses,
+        memory, HDL export — and some are already on the roadmap. Neither is a
+        reason not to ask: knowing someone wants a thing is what moves it up
+        the list.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - A new component
+        - Editing and canvas gestures
+        - Wiring
+        - The simulation engine
+        - Sub-circuits and hierarchy
+        - Drawing symbols (appearance view)
+        - Projects and the file format
+        - The interface, translations, accessibility
+        - Somewhere else
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What are you trying to do?
+      description: >-
+        The circuit or the task, rather than the feature. What you're trying
+        to build is often solvable in a way nobody thought to ask for.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: >-
+        Optional. If you already know roughly how it should look or behave,
+        say so; if not, the use case above is the part that matters.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How you work around it today
+      description: >-
+        Optional, and more useful than it sounds — a workaround that is merely
+        tedious is a different problem from one that is impossible.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this hasn't been asked for
+          required: true

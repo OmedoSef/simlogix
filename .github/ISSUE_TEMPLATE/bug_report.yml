@@ -1,0 +1,112 @@
+name: Bug report
+description: Something SimLogix does that it shouldn't, or doesn't do that it should
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for taking the time. The fields below are the ones that usually
+        decide whether a problem can be reproduced — a report that can be
+        reproduced is most of the way to being fixed.
+
+  - type: input
+    id: version
+    attributes:
+      label: SimLogix version
+      description: The **? → About** window shows it.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - Windows
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: os-details
+    attributes:
+      label: Which version, and how it was installed
+      description: >-
+        The distribution and desktop session on Linux, since the file dialog
+        and the window both go through it. Whether you used a package, an
+        installer, an archive, or built it yourself.
+      placeholder: "Ubuntu 24.04, GNOME on Wayland, installed from the .deb"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where it happens
+      options:
+        - Placing or editing components
+        - Wiring
+        - Simulation results
+        - Sub-circuits and ports
+        - Drawing a symbol (appearance view)
+        - Saving, loading, or the project file
+        - Undo and redo
+        - The window, rendering, or performance
+        - Somewhere else / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        From a fresh project if you can. If it only happens with one
+        particular circuit, attaching the `.slgx` file is the fastest way to
+        get it looked at.
+      placeholder: |
+        1. Place an AND gate and two switches
+        2. Wire them up
+        3. ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything printed to the terminal
+      description: >-
+        Only if you ran it from a terminal. This is formatted as a shell
+        block, so there is no need for backticks.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this isn't one of them
+          required: true
+        - label: >-
+            This is not a security vulnerability — those go through private
+            reporting, not a public issue
+          required: true
