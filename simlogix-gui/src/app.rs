@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
@@ -234,7 +235,20 @@ struct Settings {
     language: Option<Language>,
     #[serde(default)]
     left_drag_pans: bool,
+    /// Projects opened or saved recently, most recent first.
+    ///
+    /// A preference, not document state: it says what *you* have been
+    /// working on, so it survives opening a project — which resets almost
+    /// everything else.
+    #[serde(default)]
+    recent: Vec<PathBuf>,
 }
+
+/// How many projects the *Open recent* menu remembers.
+///
+/// Enough to cover a few days of moving between projects, short enough that
+/// the list stays something you read rather than search.
+const MAX_RECENT: usize = 8;
 
 /// The key `eframe` files our settings under in its storage.
 const SETTINGS_KEY: &str = "simlogix_settings";
@@ -293,10 +307,15 @@ enum JunctionTarget {
 
 /// A destructive action held back by the unsaved-changes confirmation until
 /// the user says what to do about the current circuit.
-#[derive(Clone, Copy, PartialEq)]
+/// Not `Copy`: `OpenRecent` carries the path it is going to open.
+#[derive(Clone, PartialEq)]
 enum PendingAction {
     New,
     Open,
+    /// A project chosen from the recent list. It goes through the same
+    /// unsaved-changes guard as *Open* — the file being already named is no
+    /// reason to throw work away without asking.
+    OpenRecent(PathBuf),
     Quit,
 }
 
@@ -336,6 +355,8 @@ pub struct SimLogixApp {
     /// `Tool::Marquee` and `Tool::Pan` each force one of the two — so this
     /// only decides which is free.
     left_drag_pans: bool,
+    /// The recent projects, most recent first. Persisted with the settings.
+    recent: Vec<PathBuf>,
     /// Where a rubber-band drag began, in scene coordinates, while one is in
     /// progress. View state: never saved, never part of an undo step.
     band_origin: Option<egui::Pos2>,
@@ -487,6 +508,7 @@ impl Default for SimLogixApp {
             clipboard: None,
             language_chosen: false,
             left_drag_pans: false,
+            recent: Vec::new(),
             band_origin: None,
             wiring_from: None,
             wires: Vec::new(),
@@ -2223,6 +2245,10 @@ impl SimLogixApp {
         match result {
             Ok(()) => {
                 self.current_path = Some(path.to_path_buf());
+                // Saving somewhere new is as much "this is what I'm working
+                // on" as opening is, and a project written once and not
+                // reopened would otherwise never appear in the list.
+                self.remember_recent(path);
                 self.dirty = false;
                 true
             }
@@ -2247,6 +2273,12 @@ impl SimLogixApp {
             return;
         };
 
+        self.open_path(path);
+    }
+
+    /// Opens a project from a known path — what the dialog hands over, and
+    /// what the recent list replays.
+    fn open_path(&mut self, path: PathBuf) {
         let result = std::fs::read(&path)
             .map_err(|err| err.to_string())
             .and_then(|bytes| SavedProject::from_bytes(&bytes));
@@ -2255,17 +2287,42 @@ impl SimLogixApp {
                 // Loading a project resets everything else, but the
                 // language is a UI preference, not part of the circuit.
                 let preferences = (self.language, self.language_chosen, self.left_drag_pans);
+                let recent = std::mem::take(&mut self.recent);
                 *self = Self::from_project(&project, 0);
                 (self.language, self.language_chosen, self.left_drag_pans) = preferences;
+                self.recent = recent;
                 self.refit_view = true;
                 self.name_library_after(&path);
+                self.remember_recent(&path);
                 self.current_path = Some(path);
             }
             Err(message) => {
                 let strings = Strings::for_language(self.language);
                 self.error = Some(strings.error_open_failed.replace("{}", &message));
+                // A file that cannot be read is not one to keep offering.
+                // Failing *is* the answer to "is this still here?", so there
+                // is no separate check to keep in step with it.
+                self.forget_recent(&path);
             }
         }
+    }
+
+    /// Puts a path at the head of the recent list.
+    ///
+    /// Any earlier mention of the same file is removed first, so reopening
+    /// something moves it up rather than filling the list with itself.
+    fn remember_recent(&mut self, path: &std::path::Path) {
+        // Resolved where possible, so the same file reached two ways — a
+        // relative path, a symlink — is one entry and not two.
+        let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        self.recent.retain(|held| held != &path);
+        self.recent.insert(0, path);
+        self.recent.truncate(MAX_RECENT);
+    }
+
+    fn forget_recent(&mut self, path: &std::path::Path) {
+        let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        self.recent.retain(|held| held != path && held != &resolved);
     }
 
     /// Removes `roots`, disconnecting each one's own pin.
@@ -2950,6 +3007,7 @@ impl SimLogixApp {
         // Preferences aren't document state: a rebuild must not quietly put
         // them back to their defaults.
         let preferences = (self.language, self.language_chosen, self.left_drag_pans);
+        let recent = std::mem::take(&mut self.recent);
         let clipboard = self.clipboard.take();
         let dirty = self.dirty;
         let current_path = self.current_path.take();
@@ -2971,6 +3029,7 @@ impl SimLogixApp {
         self.dirty = dirty;
 
         (self.language, self.language_chosen, self.left_drag_pans) = preferences;
+        self.recent = recent;
         self.clipboard = clipboard;
         self.current_path = current_path;
         self.undo_stack = undo_stack;
@@ -3367,12 +3426,15 @@ impl SimLogixApp {
             PendingAction::New => {
                 let (language, chosen, left_drag_pans) =
                     (self.language, self.language_chosen, self.left_drag_pans);
+                let recent = std::mem::take(&mut self.recent);
                 *self = Self::default();
                 self.language = language;
                 self.language_chosen = chosen;
                 self.left_drag_pans = left_drag_pans;
+                self.recent = recent;
             }
             PendingAction::Open => self.open_project(),
+            PendingAction::OpenRecent(path) => self.open_path(path),
             PendingAction::Quit => {
                 // `dirty` is already false by the time we get here (either
                 // saved, or explicitly discarded), so the close request this
@@ -3411,6 +3473,7 @@ impl SimLogixApp {
             app.language = language;
         }
         app.left_drag_pans = settings.left_drag_pans;
+        app.recent = settings.recent;
         app
     }
 }
@@ -3425,6 +3488,7 @@ impl eframe::App for SimLogixApp {
                 // machine whose locale changes still follows it.
                 language: self.language_chosen.then_some(self.language),
                 left_drag_pans: self.left_drag_pans,
+                recent: self.recent.clone(),
             },
         );
     }
@@ -3596,6 +3660,41 @@ impl eframe::App for SimLogixApp {
                         self.request_action(PendingAction::Open, ui.ctx());
                         ui.close();
                     }
+
+                    // Disabled rather than hidden when empty: a menu whose
+                    // entries come and go is one you have to hunt through.
+                    ui.add_enabled_ui(!self.recent.is_empty(), |ui| {
+                        ui.menu_button(strings.menu_file_recent, |ui| {
+                            let mut chosen = None;
+                            for path in &self.recent {
+                                // The file name is what identifies a project
+                                // at a glance; the full path goes in the
+                                // tooltip, for the days two of them share a
+                                // name.
+                                let label = path
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                                if ui
+                                    .button(label)
+                                    .on_hover_text(path.to_string_lossy())
+                                    .clicked()
+                                {
+                                    chosen = Some(path.clone());
+                                }
+                            }
+                            if let Some(path) = chosen {
+                                self.request_action(PendingAction::OpenRecent(path), ui.ctx());
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button(strings.menu_file_recent_clear).clicked() {
+                                self.recent.clear();
+                                ui.close();
+                            }
+                        });
+                    });
+
                     if ui
                         .add(
                             egui::Button::new(strings.menu_file_save)
@@ -5527,7 +5626,7 @@ impl eframe::App for SimLogixApp {
         // The unsaved-changes gate. Modal on purpose: it's answering "what
         // happens to your work", so it shouldn't be possible to click past
         // it and forget it's there.
-        if let Some(action) = self.pending_action {
+        if let Some(action) = self.pending_action.clone() {
             egui::Modal::new(egui::Id::new("confirm_discard")).show(ui.ctx(), |ui| {
                 ui.heading(strings.confirm_discard_title);
                 ui.label(strings.confirm_discard_body);
@@ -5539,7 +5638,7 @@ impl eframe::App for SimLogixApp {
                         // must not quietly discard the work anyway.
                         if self.save_project() {
                             self.pending_action = None;
-                            self.run_action(action, ui.ctx());
+                            self.run_action(action.clone(), ui.ctx());
                         }
                     }
                     if ui.button(strings.confirm_discard_discard).clicked() {
@@ -6407,6 +6506,7 @@ mod tests {
         let settings: Settings = ron::from_str("()").expect("parses");
         assert_eq!(settings.language, None);
         assert!(!settings.left_drag_pans);
+        assert!(settings.recent.is_empty());
     }
 
     #[test]
@@ -6414,6 +6514,7 @@ mod tests {
         let stored = Settings {
             language: Some(Language::French),
             left_drag_pans: true,
+            recent: vec![PathBuf::from("/tmp/alu.slgx")],
         };
 
         let text = ron::to_string(&stored).expect("serializes");
@@ -6423,6 +6524,54 @@ mod tests {
         // what keeps following the OS locale.
         assert_eq!(read.language, Some(Language::French));
         assert!(read.left_drag_pans);
+        assert_eq!(read.recent, stored.recent);
+    }
+
+    #[test]
+    fn reopening_a_project_moves_it_up_the_recent_list_rather_than_repeating_it() {
+        let mut app = SimLogixApp::default();
+        for name in ["a.slgx", "b.slgx", "c.slgx"] {
+            app.remember_recent(&PathBuf::from(format!("/tmp/{name}")));
+        }
+        assert_eq!(app.recent.len(), 3);
+
+        app.remember_recent(&PathBuf::from("/tmp/c.slgx"));
+
+        assert_eq!(app.recent.len(), 3, "no duplicate entry");
+        assert_eq!(
+            app.recent[0],
+            PathBuf::from("/tmp/c.slgx"),
+            "and it is first"
+        );
+    }
+
+    #[test]
+    fn the_recent_list_stops_at_its_limit() {
+        let mut app = SimLogixApp::default();
+        for index in 0..MAX_RECENT + 4 {
+            app.remember_recent(&PathBuf::from(format!("/tmp/{index}.slgx")));
+        }
+
+        assert_eq!(app.recent.len(), MAX_RECENT);
+        // The newest is kept and the oldest dropped, not the other way round.
+        assert_eq!(
+            app.recent[0],
+            PathBuf::from(format!("/tmp/{}.slgx", MAX_RECENT + 3))
+        );
+    }
+
+    #[test]
+    fn a_project_that_will_not_open_is_dropped_from_the_list() {
+        let mut app = SimLogixApp::default();
+        let missing = PathBuf::from("/tmp/simlogix-does-not-exist.slgx");
+        app.remember_recent(&missing);
+
+        app.open_path(missing.clone());
+
+        // Failing to read *is* the answer to "is this still here?", so there
+        // is no separate existence check to keep in step with it.
+        assert!(!app.recent.contains(&missing));
+        assert!(app.error.is_some());
     }
 
     #[test]

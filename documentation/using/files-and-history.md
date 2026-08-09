@@ -16,6 +16,17 @@ that.
 **File → Save** (`Ctrl+S`) writes back to the current file, asking for a
 path only the first time. **Save As** (`Ctrl+Shift+S`) always asks.
 
+**File → Open Recent** lists the last eight projects you opened or saved
+under a new name, most recent first, with the full path in the tooltip for
+the days two of them share a file name. It goes through the same
+unsaved-changes question as *Open* — a file already being named is no reason
+to throw work away without asking. A project that no longer opens drops off
+the list at the moment it fails, and *Clear the list* empties it.
+
+The list is a preference rather than part of any project, so it survives
+opening one — and *Reset settings* deliberately leaves it alone: it is a
+history, and clearing it has its own entry where you would look for it.
+
 The window title shows which file you're editing and an asterisk while it
 has unsaved changes:
 
