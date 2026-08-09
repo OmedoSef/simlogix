@@ -81,6 +81,7 @@ to do anything, and is written back as `.slgx` next time you save.
 | 6 | Circuits can be filed in folders. |
 | 7 | Components can carry properties. |
 | 8 | Wires can carry a colour. |
+| 9 | A circuit can carry a symbol of its own. |
 
 ## Circuits
 

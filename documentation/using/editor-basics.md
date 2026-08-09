@@ -292,3 +292,7 @@ a longer loop is refused with a message.
 
 The sub-circuit's own switches, buttons and ports aren't yours to click from
 out here — from the parent, the box is driven entirely through its pins.
+
+The generated box is a starting point, not the only option: a circuit can
+carry a symbol you drew instead. See
+[Drawing a circuit's symbol](symbols.md).

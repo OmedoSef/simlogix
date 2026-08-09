@@ -9,6 +9,7 @@ This folder holds the documentation for users and contributors. It's a work in p
   - [Editor basics](using/editor-basics.md) — tools, placing components, selecting several, moving, copy/paste, the view, settings, keyboard reference.
   - [Wiring](using/wiring.md) — drawing and reshaping wires, loose ends, junctions.
   - [Running a circuit](using/simulation.md) — run/pause, signal colours, unstable circuits.
+  - [Drawing a circuit's symbol](using/symbols.md) — the appearance view, pins, drawing tools, what isn't stored.
   - [Projects, saving and undo](using/files-and-history.md) — undo/redo, save/load, the file format.
 - **Architecture**
   - [Overview](architecture/overview.md) — workspace layout, crate responsibilities, GUI toolkit choice.

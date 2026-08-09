@@ -384,6 +384,18 @@ static ENGLISH: Strings = Strings {
             ],
         },
         HelpSection {
+            title: "Drawing a symbol",
+            rows: &[
+            ("Shift+click", "Add to or remove from the selection"),
+            ("Drag on empty canvas", "Sweep a selection; it catches whatever it touches"),
+            ("Arrow keys", "Nudge by one snap step — a quarter grid, or a whole one for a pin"),
+            ("Double-click or Enter", "Finish the line being drawn"),
+            ("Click, click, move, click", "Draw an arc: both ends, then its bulge"),
+            ("Ctrl+C / Ctrl+V", "Copy and paste shapes"),
+            ("Delete", "Remove the selected shapes"),
+            ],
+        },
+        HelpSection {
             title: "Simulation",
             rows: &[
             ("Space", "Run or pause the simulation"),
@@ -610,6 +622,18 @@ static FRENCH: Strings = Strings {
             ],
         },
         HelpSection {
+            title: "Dessiner un symbole",
+            rows: &[
+            ("Maj+clic", "Ajouter à la sélection ou en retirer"),
+            ("Glisser sur le vide", "Balayer une sélection ; elle prend tout ce qu'elle touche"),
+            ("Flèches", "Décaler d'un pas — un quart de grille, une grille entière pour une broche"),
+            ("Double-clic ou Entrée", "Terminer la ligne en cours"),
+            ("Clic, clic, bouger, clic", "Tracer un arc : les deux bouts, puis sa bosse"),
+            ("Ctrl+C / Ctrl+V", "Copier et coller des formes"),
+            ("Suppr", "Effacer les formes sélectionnées"),
+            ],
+        },
+        HelpSection {
             title: "Simulation",
             rows: &[
             ("Espace", "Lancer ou mettre en pause la simulation"),
@@ -833,6 +857,18 @@ static ITALIAN: Strings = Strings {
             ("Clic destro su un punto", "Rimuovi quel punto"),
             ("Clic destro su un segmento", "Taglia il filo lì"),
             ("Trascina un'estremità libera su un'altra", "Unisci i due fili"),
+            ],
+        },
+        HelpSection {
+            title: "Disegnare un simbolo",
+            rows: &[
+            ("Maiusc+clic", "Aggiungi alla selezione o togli"),
+            ("Trascina sul vuoto", "Traccia una selezione; prende tutto ciò che tocca"),
+            ("Frecce", "Sposta di un passo — un quarto di griglia, una intera per un pin"),
+            ("Doppio clic o Invio", "Termina la linea in corso"),
+            ("Clic, clic, muovi, clic", "Disegna un arco: le due estremità, poi la curva"),
+            ("Ctrl+C / Ctrl+V", "Copia e incolla le forme"),
+            ("Canc", "Elimina le forme selezionate"),
             ],
         },
         HelpSection {

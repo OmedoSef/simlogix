@@ -1,23 +1,61 @@
 # SimLogix
 
-Simulateur logique multiplateforme, écrit en Rust — pensé pour corriger les frustrations rencontrées avec Logisim (interaction canevas peu fluide, boucles rétroactives mal gérées, UI/UX datée).
+A cross-platform digital logic simulator written in Rust, built to fix the
+frustrations of working with Logisim: clumsy canvas interaction, feedback
+loops the engine mishandles, and a dated interface.
 
-## Prérequis
+## What it does
 
-- Docker + VS Code avec l'extension [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) — le projet se développe via un devcontainer qui embarque la toolchain Rust.
-- Sur l'hôte, avant d'ouvrir le devcontainer, autoriser les connexions X11 locales pour que la fenêtre de l'app puisse s'afficher depuis le conteneur :
+- **Schematic editing** — place components, wire them click by click,
+  reshape and colour the wires, select several things at once, copy and
+  paste, undo everything.
+- **Real-time simulation** — a discrete-event engine with propagation
+  delays, so a combinational feedback loop (an SR latch built from NAND
+  gates, a ring oscillator) settles or oscillates instead of hanging. An
+  oscillation that never settles is reported rather than freezing the UI.
+- **Signals that admit what they don't know** — `High`, `Low`, `Unknown`,
+  `Error`, `HighZ`, plus the weak levels a single transistor really passes.
+- **A full v1 component set** — the eight logic gates, transistors, rails,
+  buttons, switches, clocks, LEDs, probes, an SR latch, a tri-state buffer
+  and a bidirectional bus transceiver in both enable polarities.
+- **Hierarchy** — a project holds many circuits, filed in folders, and any
+  of them can be placed inside another. Give a circuit a symbol of your own
+  or let one be generated.
+- **Projects** — a single `.slgx` file, readable with any zip tool.
+
+## Requirements
+
+- Docker, plus VS Code with the
+  [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+  extension. The project is developed inside a devcontainer that carries the
+  Rust toolchain.
+- On the host, before opening the devcontainer, allow local X11 connections
+  so the application window can appear from inside the container:
 
   ```bash
   xhost +local:docker
   ```
 
-## Démarrer
+## Getting started
 
-1. Ouvrir le dossier dans VS Code.
-2. Palette de commandes → "Dev Containers: Reopen in Container".
-3. `cargo run -p simlogix-gui`
+1. Open the folder in VS Code.
+2. Command palette → *Dev Containers: Reopen in Container*.
+3. Run it:
+
+   ```bash
+   cargo run -p simlogix-gui
+   ```
+
+A release build produced in the container also runs on the host directly —
+the binary lands in `target/release/simlogix-gui`, which is bind-mounted:
+
+```bash
+cargo build --release
+```
 
 ## Documentation
 
-- Utilisation, architecture et conventions de contribution : voir le dossier [documentation/](documentation/README.md).
-- Contexte du projet, décisions et avancement (notes internes) : voir [CLAUDE.md](CLAUDE.md).
+- Using the editor, architecture, and contributor conventions: the
+  [documentation/](documentation/README.md) folder.
+- Project context, decisions and progress (internal notes):
+  [CLAUDE.md](CLAUDE.md).
