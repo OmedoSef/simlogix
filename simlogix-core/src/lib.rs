@@ -11,6 +11,7 @@ pub use circuit::{Circuit, ComponentId, UnstableCircuit};
 pub use component::Component;
 pub use components::and::And;
 pub use components::buffer::Buffer;
+pub use components::bus_transceiver::BusTransceiver;
 pub use components::button::Button;
 pub use components::clock::Clock;
 pub use components::led::Led;

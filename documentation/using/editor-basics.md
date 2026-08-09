@@ -152,3 +152,15 @@ The states you'll see on a shared net:
 An enable that nothing drives isn't the same as an enable held low: the
 buffer reports that it doesn't know whether it should be driving, rather
 than assuming it shouldn't.
+
+### Both ways at once
+
+The `Bus transceiver` in the Buses category joins two buses and passes
+traffic one way at a time. `DIR` picks the direction — high sends the left
+side (`A`) to the right (`B`), low sends it back — and `OE` switches the
+whole thing off, letting go of both buses at once.
+
+The side that is *listening* drives nothing, so it never fights the bus it
+is reading. Flipping `DIR` while both buses are being driven produces one
+tick of crossover, the same turnaround a real transceiver has; bus protocols
+leave a spare cycle there for exactly that reason.

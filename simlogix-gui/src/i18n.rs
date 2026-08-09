@@ -122,6 +122,7 @@ pub struct Strings {
     pub category_transistors: &'static str,
     pub category_gates: &'static str,
     pub category_memory: &'static str,
+    pub category_buses: &'static str,
 
     pub component_button: &'static str,
     pub component_led: &'static str,
@@ -141,6 +142,7 @@ pub struct Strings {
     pub component_buffer: &'static str,
     pub component_sr_latch: &'static str,
     pub component_tri_state: &'static str,
+    pub component_bus_transceiver: &'static str,
 
     pub hint_rotate_delete_component: &'static str,
     pub hint_delete_wire: &'static str,
@@ -203,6 +205,7 @@ impl Strings {
             ComponentKind::Buffer => self.component_buffer,
             ComponentKind::SrLatch => self.component_sr_latch,
             ComponentKind::TriStateBuffer => self.component_tri_state,
+            ComponentKind::BusTransceiver => self.component_bus_transceiver,
         }
     }
 }
@@ -264,6 +267,7 @@ static ENGLISH: Strings = Strings {
     category_transistors: "Transistors",
     category_gates: "Gates",
     category_memory: "Memory",
+    category_buses: "Buses",
 
     component_button: "Button",
     component_led: "LED",
@@ -283,6 +287,7 @@ static ENGLISH: Strings = Strings {
     component_buffer: "Buffer",
     component_sr_latch: "SR latch",
     component_tri_state: "Tri-state buffer",
+    component_bus_transceiver: "Bus transceiver",
 
     hint_rotate_delete_component:
         "R to rotate, Delete to remove the selected component, Esc to deselect",
@@ -367,6 +372,7 @@ static FRENCH: Strings = Strings {
     category_transistors: "Transistors",
     category_gates: "Portes",
     category_memory: "Mémoire",
+    category_buses: "Bus",
 
     component_button: "Bouton",
     component_led: "LED",
@@ -386,6 +392,7 @@ static FRENCH: Strings = Strings {
     component_buffer: "Tampon",
     component_sr_latch: "Bascule SR",
     component_tri_state: "Tampon 3 états",
+    component_bus_transceiver: "Transceiver de bus",
 
     hint_rotate_delete_component:
         "R pour tourner, Suppr pour supprimer le composant sélectionné, Échap pour désélectionner",
@@ -470,6 +477,7 @@ static ITALIAN: Strings = Strings {
     category_transistors: "Transistor",
     category_gates: "Porte",
     category_memory: "Memoria",
+    category_buses: "Bus",
 
     component_button: "Pulsante",
     component_led: "LED",
@@ -489,6 +497,7 @@ static ITALIAN: Strings = Strings {
     component_buffer: "Buffer",
     component_sr_latch: "Latch SR",
     component_tri_state: "Buffer tri-state",
+    component_bus_transceiver: "Ricetrasmettitore",
 
     hint_rotate_delete_component:
         "R per ruotare, Canc per eliminare il componente selezionato, Esc per deselezionare",

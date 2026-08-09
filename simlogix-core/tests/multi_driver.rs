@@ -144,3 +144,174 @@ fn two_drivers_agreeing_is_not_an_error() {
     bus.drive([true, true, true, true]);
     assert_eq!(bus.level(), Signal::High);
 }
+
+/// A transceiver between two buses, each bus with a tri-state source of its
+/// own so a test can let go of either side and watch the transceiver take
+/// it over.
+struct Transceiver {
+    circuit: Circuit,
+    buttons: Vec<ComponentId>,
+    /// `[a_data, a_enable, b_data, b_enable, dir, output_enable]`.
+    levers: Vec<Rc<Cell<bool>>>,
+    transceiver: ComponentId,
+}
+
+impl Transceiver {
+    fn drive(&mut self, values: [bool; 6]) -> Result<(), simlogix_core::UnstableCircuit> {
+        for (lever, value) in self.levers.iter().zip(values) {
+            lever.set(value);
+        }
+        for &button in &self.buttons {
+            self.circuit.schedule_now(button);
+        }
+        self.circuit.run()
+    }
+
+    /// Bus A is the transceiver's pin 0, bus B its pin 1.
+    fn bus(&self, pin: usize) -> Signal {
+        self.circuit
+            .signal_at(self.circuit.pins(self.transceiver)[pin].net)
+    }
+}
+
+fn build_transceiver() -> Transceiver {
+    let mut circuit = Circuit::new();
+    // `rewire` reassigns all of these; they only have to exist.
+    let nets: Vec<_> = (0..16).map(|_| circuit.add_net()).collect();
+
+    let mut buttons = Vec::new();
+    let mut levers = Vec::new();
+    for net in nets.iter().take(6) {
+        let (component, lever) = Button::new();
+        buttons.push(circuit.add_component(
+            Box::new(component),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net: *net,
+            }],
+        ));
+        levers.push(lever);
+    }
+
+    let source = |circuit: &mut Circuit, data, enable, out| {
+        circuit.add_component(
+            Box::new(TriStateBuffer),
+            vec![
+                Pin {
+                    direction: PinDirection::Input,
+                    net: data,
+                },
+                Pin {
+                    direction: PinDirection::Input,
+                    net: enable,
+                },
+                Pin {
+                    direction: PinDirection::Output,
+                    net: out,
+                },
+            ],
+        )
+    };
+    let a_source = source(&mut circuit, nets[6], nets[7], nets[8]);
+    let b_source = source(&mut circuit, nets[9], nets[10], nets[11]);
+
+    let transceiver = circuit.add_component(
+        Box::new(simlogix_core::BusTransceiver),
+        vec![
+            // A and B are `InOut`: each reads the bus it sits on, and drives
+            // it only when the direction says to.
+            Pin {
+                direction: PinDirection::InOut,
+                net: nets[12],
+            },
+            Pin {
+                direction: PinDirection::InOut,
+                net: nets[13],
+            },
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[14],
+            },
+            Pin {
+                direction: PinDirection::Input,
+                net: nets[15],
+            },
+        ],
+    );
+
+    circuit.rewire(&[
+        vec![(buttons[0], 0), (a_source, 0)],
+        vec![(buttons[1], 0), (a_source, 1)],
+        vec![(buttons[2], 0), (b_source, 0)],
+        vec![(buttons[3], 0), (b_source, 1)],
+        vec![(buttons[4], 0), (transceiver, 2)],
+        vec![(buttons[5], 0), (transceiver, 3)],
+        // The two buses themselves.
+        vec![(a_source, 2), (transceiver, 0)],
+        vec![(b_source, 2), (transceiver, 1)],
+    ]);
+
+    Transceiver {
+        circuit,
+        buttons,
+        levers,
+        transceiver,
+    }
+}
+
+#[test]
+fn a_transceiver_settles_rather_than_re_triggering_itself() {
+    let mut bus = build_transceiver();
+
+    // The question an `InOut` pin raises for the engine: driving a net
+    // reschedules everything reading that net, and this component reads the
+    // very net it just drove. If that didn't converge, nothing else here
+    // would matter.
+    bus.drive([true, true, false, false, true, true])
+        .expect("an InOut pin must not re-trigger its own component forever");
+}
+
+#[test]
+fn a_transceiver_carries_a_to_b_and_then_b_to_a() {
+    let mut bus = build_transceiver();
+
+    // A drives High, B's own source is off, direction A to B.
+    bus.drive([true, true, false, false, true, true])
+        .expect("settles");
+    assert_eq!(bus.bus(1), Signal::High, "B should follow A");
+    // The listening side adds nothing to its own net, so bus A is still
+    // just what its source puts there rather than a fight.
+    assert_eq!(bus.bus(0), Signal::High);
+
+    // Turn it round: A's source lets go, B drives Low, direction B to A.
+    bus.drive([true, false, false, true, false, true])
+        .expect("settles");
+    assert_eq!(bus.bus(0), Signal::Low, "A should follow B");
+    assert_eq!(bus.bus(1), Signal::Low);
+}
+
+#[test]
+fn a_disabled_transceiver_leaves_the_far_bus_floating() {
+    let mut bus = build_transceiver();
+    bus.drive([true, true, false, false, true, true])
+        .expect("settles");
+    assert_eq!(bus.bus(1), Signal::High);
+
+    // Output enable low: both sides let go. Nothing else drives bus B, so it
+    // floats — which reads as unknown, not as low.
+    bus.drive([true, true, false, false, true, false])
+        .expect("settles");
+    assert_eq!(bus.bus(1), Signal::Unknown);
+}
+
+#[test]
+fn a_transceiver_driving_against_a_live_source_is_reported() {
+    let mut bus = build_transceiver();
+
+    // Both of B's drivers on and disagreeing: B's own source says High while
+    // the transceiver pushes A's Low across. That is a short, and the point
+    // of `InOut` is that it resolves by the same rule as any other net.
+    bus.drive([false, true, true, true, true, true])
+        .expect("settles");
+    assert_eq!(bus.bus(1), Signal::Error);
+}

@@ -56,6 +56,94 @@ pub fn draw(
         ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
+        ComponentKind::BusTransceiver => draw_bus_transceiver(painter, rect, rotation, stroke),
+    }
+}
+
+/// A bus transceiver: a body with a double-headed arrow across it, the two
+/// bus sides on the left and right, and the control pins stacked on the left.
+///
+/// Labelled, by the same rule as the SR latch: `Dir` and `Enable` do
+/// entirely different things and nothing about their position says which is
+/// which. The arrow carries the rest — `A` is the left side, `B` the right,
+/// and `Dir` high sends A to B.
+fn draw_bus_transceiver(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    let color = stroke.color;
+
+    let inset = rect.width() * 0.2;
+    let body = Rect::from_min_max(
+        pos2(rect.left() + inset, rect.top()),
+        pos2(rect.right() - inset, rect.bottom()),
+    );
+
+    let dir = pos2(rect.left(), rect.top());
+    let a = pos2(rect.left(), c.y);
+    let enable = pos2(rect.left(), rect.bottom());
+    let b = pos2(rect.right(), c.y);
+
+    painter.line_segment([r(dir), r(pos2(body.left(), rect.top()))], stroke);
+    painter.line_segment([r(a), r(pos2(body.left(), c.y))], stroke);
+    painter.line_segment([r(enable), r(pos2(body.left(), rect.bottom()))], stroke);
+    painter.line_segment([r(b), r(pos2(body.right(), c.y))], stroke);
+
+    let corners = [
+        pos2(body.left(), body.top()),
+        pos2(body.right(), body.top()),
+        pos2(body.right(), body.bottom()),
+        pos2(body.left(), body.bottom()),
+        pos2(body.left(), body.top()),
+    ];
+    painter.line(corners.into_iter().map(r).collect(), stroke);
+
+    // A double-headed arrow across the middle: the one thing that has to
+    // read at a glance is that this passes both ways.
+    let (tail, head) = (pos2(body.left() + 8.0, c.y), pos2(body.right() - 8.0, c.y));
+    painter.line_segment([r(tail), r(head)], stroke);
+    for (point, sign) in [(tail, 1.0), (head, -1.0)] {
+        painter.line_segment(
+            [r(point), r(pos2(point.x + 4.0 * sign, point.y - 3.0))],
+            stroke,
+        );
+        painter.line_segment(
+            [r(point), r(pos2(point.x + 4.0 * sign, point.y + 3.0))],
+            stroke,
+        );
+    }
+
+    // Upright at rotated positions, like every other label here.
+    let font = FontId::proportional(9.0);
+    painter.text(
+        r(pos2(body.left() + 3.0, rect.top() + 7.0)),
+        Align2::LEFT_CENTER,
+        "DIR",
+        font.clone(),
+        color,
+    );
+    painter.text(
+        r(pos2(body.left() + 3.0, rect.bottom() - 7.0)),
+        Align2::LEFT_CENTER,
+        "OE",
+        font,
+        color,
+    );
+
+    for pin in [dir, a, enable, b] {
+        draw_pin(painter, r(pin), color);
+    }
+
+    PinPositions {
+        // Control pins first, then the two bus sides — the draw arm in
+        // `placed_component.rs` maps these back onto the pin order `place()`
+        // registers (A, B, Dir, Enable).
+        inputs: vec![r(dir), r(enable)],
+        outputs: vec![r(a), r(b)],
     }
 }
 

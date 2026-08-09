@@ -1,5 +1,6 @@
 pub mod and;
 pub mod buffer;
+pub mod bus_transceiver;
 pub mod button;
 pub mod clock;
 pub mod led;

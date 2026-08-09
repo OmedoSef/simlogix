@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use simlogix_core::{
-    And, Buffer, Button, Circuit, Clock, Component, ComponentId, Led, Nand, NetId, Nor, Not, Or,
-    Pin, PinDirection, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    And, Buffer, BusTransceiver, Button, Circuit, Clock, Component, ComponentId, Led, Nand, NetId,
+    Nor, Not, Or, Pin, PinDirection, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::canvas::{self, BOX_SIZE};
@@ -438,6 +438,33 @@ impl SimLogixApp {
             }
             // The 1-input mirror of the above (see
             // `PlacedComponent::OneInputGate`'s doc comment).
+            ComponentKind::BusTransceiver => {
+                // A and B are `InOut`: each reads the bus it sits on and
+                // drives it only when the direction says to.
+                let nets: Vec<_> = (0..4).map(|_| self.circuit.add_net()).collect();
+                let id = self.circuit.add_component(
+                    Box::new(BusTransceiver),
+                    vec![
+                        Pin {
+                            direction: PinDirection::InOut,
+                            net: nets[0],
+                        },
+                        Pin {
+                            direction: PinDirection::InOut,
+                            net: nets[1],
+                        },
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: nets[2],
+                        },
+                        Pin {
+                            direction: PinDirection::Input,
+                            net: nets[3],
+                        },
+                    ],
+                );
+                PlacedComponent::bus_transceiver(id, center)
+            }
             ComponentKind::TriStateBuffer => {
                 let data = self.circuit.add_net();
                 let enable = self.circuit.add_net();
