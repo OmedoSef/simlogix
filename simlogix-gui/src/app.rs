@@ -1963,6 +1963,33 @@ impl SimLogixApp {
             }
             ids.push(Some(id));
         }
+        // A sub-circuit may itself contain sub-circuits, and each of those
+        // arrived as a `PlacedComponent` carrying the only record of how its
+        // own innards are wired — a record about to be dropped with it.
+        //
+        // Its port pins are folded into its groups here, exactly as
+        // `rebuild_nets` does for an instance sitting on the open drawing,
+        // and the result is carried up. Without this, one level of nesting
+        // worked and two did not: the inner circuit was built into the
+        // engine and then connected to nothing.
+        //
+        // Carrying it up rather than flattening recursively into one list is
+        // what makes the depth unbounded — each level hands its parent a
+        // finished description of everything below it.
+        let mut nested: Vec<Vec<(ComponentId, usize)>> = Vec::new();
+        for placed in &self.placed[first_inner..] {
+            let Some((ports, groups)) = placed.instance_wiring() else {
+                continue;
+            };
+            let mut folded = groups.to_vec();
+            for (index, port) in ports.iter().enumerate() {
+                if let Some(group) = port.group.and_then(|g| folded.get_mut(g)) {
+                    group.push((placed.id(), index));
+                }
+            }
+            nested.extend(folded);
+        }
+
         self.placed.truncate(first_inner);
         self.flattening.pop();
 
@@ -1982,7 +2009,10 @@ impl SimLogixApp {
         // so a port's index still lands on the right one. A group with no
         // live pins at all is not noise: it's a net that exists only to join
         // ports to each other.
-        let inner_groups = groups.iter().map(live).collect();
+        // Ours first, so a port's `group` index still lands on the right
+        // one; anything carried up from a nested instance is appended after.
+        let mut inner_groups: Vec<Vec<(ComponentId, usize)>> = groups.iter().map(live).collect();
+        inner_groups.extend(nested);
         Some((
             ports.into_iter().map(|(_, port)| port).collect(),
             inner_groups,
@@ -6061,6 +6091,115 @@ mod tests {
             .find(|placed| placed.id() == instance)
             .expect("just placed");
         assert_eq!(placed.rect().width(), 180.0, "the symbol decides its size");
+    }
+
+    /// Builds `outer` containing an instance of `inner`, each with one input
+    /// port and one output port, and returns the app with `main` open and an
+    /// instance of `outer` placed in it.
+    ///
+    /// Two levels deep on purpose: one level has worked since instances
+    /// existed, and that is exactly what hid this.
+    fn nested_inverters(depth: usize) -> (SimLogixApp, ComponentId, ComponentId) {
+        let mut app = SimLogixApp::default();
+
+        // The innermost circuit: in → NOT → out.
+        app.rename_circuit(0, "level0");
+        let input = app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+        let gate = app.place(ComponentKind::Not, egui::pos2(80.0, 0.0));
+        let output = app.place(ComponentKind::OutputPort, egui::pos2(160.0, 0.0));
+        app.add_wire(
+            WireEndpoint::Pin(input, 0),
+            WireEndpoint::Pin(gate, 0),
+            Vec::new(),
+        );
+        app.add_wire(
+            WireEndpoint::Pin(gate, 1),
+            WireEndpoint::Pin(output, 0),
+            Vec::new(),
+        );
+
+        // Each further level wraps the one below in ports of its own.
+        for level in 1..depth {
+            app.create_circuit(String::new());
+            app.rename_circuit(app.active, &format!("level{level}"));
+            let input = app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+            let inside = app.place(
+                ComponentKind::Circuit(format!("level{}", level - 1)),
+                egui::pos2(80.0, 0.0),
+            );
+            let output = app.place(ComponentKind::OutputPort, egui::pos2(160.0, 0.0));
+            app.add_wire(
+                WireEndpoint::Pin(input, 0),
+                WireEndpoint::Pin(inside, 0),
+                Vec::new(),
+            );
+            app.add_wire(
+                WireEndpoint::Pin(inside, 1),
+                WireEndpoint::Pin(output, 0),
+                Vec::new(),
+            );
+        }
+
+        // And a circuit that drives the outermost one from a switch.
+        app.create_circuit(String::new());
+        let switch = app.place(ComponentKind::Switch, egui::pos2(0.0, 200.0));
+        let instance = app.place(
+            ComponentKind::Circuit(format!("level{}", depth - 1)),
+            egui::pos2(120.0, 200.0),
+        );
+        app.add_wire(
+            WireEndpoint::Pin(switch, 0),
+            WireEndpoint::Pin(instance, 0),
+            Vec::new(),
+        );
+        app.rebuild_nets();
+        app.advance_circuit(SETTLE_TICKS);
+        (app, switch, instance)
+    }
+
+    #[test]
+    fn one_level_of_nesting_inverts() {
+        let (app, _, instance) = nested_inverters(1);
+        let out = app.circuit.pins(instance)[1].net;
+        // The switch rests off, so the inverter's output is high.
+        assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::High);
+    }
+
+    #[test]
+    fn a_sub_circuit_inside_a_sub_circuit_stays_connected() {
+        // Romain's `and` is a `nand` followed by a `not`, so its instances
+        // are two levels deep — and at two levels the inner circuit's own
+        // wiring went missing, leaving the output driven by nobody.
+        let (app, _, instance) = nested_inverters(2);
+        let out = app.circuit.pins(instance)[1].net;
+        assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::High);
+    }
+
+    #[test]
+    fn nesting_has_no_depth_limit() {
+        // Eight levels, which is well past anything that could be special
+        // cased. Each level only wraps the one below in ports of its own, so
+        // there is still exactly one inverter at the bottom however deep it
+        // is buried — and that is the point: the depth must cost nothing but
+        // depth.
+        let (mut app, switch, instance) = nested_inverters(8);
+        let out = app.circuit.pins(instance)[1].net;
+        assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::High);
+
+        // Driven, not merely connected: a net can be `High` because
+        // something reaches it, and the only proof it is the *input* that
+        // reaches it is that changing the input changes it.
+        let flipped = Properties {
+            pressed: Some(true),
+            ..Default::default()
+        };
+        if let Some(placed) = app.placed.iter_mut().find(|p| p.id() == switch) {
+            placed.set_properties(flipped);
+        }
+        app.circuit.schedule_now(switch);
+        app.advance_circuit(SETTLE_TICKS);
+
+        assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::Low);
     }
 
     #[test]

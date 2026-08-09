@@ -284,6 +284,10 @@ The pins appear in the order the ports sit **in the sub-circuit**, top to
 bottom. Move a port up in there and its pin moves up on every box out here —
 that's the only ordering there is, and it's one you can see.
 
+**Sub-circuits nest as deep as you like.** A circuit built from circuits
+that are themselves built from circuits works the same at every level;
+there is no limit and no cost beyond the depth itself.
+
 An instance is not a snapshot: editing the circuit it refers to changes what
 its instances do, and two instances of the same circuit are two genuinely
 independent copies. A circuit cannot contain itself, directly or through
