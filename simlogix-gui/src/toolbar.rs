@@ -85,10 +85,21 @@ pub enum SimAction {
     Tool(SimTool),
     /// Advance by one tick — one propagation delay — and stay stopped.
     StepTick,
+    /// Advance straight to the next tick where something is scheduled.
+    StepEvent,
 }
 
 /// Draws the inspection tools and one-shots. Returns what was clicked.
-pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, active: SimTool) -> Option<SimAction> {
+///
+/// `has_event` greys *skip to the next event* when nothing is pending: a
+/// button that cannot do anything should say so rather than answer a click
+/// with silence.
+pub fn show_sim_tools(
+    ui: &mut Ui,
+    strings: &Strings,
+    active: SimTool,
+    has_event: bool,
+) -> Option<SimAction> {
     let mut clicked = None;
     for (tool, label) in [
         (SimTool::Interact, strings.tool_interact),
@@ -107,6 +118,11 @@ pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, active: SimTool) -> Option
     if icon_button(ui, strings.tool_step_tick, false, symbol::draw_step_tool) {
         clicked = Some(SimAction::StepTick);
     }
+    ui.add_enabled_ui(has_event, |ui| {
+        if icon_button(ui, strings.tool_step_event, false, symbol::draw_skip_tool) {
+            clicked = Some(SimAction::StepEvent);
+        }
+    });
     clicked
 }
 

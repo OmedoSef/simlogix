@@ -55,11 +55,34 @@ The **tick count** is at the right of the status bar, and it is worth
 watching: most ticks change nothing you can see, so without it a step that
 did its job looks exactly like a button that didn't.
 
+**Simulation → Skip to the next event**, `Shift+F10`, or the ⏭ button, goes
+straight to the next tick where something is scheduled instead. Between two
+beats of a clock there are dozens of ticks with nothing in them, and
+crossing those one at a time tells you nothing. It is greyed out when
+nothing is pending — a settled circuit with no clock in it will never move
+again on its own.
+
 One thing to know: [unstable circuits](#unstable-circuits) are detected
 within a single run, by counting how often a net changes. Stepping a tick at
 a time never reaches that count, so it will not stop you — which is the
 point, since walking an oscillation one tick at a time is how you find out
 what it is doing.
+
+## Speed
+
+**Simulation → Speed** offers ¼×, 1× and 4×. It moves the whole circuit
+through logical time faster or slower against real time; a clock's period
+is unchanged, so everything keeps its proportions and only the wall-clock
+rate differs. Slowing down before freezing is the usual way to catch
+something.
+
+Three settings rather than a slider, because what you want is "slower so I
+can watch", "normal", or "faster so I stop waiting" — none of which has a
+numeric answer. Anything but 1× is shown in the status bar, since a speed
+you left on and forgot would otherwise make the circuit look wrong.
+
+Like pause, it is not remembered between runs: it is a way of working at a
+moment, not something you set once.
 
 ## Signal colours
 

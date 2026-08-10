@@ -720,6 +720,33 @@ pub fn draw_step_tool(painter: &Painter, rect: Rect, color: Color32) {
     );
 }
 
+/// Straight to the next thing that happens: two triangles into a bar, the
+/// mark for "skip ahead" everywhere it is used.
+pub fn draw_skip_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.3;
+
+    for offset in [-reach, -reach * 0.2] {
+        painter.line(
+            vec![
+                pos2(c.x + offset, c.y - reach),
+                pos2(c.x + offset + reach * 0.8, c.y),
+                pos2(c.x + offset, c.y + reach),
+                pos2(c.x + offset, c.y - reach),
+            ],
+            stroke,
+        );
+    }
+    painter.line_segment(
+        [
+            pos2(c.x + reach * 0.75, c.y - reach),
+            pos2(c.x + reach * 0.75, c.y + reach),
+        ],
+        stroke,
+    );
+}
+
 pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.6, color);
     let c = rect.center();

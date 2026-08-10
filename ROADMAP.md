@@ -49,12 +49,12 @@ better at the thing it's for.
     ripple counter has to be watched through. One tick processes *all* the
     events at that instant, not one of them, and that is the right
     granularity.
-  - [ ] **Run to the next event.** Between two clock edges there are 59 ticks
+  - [x] **Run to the next event.** Between two clock edges there are 59 ticks
     where nothing happens, and crossing them one at a time is tedious. The
     event queue already knows when the next one falls; it needs an accessor.
   - [ ] **Step one clock edge**, with an explicit **source selector** — see
     below.
-  - [ ] **A speed multiplier** on the tick budget (¼×, 1×, 4×). The natural
+  - [x] **A speed multiplier** on the tick budget (¼×, 1×, 4×). The natural
     companion: slowing down before freezing.
 
   **Stepping implies pausing.** Pressing *step* while it runs stops it first.

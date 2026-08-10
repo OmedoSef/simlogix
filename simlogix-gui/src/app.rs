@@ -42,6 +42,23 @@ const CLOCK_PERIOD_TICKS: u64 = 60;
 /// propagate in one go.
 pub(crate) const SETTLE_TICKS: u64 = 32;
 
+/// The speeds the Simulation menu offers, slowest first.
+///
+/// Three rather than a slider: what you actually want is "slower so I can
+/// watch", "normal", and "faster so I stop waiting", and a continuous
+/// control makes you choose a number for a question that has no numeric
+/// answer.
+pub(crate) const SPEEDS: [f32; 3] = [0.25, 1.0, 4.0];
+
+/// How a speed is written, in the menu and in the status bar.
+pub(crate) fn speed_label(speed: f32) -> &'static str {
+    match speed {
+        s if s < 0.5 => "¼×",
+        s if s < 2.0 => "1×",
+        _ => "4×",
+    }
+}
+
 /// What is picked while a symbol is being drawn.
 ///
 /// Shapes and pins are held apart rather than in one list of an enum: they
@@ -409,6 +426,14 @@ pub struct SimLogixApp {
     /// Whether the simulation is advancing. Editing still works while
     /// paused — only time stops.
     running: bool,
+    /// How fast logical time runs against real time, as a multiplier on the
+    /// per-frame tick budget. A clock's *period* is unchanged — this moves
+    /// the whole circuit through time faster or slower, which is what lets
+    /// you watch something happen before deciding to freeze it.
+    ///
+    /// Not remembered between runs, for the same reason pause isn't: it is a
+    /// way of working at a moment, not something you set once like a theme.
+    speed: f32,
     /// The net that refused to settle, if the engine reported one. Set only
     /// alongside `running = false`: a fault pauses rather than crashing or
     /// silently looping, and stays on screen until the user resumes.
@@ -550,6 +575,7 @@ impl Default for SimLogixApp {
             pending_attach: None,
             net_fingerprint: 0,
             running: true,
+            speed: 1.0,
             unstable_net: None,
             library: String::new(),
             // A project always has at least one circuit: there has to be
@@ -1890,6 +1916,25 @@ impl SimLogixApp {
         }
     }
 
+    /// Advances straight to the next tick where something is scheduled.
+    ///
+    /// Between two beats of a clock there are dozens of ticks with nothing
+    /// in them, and crossing those one at a time says nothing at all.
+    ///
+    /// Does nothing when nothing is pending — a circuit that has settled and
+    /// holds no clock will never move again on its own, and pretending to
+    /// advance would only run the tick counter up. The button is greyed for
+    /// the same reason.
+    fn step_to_next_event(&mut self) {
+        let Some(tick) = self.circuit.next_event_tick() else {
+            return;
+        };
+        // At least one, so this always moves: everything due at or before
+        // now has already been evaluated, but a caller does not have to know
+        // that to be safe here.
+        self.step(tick.saturating_sub(self.circuit.now()).max(1));
+    }
+
     /// Snapshots the document so the edit about to happen can be undone.
     /// **Call this before mutating**, not after — it records the state being
     /// left behind. For a drag, that means calling it the frame the drag
@@ -2114,7 +2159,7 @@ impl SimLogixApp {
         // makes egui keep calling this at all without new input; the
         // tradeoff is constant redraw (and CPU use) instead of only on
         // interaction, even for a circuit with no Clock in it.
-        self.tick_budget += ui.ctx().input(|i| i.stable_dt) * TICKS_PER_SECOND;
+        self.tick_budget += ui.ctx().input(|i| i.stable_dt) * TICKS_PER_SECOND * self.speed;
         let ticks_due = self.tick_budget.floor();
         if ticks_due > 0.0 {
             self.tick_budget -= ticks_due;
@@ -2221,8 +2266,15 @@ impl SimLogixApp {
 
         // Stepping is allowed from every view, not only the simulation one:
         // it advances time, which is a thing the schematic is doing too.
-        if !ui.ctx().text_edit_focused() && ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step)) {
-            self.step(1);
+        if !ui.ctx().text_edit_focused() {
+            // The longer step is tried first. egui matches modifiers
+            // exactly, so the two chords cannot both fire — but the order
+            // says which one is meant to win if that ever stops being true.
+            if ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step_event)) {
+                self.step_to_next_event();
+            } else if ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step)) {
+                self.step(1);
+            }
         }
 
         // Renames the circuit you are in — the one shown in bold. The tree
@@ -2299,6 +2351,12 @@ impl SimLogixApp {
                         )
                         .weak(),
                     );
+                    // Only when it is not 1x. A mode you can leave on and
+                    // forget has to say so — but saying "normal speed" all
+                    // day is noise.
+                    if self.speed != 1.0 {
+                        ui.label(egui::RichText::new(speed_label(self.speed)).weak());
+                    }
                 });
             });
         });
@@ -2656,9 +2714,11 @@ impl SimLogixApp {
                     }
                 }
                 toolbar::View::Simulation => {
-                    match toolbar::show_sim_tools(ui, strings, self.sim_tool) {
+                    let has_event = self.circuit.next_event_tick().is_some();
+                    match toolbar::show_sim_tools(ui, strings, self.sim_tool, has_event) {
                         Some(toolbar::SimAction::Tool(tool)) => self.sim_tool = tool,
                         Some(toolbar::SimAction::StepTick) => self.step(1),
+                        Some(toolbar::SimAction::StepEvent) => self.step_to_next_event(),
                         None => {}
                     }
                 }

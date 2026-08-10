@@ -272,6 +272,25 @@ impl Circuit {
         self.clock
     }
 
+    /// When the next thing is due to happen, or `None` if nothing is.
+    ///
+    /// For advancing straight to it instead of a tick at a time: between two
+    /// beats of a clock there are dozens of ticks where nothing is scheduled
+    /// at all, and crossing them one by one tells you nothing.
+    ///
+    /// Events naming a component that has since been removed are skipped —
+    /// [`Circuit::advance`] drops them without evaluating anything, so
+    /// reporting one would promise a step that changes nothing, which is the
+    /// very thing this exists to avoid.
+    pub fn next_event_tick(&self) -> Option<u64> {
+        self.events
+            .iter()
+            .map(|Reverse(event)| event)
+            .filter(|event| self.components.contains_key(&event.component))
+            .map(|event| event.tick)
+            .min()
+    }
+
     /// Components with an `Input` or `InOut` pin connected to `net` — i.e. whose
     /// output may need recomputing when `net`'s signal changes.
     pub fn components_reading(&self, net: NetId) -> Vec<ComponentId> {
@@ -975,6 +994,32 @@ mod tests {
         // Advancing by far less than the period must not fast-forward it.
         circuit.advance(1).unwrap();
         assert_eq!(circuit.signal_at(net), Signal::High);
+    }
+
+    #[test]
+    fn the_next_event_is_the_soonest_one_that_will_actually_run() {
+        let mut circuit = Circuit::new();
+        assert_eq!(circuit.next_event_tick(), None, "nothing is pending");
+
+        let net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+        circuit.schedule_periodic(clock, 60);
+        assert_eq!(circuit.next_event_tick(), Some(0));
+
+        circuit.advance(1).expect("stable");
+        assert_eq!(circuit.next_event_tick(), Some(60));
+
+        // A component removed after being scheduled leaves its event behind;
+        // `advance` drops it without evaluating anything, so reporting it
+        // would promise a step that changes nothing.
+        circuit.remove_component(clock);
+        assert_eq!(circuit.next_event_tick(), None);
     }
 
     #[test]

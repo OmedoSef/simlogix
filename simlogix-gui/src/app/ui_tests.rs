@@ -142,6 +142,65 @@ fn sixty_steps_reach_a_clock() {
     );
 }
 
+#[test]
+fn skipping_lands_on_the_next_event_rather_than_the_next_tick() {
+    let mut harness = harness();
+    harness
+        .state_mut()
+        .place(ComponentKind::Clock, egui::pos2(200.0, 200.0));
+    step(&mut harness);
+
+    // Stop somewhere, then read where the next thing is actually due.
+    press(&mut harness, egui::Key::F10);
+    step(&mut harness);
+    let due = harness
+        .state()
+        .circuit
+        .next_event_tick()
+        .expect("a clock always has a next beat");
+    assert!(
+        due > harness.state().circuit.now() + 1,
+        "the point of skipping is that it is further than one tick"
+    );
+
+    press_with(&mut harness, egui::Key::F10, egui::Modifiers::SHIFT);
+    step(&mut harness);
+    assert_eq!(harness.state().circuit.now(), due);
+}
+
+#[test]
+fn the_speed_multiplier_moves_logical_time_against_the_frames() {
+    // Frames are the same either way; what changes is how much time each
+    // one is worth.
+    let elapsed = |speed: f32| {
+        let mut harness = harness();
+        harness.state_mut().speed = speed;
+        step(&mut harness);
+        let from = harness.state().circuit.now();
+        for _ in 0..10 {
+            step(&mut harness);
+        }
+        harness.state().circuit.now() - from
+    };
+
+    let slow = elapsed(0.25);
+    let fast = elapsed(4.0);
+    assert!(
+        fast > slow,
+        "four times speed covered {fast} ticks against {slow} at a quarter"
+    );
+}
+
+fn press_with(harness: &mut Harness<'_, SimLogixApp>, key: egui::Key, modifiers: egui::Modifiers) {
+    harness.input_mut().events.push(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    });
+}
+
 fn press(harness: &mut Harness<'_, SimLogixApp>, key: egui::Key) {
     harness.input_mut().events.push(egui::Event::Key {
         key,

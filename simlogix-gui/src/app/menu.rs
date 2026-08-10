@@ -36,6 +36,9 @@ pub(super) struct Shortcuts {
     /// the same on every layout, and it is what a debugger has meant by
     /// "step" for thirty years. `.` would have needed Shift on an AZERTY.
     pub step: egui::KeyboardShortcut,
+    /// Shift alongside it, the way *step over* and *step into* sit together
+    /// in a debugger: the same gesture, one going further.
+    pub step_event: egui::KeyboardShortcut,
 }
 
 impl Shortcuts {
@@ -55,6 +58,7 @@ impl Shortcuts {
             copy: command(egui::Key::C),
             paste: command(egui::Key::V),
             step: egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F10),
+            step_event: egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::F10),
         }
     }
 }
@@ -177,6 +181,30 @@ impl SimLogixApp {
                         self.step(1);
                         ui.close();
                     }
+                    let has_event = self.circuit.next_event_tick().is_some();
+                    if ui
+                        .add_enabled(
+                            has_event,
+                            egui::Button::new(strings.menu_simulation_step_event)
+                                .shortcut_text(ui.ctx().format_shortcut(&keys.step_event)),
+                        )
+                        .clicked()
+                    {
+                        self.step_to_next_event();
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.menu_button(strings.menu_simulation_speed, |ui| {
+                        for speed in super::SPEEDS {
+                            if ui
+                                .radio(self.speed == speed, super::speed_label(speed))
+                                .clicked()
+                            {
+                                self.speed = speed;
+                                ui.close();
+                            }
+                        }
+                    });
                     ui.separator();
                     // In this menu rather than in Settings: what the wires
                     // show *is* the simulation's output, and this is
