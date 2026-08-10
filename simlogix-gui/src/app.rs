@@ -920,6 +920,25 @@ impl SimLogixApp {
     }
 
     /// Registers a new `Wire` and returns its id.
+    /// Builds a component from its saved form: places it, gives it its
+    /// rotation and properties, and **re-evaluates it**.
+    ///
+    /// That last step is the whole reason this exists. `place` schedules the
+    /// component before its properties are applied, so a switch saved closed
+    /// or a port with a resting level went into the engine holding whatever
+    /// it starts with — and nothing put it right afterwards, since neither
+    /// has an input for `rebuild_nets` to notice a change on. Three callers
+    /// wrote out the same three steps and all three forgot the fourth.
+    fn place_saved(&mut self, saved: &SavedComponent, offset: egui::Vec2) -> ComponentId {
+        let id = self.place(saved.kind.clone(), egui::pos2(saved.x, saved.y) + offset);
+        if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
+            placed.set_rotation(saved.rotation);
+            placed.set_properties(saved.properties.clone());
+        }
+        self.circuit.schedule_now(id);
+        id
+    }
+
     fn add_wire(
         &mut self,
         from: WireEndpoint,
@@ -1088,14 +1107,7 @@ impl SimLogixApp {
         let ids: Vec<ComponentId> = circuit
             .components
             .iter()
-            .map(|saved| {
-                let id = app.place(saved.kind.clone(), egui::pos2(saved.x, saved.y));
-                if let Some(placed) = app.placed.iter_mut().find(|p| p.id() == id) {
-                    placed.set_rotation(saved.rotation);
-                    placed.set_properties(saved.properties.clone());
-                }
-                id
-            })
+            .map(|saved| app.place_saved(saved, egui::Vec2::ZERO))
             .collect();
 
         // Saved wire index -> runtime id, so a junction can resolve the wire
@@ -1362,15 +1374,10 @@ impl SimLogixApp {
                 ids.push(None);
                 continue;
             }
-            let id = self.place(component.kind.clone(), egui::pos2(component.x, component.y));
-            if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
-                placed.set_rotation(component.rotation);
-                // Applied before the entry is dropped: this is what puts a
-                // switch's position or a port's resting level into the cell
-                // the engine reads.
-                placed.set_properties(component.properties.clone());
-            }
-            ids.push(Some(id));
+            // Applied before the entry is dropped: this is what puts a
+            // switch's position or a port's resting level into the cell the
+            // engine reads.
+            ids.push(Some(self.place_saved(component, egui::Vec2::ZERO)));
         }
         // A sub-circuit may itself contain sub-circuits, and each of those
         // arrived as a `PlacedComponent` carrying the only record of how its
@@ -1582,14 +1589,7 @@ impl SimLogixApp {
         let ids: Vec<ComponentId> = clip
             .components
             .iter()
-            .map(|saved| {
-                let id = self.place(saved.kind.clone(), egui::pos2(saved.x, saved.y) + offset);
-                if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
-                    placed.set_rotation(saved.rotation);
-                    placed.set_properties(saved.properties.clone());
-                }
-                id
-            })
+            .map(|saved| self.place_saved(saved, offset))
             .collect();
 
         let mut wire_ids: Vec<u64> = Vec::with_capacity(clip.wires.len());

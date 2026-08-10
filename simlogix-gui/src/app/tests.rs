@@ -1083,3 +1083,47 @@ fn saving_carries_every_circuit_not_just_the_open_one() {
     assert_eq!(project.circuits[0].components.len(), 1);
     assert_eq!(project.circuits[1].components.len(), 1);
 }
+
+#[test]
+fn a_switch_saved_closed_is_closed_when_the_project_is_opened() {
+    // Romain's: every switch he had left closed read 0 on opening the file.
+    // `place` schedules a component before its properties are applied, so
+    // the engine had evaluated it while its cell still held the default —
+    // and a switch has no input, so `rebuild_nets` never disturbs it again.
+    let mut project = SimLogixApp::default().to_project();
+    project.circuits[0].components.push(SavedComponent {
+        kind: ComponentKind::Switch,
+        x: 0.0,
+        y: 0.0,
+        rotation: canvas::Rotation::Deg0,
+        properties: Properties {
+            pressed: Some(true),
+            ..Default::default()
+        },
+    });
+
+    let app = SimLogixApp::from_project(&project, 0);
+
+    let switch = app.placed[0].id();
+    let net = app.circuit.pins(switch)[0].net;
+    assert_eq!(app.circuit.signal_at(net), simlogix_core::Signal::High);
+}
+
+#[test]
+fn a_switch_saved_open_is_open_when_the_project_is_opened() {
+    // The other half: without it, a fix that simply forced every switch
+    // closed would pass the test above.
+    let mut project = SimLogixApp::default().to_project();
+    project.circuits[0].components.push(SavedComponent {
+        kind: ComponentKind::Switch,
+        x: 0.0,
+        y: 0.0,
+        rotation: canvas::Rotation::Deg0,
+        properties: Properties::default(),
+    });
+
+    let app = SimLogixApp::from_project(&project, 0);
+
+    let net = app.circuit.pins(app.placed[0].id())[0].net;
+    assert_eq!(app.circuit.signal_at(net), simlogix_core::Signal::Low);
+}
