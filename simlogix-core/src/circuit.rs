@@ -332,6 +332,29 @@ impl Circuit {
         driving
     }
 
+    /// The pins that **read** `net` — every pin on it that isn't an output.
+    ///
+    /// The other half of [`Circuit::contributions`], and the half that is
+    /// otherwise invisible: a reader puts nothing on the net, so nothing
+    /// about it shows up in what the net carries. That is exactly the case
+    /// worth seeing when a reader disagrees about how wide the net is.
+    pub fn readers(&self, net: NetId) -> Vec<(ComponentId, usize)> {
+        let mut reading: Vec<(ComponentId, usize)> = self
+            .components
+            .iter()
+            .flat_map(|(&component, registered)| {
+                registered
+                    .pins
+                    .iter()
+                    .enumerate()
+                    .filter(move |(_, pin)| pin.net == net && pin.direction != PinDirection::Output)
+                    .map(move |(index, _)| (component, index))
+            })
+            .collect();
+        reading.sort_by_key(|(component, index)| (component.0, *index));
+        reading
+    }
+
     /// What is queued and will actually run, soonest first.
     ///
     /// Events naming a component that has since been removed are left out,

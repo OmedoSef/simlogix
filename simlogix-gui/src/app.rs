@@ -3068,6 +3068,7 @@ impl SimLogixApp {
                 .iter()
                 .map(|placed| crate::inspector::Named {
                     id: placed.id(),
+                    width: placed.width(),
                     label: placed
                         .properties()
                         .label()

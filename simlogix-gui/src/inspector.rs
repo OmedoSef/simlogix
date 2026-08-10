@@ -23,6 +23,10 @@ pub struct Named {
     pub id: ComponentId,
     /// The user's own name if they gave one, else the kind's label.
     pub label: String,
+    /// How wide its properties say its pins are. The engine does not know
+    /// this — a net's width is derived *from* it — so it has to be handed
+    /// over, and it is the number that makes a disagreement visible.
+    pub width: usize,
 }
 
 /// The whole of what this window shows, as text to paste into a bug report.
@@ -74,6 +78,20 @@ pub fn report(strings: &Strings, circuit: &Circuit, named: &[Named]) -> String {
                 index,
                 signal.width(),
                 describe(&signal),
+            ));
+        }
+        for (component, index) in circuit.readers(net) {
+            let declared = width_of(named, component);
+            out.push_str(&format!(
+                "    {} · pin {} · {} bits · reads{}\n",
+                label_of(named, component),
+                index,
+                declared,
+                if declared == circuit.net_width(net) {
+                    ""
+                } else {
+                    "  (width mismatch)"
+                },
             ));
         }
     }
@@ -188,7 +206,6 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
             let contributions = circuit.contributions(net);
             if contributions.is_empty() {
                 ui.label(RichText::new(strings.inspector_undriven).weak());
-                return;
             }
             for ((component, index), signal) in contributions {
                 // The width beside each contribution, not only the net's:
@@ -204,7 +221,33 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
                     describe(&signal),
                 ));
             }
+            // The readers, which put nothing on the net and are therefore
+            // invisible in everything above. A two-bit output reading a
+            // four-bit bus is a real mistake that nothing else reports, and
+            // this is the one line that shows it.
+            for (component, index) in circuit.readers(net) {
+                let declared = width_of(named, component);
+                let mut row = format!(
+                    "{} · {} · {} · {}",
+                    label_of(named, component),
+                    strings.inspector_pin.replace("{}", &index.to_string()),
+                    strings.inspector_bits.replace("{}", &declared.to_string()),
+                    strings.inspector_reads,
+                );
+                if declared != width {
+                    row.push_str(&format!("  ⚠ {}", strings.inspector_mismatch));
+                }
+                ui.label(row);
+            }
         });
+}
+
+fn width_of(named: &[Named], component: ComponentId) -> usize {
+    named
+        .iter()
+        .find(|entry| entry.id == component)
+        .map(|entry| entry.width)
+        .unwrap_or(1)
 }
 
 fn label_of(named: &[Named], component: ComponentId) -> &str {

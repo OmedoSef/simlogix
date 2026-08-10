@@ -318,6 +318,60 @@ fn the_inspector_opens_and_names_what_is_driving_a_net() {
 }
 
 #[test]
+fn the_inspector_shows_a_reader_that_disagrees_about_the_width() {
+    // The case that is otherwise invisible: a reader puts nothing on the
+    // net, so nothing about it shows in what the net carries. Romain found
+    // it by wiring a two-bit output to a four-bit bus and seeing no
+    // complaint anywhere.
+    let mut harness = harness();
+    let wide = harness
+        .state_mut()
+        .place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    let narrow = harness
+        .state_mut()
+        .place(ComponentKind::OutputPort, egui::pos2(200.0, 0.0));
+    {
+        let app = harness.state_mut();
+        app.add_wire(
+            WireEndpoint::Pin(wide, 0),
+            WireEndpoint::Pin(narrow, 0),
+            Vec::new(),
+        );
+        for (id, bits) in [(wide, 4), (narrow, 2)] {
+            let placed = app
+                .placed
+                .iter_mut()
+                .find(|placed| placed.id() == id)
+                .expect("just placed");
+            let mut properties = placed.properties().clone();
+            properties.width = Some(bits);
+            placed.set_properties(properties);
+        }
+        app.rebuild_nets();
+    }
+
+    let strings = crate::i18n::Strings::for_language(harness.state().language);
+    let named: Vec<crate::inspector::Named> = harness
+        .state()
+        .placed
+        .iter()
+        .map(|placed| crate::inspector::Named {
+            id: placed.id(),
+            label: strings.component_kind_label(&placed.kind()).to_string(),
+            width: placed.width(),
+        })
+        .collect();
+    let report = crate::inspector::report(strings, &harness.state().circuit, &named);
+
+    // Not the net's number, which is handed out afresh on every rebuild.
+    assert!(report.contains("· 4 bits ·"), "{report}");
+    assert!(
+        report.contains("2 bits · reads  (width mismatch)"),
+        "{report}"
+    );
+}
+
+#[test]
 fn the_bug_report_carries_the_build_and_what_drives_each_net() {
     let mut harness = harness();
     let source = harness
@@ -330,6 +384,7 @@ fn the_bug_report_carries_the_build_and_what_drives_each_net() {
     let named = vec![crate::inspector::Named {
         id: source,
         label: "CLK".to_string(),
+        width: 1,
     }];
     let report = crate::inspector::report(strings, &app.circuit, &named);
 
