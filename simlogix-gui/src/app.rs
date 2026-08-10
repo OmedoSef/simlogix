@@ -1237,6 +1237,22 @@ impl SimLogixApp {
         if self.scene_rect.width() <= 0.0 {
             self.refit_view = true;
         }
+        // ...and whenever what it kept no longer looks at anything. A camera
+        // belongs to a *view*, not to a circuit, so switching circuits leaves
+        // the other view's camera where the previous circuit's drawing was —
+        // and arriving there lands on blank canvas with nothing saying which
+        // way the work is. Panning off and switching does the same.
+        //
+        // Only when the two have nothing in common, rather than framing on
+        // every switch: a camera that still shows the drawing is one the user
+        // chose, and re-framing would throw their zoom away every time they
+        // flicked between the two.
+        if self
+            .content_rect()
+            .is_some_and(|content| !self.scene_rect.intersects(content))
+        {
+            self.refit_view = true;
+        }
         // Shape indices belong to whichever symbol was showing.
         self.symbol_selection = SymbolSelection::default();
         self.drawing = None;

@@ -1171,6 +1171,38 @@ fn switching_circuits_asks_for_a_refit_but_undo_does_not() {
 }
 
 #[test]
+fn switching_views_reframes_only_when_the_camera_shows_nothing() {
+    let rect = |min: (f32, f32), max: (f32, f32)| {
+        egui::Rect::from_min_max(egui::pos2(min.0, min.1), egui::pos2(max.0, max.1))
+    };
+    let mut app = SimLogixApp::default();
+    // Drawn a long way from the origin, as a schematic naturally is.
+    app.place(ComponentKind::And, egui::pos2(800.0, 400.0));
+
+    // The schematic's own camera, left on the origin — which is where some
+    // *other* circuit was drawn, since a camera belongs to a view and not to
+    // a circuit. Coming back to the schematic has to find the drawing again.
+    app.view = crate::toolbar::View::Appearance;
+    app.scene_rect = rect((-90.0, -90.0), (90.0, 90.0));
+    app.idle_scene_rect = rect((-90.0, -90.0), (90.0, 90.0));
+    app.refit_view = false;
+    app.switch_view(crate::toolbar::View::Schematic);
+    assert!(
+        app.refit_view,
+        "the camera it kept has nothing in common with the drawing"
+    );
+
+    // And a camera that does show it is left exactly as it was: framing on
+    // every switch would throw away the zoom each time you flicked across.
+    app.view = crate::toolbar::View::Appearance;
+    app.scene_rect = rect((-90.0, -90.0), (90.0, 90.0));
+    app.idle_scene_rect = rect((700.0, 300.0), (900.0, 500.0));
+    app.refit_view = false;
+    app.switch_view(crate::toolbar::View::Schematic);
+    assert!(!app.refit_view, "that camera was already on the drawing");
+}
+
+#[test]
 fn saving_carries_every_circuit_not_just_the_open_one() {
     let mut app = SimLogixApp::default();
     app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));
