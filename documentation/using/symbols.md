@@ -131,6 +131,20 @@ three points, a label's size and alignment.
 how you make it exact, and a curve sometimes has to sit off the grid to look
 right.
 
+## The view keeps its place
+
+There are two things to look at, so there are two cameras: **the drawing**,
+which the schematic and the simulation both show, and **the symbol**, which
+always sits on the origin. Switching between the schematic and the
+simulation therefore leaves the view exactly where it was — the same
+drawing is on screen either way — while stepping across to the symbol puts
+the drawing's camera away and hands it back when you return.
+
+One thing is not preserved, deliberately: if the camera you come back to no
+longer looks at anything — because you switched circuits meanwhile, and a
+camera belongs to a view rather than to a circuit — the view is reframed on
+what is there.
+
 ## The circuit's name
 
 By default the circuit's name is written above the symbol. With nothing

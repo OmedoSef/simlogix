@@ -1171,6 +1171,34 @@ fn switching_circuits_asks_for_a_refit_but_undo_does_not() {
 }
 
 #[test]
+fn the_schematic_and_the_simulation_share_one_camera() {
+    let rect = |min: (f32, f32), max: (f32, f32)| {
+        egui::Rect::from_min_max(egui::pos2(min.0, min.1), egui::pos2(max.0, max.1))
+    };
+    let mut app = SimLogixApp::default();
+    app.place(ComponentKind::And, egui::pos2(800.0, 400.0));
+    let looking_at = rect((700.0, 300.0), (900.0, 500.0));
+    app.scene_rect = looking_at;
+    app.idle_scene_rect = rect((-90.0, -90.0), (90.0, 90.0));
+
+    // The simulation is the schematic with the editing taken away — the same
+    // drawing, in the same place. Moving the view would be moving what never
+    // changed.
+    app.switch_view(crate::toolbar::View::Simulation);
+    assert_eq!(app.scene_rect, looking_at);
+    assert!(!app.refit_view);
+    app.switch_view(crate::toolbar::View::Schematic);
+    assert_eq!(app.scene_rect, looking_at);
+
+    // The symbol is somewhere else entirely, so that one is still put away
+    // and handed back.
+    app.switch_view(crate::toolbar::View::Appearance);
+    assert_eq!(app.scene_rect, rect((-90.0, -90.0), (90.0, 90.0)));
+    app.switch_view(crate::toolbar::View::Simulation);
+    assert_eq!(app.scene_rect, looking_at, "the drawing's camera came back");
+}
+
+#[test]
 fn switching_views_reframes_only_when_the_camera_shows_nothing() {
     let rect = |min: (f32, f32), max: (f32, f32)| {
         egui::Rect::from_min_max(egui::pos2(min.0, min.1), egui::pos2(max.0, max.1))

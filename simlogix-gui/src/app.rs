@@ -1261,15 +1261,26 @@ impl SimLogixApp {
     /// since those can sit well outside every component.
     /// Puts the other side of the circuit on the canvas.
     ///
-    /// The two views look at unrelated places — a schematic sits wherever it
-    /// was drawn, a symbol always sits on the origin — so each keeps its own
-    /// camera rather than one being carried across and landing nowhere.
+    /// There are two things to look at, not three: **the drawing** — which
+    /// the schematic and the simulation both show, the second being the
+    /// first with the editing taken away — and **the symbol**, which always
+    /// sits on the origin. So there are two cameras, and one is put away
+    /// only when crossing between the two.
+    ///
+    /// Swapping on every switch was wrong and showed: going from schematic
+    /// to simulation and back moved the view, though what is on screen never
+    /// changed. It also handed the symbol's camera to the drawing, which is
+    /// what then tripped the refit below — a jump instead of a nudge.
     fn switch_view(&mut self, view: toolbar::View) {
         if view == self.view {
             return;
         }
+        let was_symbol = self.view == toolbar::View::Appearance;
+        let is_symbol = view == toolbar::View::Appearance;
         self.view = view;
-        std::mem::swap(&mut self.scene_rect, &mut self.idle_scene_rect);
+        if was_symbol != is_symbol {
+            std::mem::swap(&mut self.scene_rect, &mut self.idle_scene_rect);
+        }
         // Never framed before: `ui()` reads a zero rect as "frame me".
         if self.scene_rect.width() <= 0.0 {
             self.refit_view = true;
