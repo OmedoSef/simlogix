@@ -46,11 +46,13 @@ impl Latch {
     fn q(&self) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.q_gate)[2].net)
+            .only_level()
     }
 
     fn q_bar(&self) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.q_bar_gate)[2].net)
+            .only_level()
     }
 }
 
@@ -285,7 +287,7 @@ fn started_ring() -> (Circuit, ComponentId) {
     circuit.run().expect("held in reset, the ring settles");
     let output = circuit.pins(nor)[2].net;
     assert_eq!(
-        circuit.signal_at(output),
+        circuit.signal_at(output).only_level(),
         Level::Low,
         "the enable should have seeded the ring with a definite value"
     );
@@ -307,7 +309,7 @@ fn a_ring_oscillator_oscillates_instead_of_hanging() {
         circuit
             .advance(4)
             .expect("small steps should never look unstable");
-        seen.push(circuit.signal_at(output));
+        seen.push(circuit.signal_at(output).only_level());
     }
 
     assert!(

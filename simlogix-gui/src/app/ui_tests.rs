@@ -123,7 +123,9 @@ fn sixty_steps_reach_a_clock() {
 
     let level = |harness: &Harness<'_, SimLogixApp>| {
         let app = harness.state();
-        app.circuit.signal_at(app.circuit.pins(clock)[0].net)
+        app.circuit
+            .signal_at(app.circuit.pins(clock)[0].net)
+            .only_level()
     };
 
     press(&mut harness, egui::Key::F10);
@@ -202,7 +204,9 @@ fn a_clock_step_lands_on_an_edge_of_the_clock() {
 
     let level = |harness: &Harness<'_, SimLogixApp>| {
         let app = harness.state();
-        app.circuit.signal_at(app.circuit.pins(clock)[0].net)
+        app.circuit
+            .signal_at(app.circuit.pins(clock)[0].net)
+            .only_level()
     };
 
     press(&mut harness, egui::Key::F10);
@@ -228,7 +232,9 @@ fn a_clock_step_drives_a_port_when_that_is_where_the_clock_comes_from() {
 
     let level = |harness: &Harness<'_, SimLogixApp>| {
         let app = harness.state();
-        app.circuit.signal_at(app.circuit.pins(port)[0].net)
+        app.circuit
+            .signal_at(app.circuit.pins(port)[0].net)
+            .only_level()
     };
 
     press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
@@ -537,7 +543,7 @@ fn a_tri_state_source_can_be_clicked_into_letting_go() {
     let signal = |harness: &Harness<'_, SimLogixApp>| {
         let app = harness.state();
         let net = app.circuit.pins(id)[0].net;
-        app.circuit.signal_at(net)
+        app.circuit.signal_at(net).only_level()
     };
     // Nothing else is on this net, so what it reads *is* what the source
     // is putting on it.

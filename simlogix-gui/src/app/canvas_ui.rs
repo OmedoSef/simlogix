@@ -396,7 +396,7 @@ impl SimLogixApp {
                             match net {
                                 Some(net) => {
                                     let level = canvas::signal_color(
-                                        self.circuit.signal_at(net),
+                                        self.circuit.signal_at(net).only_level(),
                                         ui.visuals().dark_mode,
                                     );
                                     // Faded when nothing but a pass

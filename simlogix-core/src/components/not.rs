@@ -1,5 +1,6 @@
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// An inverter, combinational (no internal state): its single output
 /// follows `NOT input` at every evaluation. `Error` stays `Error`
@@ -10,11 +11,11 @@ use crate::level::Level;
 pub struct Not;
 
 impl Component for Not {
-    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
-        match inputs {
+    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(inputs, |inputs| match inputs {
             [a] => vec![not(*a)],
             _ => vec![Level::Unknown],
-        }
+        })
     }
 }
 
@@ -38,21 +39,22 @@ fn not(a: Level) -> Level {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn inverts_a_definite_input() {
-        assert_eq!(Not.eval(&[Level::High]), vec![Level::Low]);
-        assert_eq!(Not.eval(&[Level::Low]), vec![Level::High]);
+        assert_eq!(eval_levels(&Not, &[Level::High]), vec![Level::Low]);
+        assert_eq!(eval_levels(&Not, &[Level::Low]), vec![Level::High]);
     }
 
     #[test]
     fn error_stays_error() {
-        assert_eq!(Not.eval(&[Level::Error]), vec![Level::Error]);
+        assert_eq!(eval_levels(&Not, &[Level::Error]), vec![Level::Error]);
     }
 
     #[test]
     fn unknown_and_high_z_both_resolve_to_unknown() {
-        assert_eq!(Not.eval(&[Level::Unknown]), vec![Level::Unknown]);
-        assert_eq!(Not.eval(&[Level::HighZ]), vec![Level::Unknown]);
+        assert_eq!(eval_levels(&Not, &[Level::Unknown]), vec![Level::Unknown]);
+        assert_eq!(eval_levels(&Not, &[Level::HighZ]), vec![Level::Unknown]);
     }
 }

@@ -12,8 +12,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// Where a driving port has been *set*, which is not the same thing as
 /// what its net comes to carry — hence a name of its own rather than
@@ -86,12 +87,14 @@ impl CircuitPort {
 }
 
 impl Component for CircuitPort {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        vec![match self.level.get() {
-            PortSetting::Undriven => self.undriven,
-            PortSetting::Low => Level::Low,
-            PortSetting::High => Level::High,
-        }]
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| {
+            vec![match self.level.get() {
+                PortSetting::Undriven => self.undriven,
+                PortSetting::Low => Level::Low,
+                PortSetting::High => Level::High,
+            }]
+        })
     }
 }
 
@@ -105,8 +108,8 @@ impl Component for CircuitPort {
 pub struct CircuitOutput;
 
 impl Component for CircuitOutput {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        Vec::new()
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| Vec::new())
     }
 }
 
@@ -130,8 +133,8 @@ impl CircuitAnchor {
 }
 
 impl Component for CircuitAnchor {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        vec![Level::HighZ; self.pins]
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| vec![Level::HighZ; self.pins])
     }
 }
 
@@ -142,17 +145,18 @@ impl Component for CircuitAnchor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn an_input_holds_the_level_it_was_set_to() {
         let (port, level) = CircuitPort::input();
         // Undriven from the outside is exactly what "not known" means here.
-        assert_eq!(port.eval(&[]), vec![Level::Unknown]);
+        assert_eq!(eval_levels(&port, &[]), vec![Level::Unknown]);
 
         level.set(PortSetting::High);
-        assert_eq!(port.eval(&[]), vec![Level::High]);
+        assert_eq!(eval_levels(&port, &[]), vec![Level::High]);
         // Latching, not momentary: nothing releases it.
-        assert_eq!(port.eval(&[]), vec![Level::High]);
+        assert_eq!(eval_levels(&port, &[]), vec![Level::High]);
     }
 
     #[test]
@@ -161,10 +165,10 @@ mod tests {
         // The difference from an input, and the reason the two exist:
         // `HighZ` is ignored when a net resolves, so the circuit inside can
         // drive it. `Unknown` would count as a driver and cause a conflict.
-        assert_eq!(port.eval(&[]), vec![Level::HighZ]);
+        assert_eq!(eval_levels(&port, &[]), vec![Level::HighZ]);
 
         level.set(PortSetting::Low);
-        assert_eq!(port.eval(&[]), vec![Level::Low]);
+        assert_eq!(eval_levels(&port, &[]), vec![Level::Low]);
     }
 
     #[test]
@@ -196,13 +200,16 @@ mod tests {
         // all of them have to be `HighZ` or the instance would drive its own
         // ports.
         assert_eq!(
-            CircuitAnchor::new(3).eval(&[Level::High, Level::Low, Level::Unknown]),
+            eval_levels(
+                &CircuitAnchor::new(3),
+                &[Level::High, Level::Low, Level::Unknown]
+            ),
             vec![Level::HighZ; 3]
         );
     }
 
     #[test]
     fn an_output_drives_nothing() {
-        assert!(CircuitOutput.eval(&[Level::High]).is_empty());
+        assert!(eval_levels(&CircuitOutput, &[Level::High]).is_empty());
     }
 }

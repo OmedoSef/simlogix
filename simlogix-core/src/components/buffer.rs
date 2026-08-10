@@ -1,5 +1,6 @@
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// A buffer, combinational (no internal state): its single output repeats
 /// its input unchanged, every signal state included — unlike a gate, a
@@ -8,11 +9,11 @@ use crate::level::Level;
 pub struct Buffer;
 
 impl Component for Buffer {
-    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
-        match inputs {
+    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(inputs, |inputs| match inputs {
             [a] => vec![*a],
             _ => vec![Level::Unknown],
-        }
+        })
     }
 }
 
@@ -23,13 +24,17 @@ impl Component for Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn repeats_every_signal_state_unchanged() {
-        assert_eq!(Buffer.eval(&[Level::High]), vec![Level::High]);
-        assert_eq!(Buffer.eval(&[Level::Low]), vec![Level::Low]);
-        assert_eq!(Buffer.eval(&[Level::Unknown]), vec![Level::Unknown]);
-        assert_eq!(Buffer.eval(&[Level::Error]), vec![Level::Error]);
-        assert_eq!(Buffer.eval(&[Level::HighZ]), vec![Level::HighZ]);
+        assert_eq!(eval_levels(&Buffer, &[Level::High]), vec![Level::High]);
+        assert_eq!(eval_levels(&Buffer, &[Level::Low]), vec![Level::Low]);
+        assert_eq!(
+            eval_levels(&Buffer, &[Level::Unknown]),
+            vec![Level::Unknown]
+        );
+        assert_eq!(eval_levels(&Buffer, &[Level::Error]), vec![Level::Error]);
+        assert_eq!(eval_levels(&Buffer, &[Level::HighZ]), vec![Level::HighZ]);
     }
 }

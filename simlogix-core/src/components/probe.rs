@@ -1,5 +1,5 @@
-use crate::component::Component;
-use crate::level::Level;
+use crate::component::{scalar_eval, Component};
+use crate::signal::Signal;
 
 /// A read-only measurement point: a single input pin and no outputs, used to
 /// observe a net's signal without affecting the circuit.
@@ -12,8 +12,8 @@ use crate::level::Level;
 pub struct Probe;
 
 impl Component for Probe {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        Vec::new()
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| Vec::new())
     }
 }
 
@@ -24,10 +24,12 @@ impl Component for Probe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
+    use crate::level::Level;
 
     #[test]
     fn probe_has_no_outputs_regardless_of_its_input() {
-        assert_eq!(Probe.eval(&[Level::High]), Vec::new());
-        assert_eq!(Probe.eval(&[Level::Unknown]), Vec::new());
+        assert_eq!(eval_levels(&Probe, &[Level::High]), Vec::new());
+        assert_eq!(eval_levels(&Probe, &[Level::Unknown]), Vec::new());
     }
 }

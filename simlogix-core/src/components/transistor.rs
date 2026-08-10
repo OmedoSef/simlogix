@@ -1,5 +1,6 @@
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// Which MOSFET polarity a [`Transistor`] models — determines which gate
 /// level makes it conduct.
@@ -75,11 +76,11 @@ impl Transistor {
 }
 
 impl Component for Transistor {
-    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
-        match inputs {
+    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(inputs, |inputs| match inputs {
             [gate, source] if self.conducts(*gate) => vec![self.pass(*source)],
             _ => vec![Level::HighZ],
-        }
+        })
     }
 }
 
@@ -114,18 +115,19 @@ impl Transistor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn an_n_type_pulls_down_at_full_strength_and_up_only_weakly() {
         let transistor = Transistor::n_type();
         assert_eq!(
-            transistor.eval(&[Level::High, Level::Low]),
+            eval_levels(&transistor, &[Level::High, Level::Low]),
             vec![Level::Low],
             "the direction an NMOS pulls well"
         );
         // The threshold drop, and the reason a lone NMOS is not a pass gate.
         assert_eq!(
-            transistor.eval(&[Level::High, Level::High]),
+            eval_levels(&transistor, &[Level::High, Level::High]),
             vec![Level::WeakHigh]
         );
     }
@@ -134,12 +136,12 @@ mod tests {
     fn a_p_type_is_the_mirror() {
         let transistor = Transistor::p_type();
         assert_eq!(
-            transistor.eval(&[Level::Low, Level::High]),
+            eval_levels(&transistor, &[Level::Low, Level::High]),
             vec![Level::High],
             "the direction a PMOS pulls well"
         );
         assert_eq!(
-            transistor.eval(&[Level::Low, Level::Low]),
+            eval_levels(&transistor, &[Level::Low, Level::Low]),
             vec![Level::WeakLow]
         );
     }
@@ -152,12 +154,12 @@ mod tests {
         // which is how a correct CMOS NAND came to report `Error`.
         for source in [Level::Unknown, Level::HighZ] {
             assert_eq!(
-                Transistor::n_type().eval(&[Level::High, source]),
+                eval_levels(&Transistor::n_type(), &[Level::High, source]),
                 vec![Level::HighZ],
                 "an n-type conducting from {source:?}"
             );
             assert_eq!(
-                Transistor::p_type().eval(&[Level::Low, source]),
+                eval_levels(&Transistor::p_type(), &[Level::Low, source]),
                 vec![Level::HighZ],
                 "a p-type conducting from {source:?}"
             );
@@ -170,7 +172,7 @@ mod tests {
         // applies to a *level*, and there is no such thing as a weak
         // "something is wrong".
         assert_eq!(
-            Transistor::n_type().eval(&[Level::High, Level::Error]),
+            eval_levels(&Transistor::n_type(), &[Level::High, Level::Error]),
             vec![Level::Error]
         );
     }
@@ -179,7 +181,7 @@ mod tests {
     fn n_type_drives_high_z_when_gate_is_low() {
         let transistor = Transistor::n_type();
         assert_eq!(
-            transistor.eval(&[Level::Low, Level::High]),
+            eval_levels(&transistor, &[Level::Low, Level::High]),
             vec![Level::HighZ]
         );
     }
@@ -188,7 +190,7 @@ mod tests {
     fn p_type_drives_high_z_when_gate_is_high() {
         let transistor = Transistor::p_type();
         assert_eq!(
-            transistor.eval(&[Level::High, Level::Low]),
+            eval_levels(&transistor, &[Level::High, Level::Low]),
             vec![Level::HighZ]
         );
     }

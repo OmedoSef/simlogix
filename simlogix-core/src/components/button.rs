@@ -1,8 +1,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// A source with a single output pin and no inputs, carrying whichever level
 /// its handle is set to.
@@ -37,12 +38,14 @@ impl Button {
 }
 
 impl Component for Button {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        vec![if self.pressed.get() {
-            Level::High
-        } else {
-            Level::Low
-        }]
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| {
+            vec![if self.pressed.get() {
+                Level::High
+            } else {
+                Level::Low
+            }]
+        })
     }
 }
 
@@ -53,17 +56,18 @@ impl Component for Button {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn unpressed_button_outputs_low() {
         let (button, _pressed) = Button::new();
-        assert_eq!(button.eval(&[]), vec![Level::Low]);
+        assert_eq!(eval_levels(&button, &[]), vec![Level::Low]);
     }
 
     #[test]
     fn pressing_the_handle_makes_the_button_output_high() {
         let (button, pressed) = Button::new();
         pressed.set(true);
-        assert_eq!(button.eval(&[]), vec![Level::High]);
+        assert_eq!(eval_levels(&button, &[]), vec![Level::High]);
     }
 }

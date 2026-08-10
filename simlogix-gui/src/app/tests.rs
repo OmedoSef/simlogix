@@ -433,7 +433,10 @@ fn one_level_of_nesting_inverts() {
     let (app, _, instance) = nested_inverters(1);
     let out = app.circuit.pins(instance)[1].net;
     // The switch rests off, so the inverter's output is high.
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::High);
+    assert_eq!(
+        app.circuit.signal_at(out).only_level(),
+        simlogix_core::Level::High
+    );
 }
 
 #[test]
@@ -443,7 +446,10 @@ fn a_sub_circuit_inside_a_sub_circuit_stays_connected() {
     // wiring went missing, leaving the output driven by nobody.
     let (app, _, instance) = nested_inverters(2);
     let out = app.circuit.pins(instance)[1].net;
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::High);
+    assert_eq!(
+        app.circuit.signal_at(out).only_level(),
+        simlogix_core::Level::High
+    );
 }
 
 #[test]
@@ -455,7 +461,10 @@ fn nesting_has_no_depth_limit() {
     // depth.
     let (mut app, switch, instance) = nested_inverters(8);
     let out = app.circuit.pins(instance)[1].net;
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::High);
+    assert_eq!(
+        app.circuit.signal_at(out).only_level(),
+        simlogix_core::Level::High
+    );
 
     // Driven, not merely connected: a net can be `High` because
     // something reaches it, and the only proof it is the *input* that
@@ -470,7 +479,10 @@ fn nesting_has_no_depth_limit() {
     app.circuit.schedule_now(switch);
     app.advance_circuit(SETTLE_TICKS);
 
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::Low);
+    assert_eq!(
+        app.circuit.signal_at(out).only_level(),
+        simlogix_core::Level::Low
+    );
 }
 
 #[test]
@@ -1266,7 +1278,10 @@ fn a_switch_saved_closed_is_closed_when_the_project_is_opened() {
 
     let switch = app.placed[0].id();
     let net = app.circuit.pins(switch)[0].net;
-    assert_eq!(app.circuit.signal_at(net), simlogix_core::Level::High);
+    assert_eq!(
+        app.circuit.signal_at(net).only_level(),
+        simlogix_core::Level::High
+    );
 }
 
 #[test]
@@ -1285,7 +1300,10 @@ fn a_switch_saved_open_is_open_when_the_project_is_opened() {
     let app = SimLogixApp::from_project(&project, 0);
 
     let net = app.circuit.pins(app.placed[0].id())[0].net;
-    assert_eq!(app.circuit.signal_at(net), simlogix_core::Level::Low);
+    assert_eq!(
+        app.circuit.signal_at(net).only_level(),
+        simlogix_core::Level::Low
+    );
 }
 
 #[test]
@@ -1386,7 +1404,7 @@ fn a_clock_still_ticks_after_the_project_is_reopened() {
         .expect("the clock came back")
         .id();
     let net = app.circuit.pins(clock)[0].net;
-    let before = app.circuit.signal_at(net);
+    let before = app.circuit.signal_at(net).only_level();
 
     // A clock beats every sixty ticks, so it has to turn over within sixty
     // of them wherever the load left it.
@@ -1394,7 +1412,7 @@ fn a_clock_still_ticks_after_the_project_is_reopened() {
         app.step(1);
     }
     assert_ne!(
-        app.circuit.signal_at(net),
+        app.circuit.signal_at(net).only_level(),
         before,
         "sixty ticks after a reopen and the clock never moved"
     );

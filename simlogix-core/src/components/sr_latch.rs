@@ -1,7 +1,8 @@
 use std::cell::Cell;
 
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// An SR latch: `Set` drives `Q` high, `Reset` drives it low, and with
 /// neither asserted it holds whatever it was last told.
@@ -42,13 +43,15 @@ impl SrLatch {
 }
 
 impl Component for SrLatch {
-    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
-        let next = match inputs {
-            [set, reset] => next_state(*set, *reset, self.state.get()),
-            _ => Level::Unknown,
-        };
-        self.state.set(next);
-        vec![next, complement(next)]
+    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(inputs, |inputs| {
+            let next = match inputs {
+                [set, reset] => next_state(*set, *reset, self.state.get()),
+                _ => Level::Unknown,
+            };
+            self.state.set(next);
+            vec![next, complement(next)]
+        })
     }
 }
 
@@ -87,10 +90,11 @@ fn complement(state: Level) -> Level {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     /// `[Q, Q̄]` after driving the two inputs.
     fn drive(latch: &SrLatch, set: Level, reset: Level) -> Vec<Level> {
-        latch.eval(&[set, reset])
+        eval_levels(latch, &[set, reset])
     }
 
     #[test]

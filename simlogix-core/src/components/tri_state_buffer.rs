@@ -1,5 +1,6 @@
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// A buffer with an enable: it passes its data input through while enabled,
 /// and stops driving altogether when it isn't.
@@ -17,11 +18,11 @@ use crate::level::Level;
 pub struct TriStateBuffer;
 
 impl Component for TriStateBuffer {
-    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
-        match inputs {
+    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(inputs, |inputs| match inputs {
             [data, enable] => vec![gated(*data, *enable)],
             _ => vec![Level::Unknown],
-        }
+        })
     }
 }
 
@@ -47,15 +48,16 @@ fn gated(data: Level, enable: Level) -> Level {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn it_passes_its_input_through_while_enabled() {
         assert_eq!(
-            TriStateBuffer.eval(&[Level::High, Level::High]),
+            eval_levels(&TriStateBuffer, &[Level::High, Level::High]),
             vec![Level::High]
         );
         assert_eq!(
-            TriStateBuffer.eval(&[Level::Low, Level::High]),
+            eval_levels(&TriStateBuffer, &[Level::Low, Level::High]),
             vec![Level::Low]
         );
     }
@@ -64,7 +66,7 @@ mod tests {
     fn it_stops_driving_when_disabled_whatever_its_input_says() {
         for data in [Level::High, Level::Low, Level::Unknown, Level::Error] {
             assert_eq!(
-                TriStateBuffer.eval(&[data, Level::Low]),
+                eval_levels(&TriStateBuffer, &[data, Level::Low]),
                 vec![Level::HighZ],
                 "a disabled buffer drives nothing, even with {data:?} on its input"
             );
@@ -76,11 +78,11 @@ mod tests {
         // `HighZ` here would assert that the buffer is deliberately off,
         // which would let the rest of the bus resolve as if it were absent.
         assert_eq!(
-            TriStateBuffer.eval(&[Level::High, Level::Unknown]),
+            eval_levels(&TriStateBuffer, &[Level::High, Level::Unknown]),
             vec![Level::Unknown]
         );
         assert_eq!(
-            TriStateBuffer.eval(&[Level::High, Level::HighZ]),
+            eval_levels(&TriStateBuffer, &[Level::High, Level::HighZ]),
             vec![Level::Unknown]
         );
     }
@@ -88,7 +90,7 @@ mod tests {
     #[test]
     fn a_faulted_enable_dominates() {
         assert_eq!(
-            TriStateBuffer.eval(&[Level::High, Level::Error]),
+            eval_levels(&TriStateBuffer, &[Level::High, Level::Error]),
             vec![Level::Error]
         );
     }
@@ -96,7 +98,7 @@ mod tests {
     #[test]
     fn a_faulted_input_passes_through_while_enabled() {
         assert_eq!(
-            TriStateBuffer.eval(&[Level::Error, Level::High]),
+            eval_levels(&TriStateBuffer, &[Level::Error, Level::High]),
             vec![Level::Error]
         );
     }

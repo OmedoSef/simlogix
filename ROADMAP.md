@@ -44,12 +44,11 @@ better at the thing it's for.
   argument for doing it sooner rather than later — the cost grows with
   everything built on top of the current shape.
 
-  ### How a signal is represented
+  ### How a signal is represented — **done**
 
-  The current seven-state scalar is renamed **`Level`**, and **`Signal`
-  becomes a list of `Level`** — a plain wire being a list of one. Every truth
-  table that exists keeps working on `Level` untouched, and a gate is a gate
-  applied bit by bit.
+  The seven-state scalar is now **`Level`**, and **`Signal` is a list of
+  `Level`**, least significant bit first, a plain wire being a list of one.
+  Every truth table still works on `Level` untouched.
 
   The alternative, recorded because it was considered and refused: pack the
   whole bus into fixed-size masks — `value`, `known`, `driving` over 64 bits
@@ -60,8 +59,27 @@ better at the thing it's for.
   it is where the transistor bug and the CMOS NAND bug were both found — and
   that is not worth trading for speed nobody has needed yet.
 
-  The cost of the chosen way is that `Signal` loses `Copy`. That is
-  mechanical, and the compiler shows the whole of it at once.
+  Two things made the change cheap, and are worth knowing before the next
+  one:
+
+  - **`component::scalar_eval`** wraps a component whose body is written in
+    levels. Every one of them is, today, so the conversion is named once
+    rather than written out twenty times — and the name says the truth:
+    *this component has no meaning on a bus yet*. It stops being true one
+    component at a time, as each learns what a bus means for it.
+  - **`component::eval_levels`** does the same for the tests, so all 108
+    call sites still say exactly what they said before. They are the
+    evidence that nothing changed meaning; rewriting their expectations by
+    hand is how that evidence would have been lost.
+
+  `resolve` already works **bit by bit**, by the rule a plain wire has always
+  used, and contributions of differing widths already come out `Error` on
+  every bit. `Signal::only_level` answers `Error` for anything but width one,
+  so a component with no meaning on a bus says so on the wire rather than
+  reporting its first bit.
+
+  Everything is still one bit wide: nothing yet *makes* a signal wider. That
+  is the next step, and it is where this starts to show.
 
   ### Width belongs to the net, not to the wire
 

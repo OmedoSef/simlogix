@@ -1,5 +1,5 @@
-use crate::component::Component;
-use crate::level::Level;
+use crate::component::{scalar_eval, Component};
+use crate::signal::Signal;
 
 /// An output sink: a single input pin and no outputs.
 ///
@@ -10,8 +10,8 @@ use crate::level::Level;
 pub struct Led;
 
 impl Component for Led {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        Vec::new()
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| Vec::new())
     }
 }
 
@@ -22,10 +22,12 @@ impl Component for Led {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
+    use crate::level::Level;
 
     #[test]
     fn led_has_no_outputs_regardless_of_its_input() {
-        assert_eq!(Led.eval(&[Level::High]), Vec::new());
-        assert_eq!(Led.eval(&[Level::Low]), Vec::new());
+        assert_eq!(eval_levels(&Led, &[Level::High]), Vec::new());
+        assert_eq!(eval_levels(&Led, &[Level::Low]), Vec::new());
     }
 }

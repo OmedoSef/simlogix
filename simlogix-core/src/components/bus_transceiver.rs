@@ -1,5 +1,6 @@
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// A bus transceiver: two bus-side pins, and a direction that says which one
 /// is listening and which one is talking.
@@ -63,11 +64,11 @@ impl BusTransceiver {
 }
 
 impl Component for BusTransceiver {
-    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
-        match inputs {
+    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(inputs, |inputs| match inputs {
             [a, b, dir, enable] => drive(*a, *b, *dir, self.asserted(*enable)),
             _ => vec![Level::Unknown, Level::Unknown],
-        }
+        })
     }
 }
 
@@ -97,10 +98,11 @@ fn drive(a: Level, b: Level, dir: Level, enabled: Level) -> Vec<Level> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     /// `[drive on A, drive on B]`.
     fn eval(part: BusTransceiver, a: Level, b: Level, dir: Level, enable: Level) -> Vec<Level> {
-        part.eval(&[a, b, dir, enable])
+        eval_levels(&part, &[a, b, dir, enable])
     }
 
     /// The pin level that switches each variant *on*.

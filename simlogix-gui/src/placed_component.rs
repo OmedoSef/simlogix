@@ -546,7 +546,7 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net))
+                    .map(|pin| circuit.signal_at(pin.net).only_level())
                     .unwrap_or(Level::Unknown);
                 let color = if signal == Level::High {
                     let [r, g, b] = properties.color.unwrap_or(DEFAULT_LED_COLOR);
@@ -712,7 +712,7 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net))
+                    .map(|pin| circuit.signal_at(pin.net).only_level())
                     .unwrap_or(Level::Unknown);
                 let readout = signal_letter(signal);
                 // The readout follows the signal, the body doesn't: which way
@@ -928,7 +928,7 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net))
+                    .map(|pin| circuit.signal_at(pin.net).only_level())
                     .unwrap_or(Level::Unknown);
                 // A probe reads out the net it's attached to, so it uses the
                 // very colour code that net is drawn in — its own duplicate
@@ -978,7 +978,7 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net))
+                    .map(|pin| circuit.signal_at(pin.net).only_level())
                     .unwrap_or(Level::Unknown);
                 // A clock is a signal source, so its symbol follows the same
                 // colour code as the wire it drives (`canvas::signal_color`)

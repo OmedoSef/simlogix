@@ -38,6 +38,7 @@ impl Bus {
     fn level(&self) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.shared)[2].net)
+            .only_level()
     }
 }
 
@@ -172,6 +173,7 @@ impl Transceiver {
     fn bus(&self, pin: usize) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.transceiver)[pin].net)
+            .only_level()
     }
 }
 
@@ -408,7 +410,7 @@ fn a_transmission_gate_passes_a_high_at_full_strength() {
     // The NMOS half can only deliver a weak high; the PMOS half delivers a
     // strong one and overrides it.
     let output = circuit.pins(n)[2].net;
-    assert_eq!(circuit.signal_at(output), Level::High);
+    assert_eq!(circuit.signal_at(output).only_level(), Level::High);
     assert!(
         !circuit.is_weakly_driven(output),
         "the PMOS half is what makes this a full-strength high"
@@ -466,7 +468,7 @@ fn a_lone_n_type_delivers_a_high_that_is_real_but_weak() {
     // threshold, which the next gate still reads as a one. Reporting
     // anything else here would make a working circuit look broken.
     let output = circuit.pins(n)[2].net;
-    assert_eq!(circuit.signal_at(output), Level::High);
+    assert_eq!(circuit.signal_at(output).only_level(), Level::High);
     // What's true and worth seeing is that it has no margin left.
     assert!(circuit.is_weakly_driven(output));
 }
@@ -535,5 +537,8 @@ fn a_lone_pass_transistor_loses_to_anything_pulling_the_other_way() {
 
     // Not a conflict: the strong driver simply wins, which is what a weak
     // level *means*. With the old ideal-switch model this was `Error`.
-    assert_eq!(circuit.signal_at(circuit.pins(n)[2].net), Level::Low);
+    assert_eq!(
+        circuit.signal_at(circuit.pins(n)[2].net).only_level(),
+        Level::Low
+    );
 }

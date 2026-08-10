@@ -108,7 +108,11 @@ fn the_four_rows_of_a_nand() {
         (true, true, Level::Low),
     ] {
         nand.drive(a, b);
-        assert_eq!(nand.circuit.signal_at(nand.y), expected, "A={a}, B={b}");
+        assert_eq!(
+            nand.circuit.signal_at(nand.y).only_level(),
+            expected,
+            "A={a}, B={b}"
+        );
     }
 }
 
@@ -119,7 +123,10 @@ fn the_series_node_is_undriven_when_the_lower_transistor_is_off() {
     // with no driver resolves to.
     let mut nand = build();
     nand.drive(true, false);
-    assert_eq!(nand.circuit.signal_at(nand.mid), Level::Unknown);
+    assert_eq!(
+        nand.circuit.signal_at(nand.mid).only_level(),
+        Level::Unknown
+    );
 }
 
 /// The mirror: two PMOS in series to VDD, two NMOS in parallel to ground.
@@ -188,6 +195,10 @@ fn the_four_rows_of_a_nor() {
         (true, true, Level::Low),
     ] {
         nor.drive(a, b);
-        assert_eq!(nor.circuit.signal_at(nor.y), expected, "A={a}, B={b}");
+        assert_eq!(
+            nor.circuit.signal_at(nor.y).only_level(),
+            expected,
+            "A={a}, B={b}"
+        );
     }
 }

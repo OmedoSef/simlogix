@@ -1,7 +1,8 @@
 use std::cell::Cell;
 
-use crate::component::Component;
+use crate::component::{scalar_eval, Component};
 use crate::level::Level;
+use crate::signal::Signal;
 
 /// A periodic source: alternates `Low`/`High` every time it's evaluated.
 ///
@@ -28,13 +29,15 @@ impl Clock {
 }
 
 impl Component for Clock {
-    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
-        let next = match self.state.get() {
-            Level::High => Level::Low,
-            _ => Level::High,
-        };
-        self.state.set(next);
-        vec![next]
+    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        scalar_eval(_inputs, |_inputs| {
+            let next = match self.state.get() {
+                Level::High => Level::Low,
+                _ => Level::High,
+            };
+            self.state.set(next);
+            vec![next]
+        })
     }
 }
 
@@ -45,12 +48,13 @@ impl Component for Clock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::eval_levels;
 
     #[test]
     fn clock_alternates_high_and_low_each_evaluation() {
         let clock = Clock::new();
-        assert_eq!(clock.eval(&[]), vec![Level::High]);
-        assert_eq!(clock.eval(&[]), vec![Level::Low]);
-        assert_eq!(clock.eval(&[]), vec![Level::High]);
+        assert_eq!(eval_levels(&clock, &[]), vec![Level::High]);
+        assert_eq!(eval_levels(&clock, &[]), vec![Level::Low]);
+        assert_eq!(eval_levels(&clock, &[]), vec![Level::High]);
     }
 }

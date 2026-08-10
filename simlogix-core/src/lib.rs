@@ -6,6 +6,7 @@ mod components;
 mod level;
 mod net;
 mod pin;
+mod signal;
 
 pub use circuit::{Circuit, ComponentId, UnstableCircuit};
 pub use component::Component;
@@ -30,3 +31,4 @@ pub use components::xor::Xor;
 pub use level::Level;
 pub use net::NetId;
 pub use pin::{Pin, PinDirection};
+pub use signal::Signal;

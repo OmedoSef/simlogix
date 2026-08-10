@@ -2118,13 +2118,13 @@ impl SimLogixApp {
             return;
         };
         let net = net.net;
-        let before = self.circuit.signal_at(net);
+        let before = self.circuit.signal_at(net).only_level();
         for _ in 0..MAX_EDGE_EVENTS {
             let Some(tick) = self.circuit.next_event_tick() else {
                 return;
             };
             self.step(tick.saturating_sub(self.circuit.now()).max(1));
-            if self.circuit.signal_at(net) != before {
+            if self.circuit.signal_at(net).only_level() != before {
                 return;
             }
         }
