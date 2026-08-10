@@ -47,7 +47,7 @@ use crate::properties::Properties;
 ///   such as a button's resting state or a LED's colour). Absent means the
 ///   behaviour that was there before, so nothing needed migrating.
 /// - `8` — a wire can carry a colour of its own.
-pub const CURRENT_VERSION: u32 = 10;
+pub const CURRENT_VERSION: u32 = 11;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";
@@ -612,6 +612,44 @@ mod v1 {
 
 #[cfg(test)]
 mod tests {
+    /// `scripts/set-format-version.py` decides whether a project can be
+    /// stamped back to an older format, from a table of which versions only
+    /// *added* to it. A version missing from that table is refused, so the
+    /// tool cannot quietly guess — but it would then refuse the very file it
+    /// exists for, and only once someone was mid-move between machines.
+    ///
+    /// So the table is held to reaching here instead. Bumping the format
+    /// without saying which kind of change it was fails the build, which is
+    /// the same bargain `SAVED_NAMES` makes: a thing written in one place and
+    /// forgotten in another is caught by the pair being checked together.
+    ///
+    /// `include_str!` rather than reading at run time, so editing the script
+    /// rebuilds this.
+    #[test]
+    fn the_downgrade_tool_knows_about_every_format_we_write() {
+        let script = include_str!("../../scripts/set-format-version.py");
+        let table: Vec<u32> = script
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let (version, rest) = line.split_once(": ")?;
+                // Only the table's own rows: `7: True,  # ...`
+                rest.starts_with("True,")
+                    .then_some(())
+                    .or_else(|| rest.starts_with("False,").then_some(()))?;
+                version.parse().ok()
+            })
+            .collect();
+
+        assert_eq!(
+            table,
+            (1..=CURRENT_VERSION).collect::<Vec<_>>(),
+            "scripts/set-format-version.py must list every format from 1 to \
+             {CURRENT_VERSION}, in order, saying whether each only added to \
+             the format"
+        );
+    }
+
     use super::*;
 
     #[test]

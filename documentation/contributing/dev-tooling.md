@@ -53,13 +53,28 @@ checks before reading anything else, and it refuses a document newer than
 itself — so a file saved from a working tree cannot be opened by the last
 release until that release catches up.
 
-Only the stamp changes. Nothing is stripped, so anything the older build
-cannot read is still in the file and comes back when you open it here
-again — but that build **writes back only what it understood**, so saving
-there drops it for good. Hence the backup, written beside the file, which
-is an ordinary project: rename it to open it, or type its full name into
-the open dialog, since the format is recognised from the bytes rather than
-the extension.
+Only the stamp changes, and only when changing it is honest. Most versions
+since 6 added optional fields and nothing else, so an older build reads such
+a document correctly, just without the newer bits. Some earlier ones changed
+the shape of what was already there — wires, endpoints, the container
+itself, the way a component kind is written — and stamping across one of
+those produces a file that is *misread* rather than refused, which is the
+worst of the three outcomes. The tool keeps a table of which is which,
+refuses to cross a version that changed the format, and says which one
+stopped it. A version it has never heard of is refused too, rather than
+guessed at.
+
+That table is held to reaching `CURRENT_VERSION` by a test, so bumping the
+format without saying which kind of change it was fails the build — rather
+than being found out by someone mid-move between machines. Same bargain as
+`SAVED_NAMES`: two things that have to agree are checked together.
+
+Nothing is stripped, so anything the older build cannot read is still in the
+file and comes back when you open it here again — but that build **writes
+back only what it understood**, so saving there drops it for good. Hence the
+backup, written beside the file, which is an ordinary project: rename it to
+open it, or type its full name into the open dialog, since the format is
+recognised from the bytes rather than the extension.
 
 It reads the result back before reporting success, and refuses if any entry
 other than `project.json` came out changed. It runs on the only copy of

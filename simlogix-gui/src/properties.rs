@@ -341,6 +341,17 @@ pub fn show_pin(
     }
 
     ui.add_space(8.0);
+    // Beside the lead, since that is what it changes: the bubble takes the
+    // last of it, against the body.
+    if ui
+        .checkbox(&mut pin.inverted, strings.pin_inverted)
+        .on_hover_text(strings.pin_inverted_hint)
+        .changed()
+    {
+        result.edit_started = true;
+    }
+
+    ui.add_space(8.0);
     if ui
         .checkbox(&mut pin.show_name, strings.pin_show_name)
         .changed()

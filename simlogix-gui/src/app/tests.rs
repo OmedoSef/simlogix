@@ -295,6 +295,7 @@ fn a_circuit_with_a_symbol_of_its_own_stops_showing_the_generated_box() {
             lead: 10.0,
             show_name: true,
             name_offset: (0.0, 0.0),
+            inverted: false,
         }],
         show_name: true,
     });
@@ -331,6 +332,7 @@ fn a_symbol_drawn_away_from_its_origin_still_lands_under_the_pointer() {
             lead: 20.0,
             show_name: false,
             name_offset: (0.0, 0.0),
+            inverted: false,
         }],
         show_name: false,
     });

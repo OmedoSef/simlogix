@@ -947,7 +947,15 @@ fn arc_around(center: Pos2, radius: f32, start_angle: f32, end_angle: f32) -> Ve
 }
 
 /// Inversion bubble radius, used by every inverted gate (NAND/NOR/XNOR/NOT).
-const BUBBLE_RADIUS: f32 = 3.5;
+pub const BUBBLE_RADIUS: f32 = 3.5;
+
+/// The inversion bubble on its own, for a symbol that places its own pins.
+///
+/// The same radius every gate in this file draws, so one you drew and one
+/// we drew do not come out slightly different sizes on the same schematic.
+pub fn draw_bubble(painter: &Painter, center: Pos2, stroke: Stroke) {
+    painter.circle_stroke(center, BUBBLE_RADIUS, stroke);
+}
 
 /// Draws a small inversion "bubble" just past `tip` along +x — canonical,
 /// pre-rotation space, same as every other point in a `draw_xxx` function;

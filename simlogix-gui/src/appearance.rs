@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use crate::canvas::{self, Rotation};
 use crate::palette::ComponentKind;
 use crate::placed_component::{instance_height, InstancePort};
-use crate::symbol::{draw_pin, rotate, rotate_rect, TextLayer};
+use crate::symbol::{self, draw_pin, rotate, rotate_rect, TextLayer};
 
 /// How wide the generated box's body is, as a fraction of the box.
 ///
@@ -197,6 +197,17 @@ pub struct PinSlot {
     pub lead: f32,
     /// Whether to write the port's name at the lead's inner end.
     pub show_name: bool,
+    /// Draws the inversion bubble against the body, with the lead starting
+    /// past it.
+    ///
+    /// A property of the pin rather than a circle you place yourself: drawn
+    /// by hand it stays where it was put when the pin moves, and it comes
+    /// out whatever size you happened to drag — while every bubble the
+    /// application draws is one radius, and a schematic mixing two reads as
+    /// a mistake. Marking the pin also survives the lead being lengthened,
+    /// which is the moment a hand-drawn one comes adrift.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inverted: bool,
     /// Nudges that name away from where it would otherwise land, in the
     /// symbol's own coordinates.
     ///
@@ -291,6 +302,7 @@ impl Appearance {
                     lead,
                     show_name: true,
                     name_offset: (0.0, 0.0),
+                    inverted: false,
                 }
             })
             .collect();
@@ -358,8 +370,28 @@ impl Appearance {
             .map(|(index, pin)| {
                 let (dx, dy) = pin.facing.inward();
                 let inner = (pin.at.0 + dx * pin.lead, pin.at.1 + dy * pin.lead);
-                if pin.lead > 0.0 {
-                    painter.line_segment([at(pin.at), at(inner)], stroke);
+                // The bubble sits against the body and the lead stops at its
+                // outer edge, so the line never crosses the circle — the way
+                // every built-in inverted output is drawn.
+                let bubble = 2.0 * symbol::BUBBLE_RADIUS;
+                let stops_at = if pin.inverted {
+                    pin.lead - bubble
+                } else {
+                    pin.lead
+                };
+                if stops_at > 0.0 {
+                    let end = (pin.at.0 + dx * stops_at, pin.at.1 + dy * stops_at);
+                    painter.line_segment([at(pin.at), at(end)], stroke);
+                }
+                if pin.inverted {
+                    // Against the body even when the lead is too short to
+                    // hold it: a bubble that vanished at short leads would
+                    // read as the mark having been forgotten.
+                    let centre = (
+                        inner.0 - dx * symbol::BUBBLE_RADIUS,
+                        inner.1 - dy * symbol::BUBBLE_RADIUS,
+                    );
+                    symbol::draw_bubble(painter, at(centre), stroke);
                 }
                 let point = at(pin.at);
                 draw_pin(painter, point, color);
@@ -711,18 +743,22 @@ mod tests {
     }
 
     #[test]
-    fn a_nudged_name_is_stored_and_an_old_symbol_reads_back_without_one() {
+    fn a_pin_stores_what_it_was_given_and_an_old_one_reads_back_at_rest() {
         let mut symbol = Appearance::generated(&ports(1, 0));
         symbol.pins[0].name_offset = (-SHAPE_SNAP, 2.0 * SHAPE_SNAP);
+        symbol.pins[0].inverted = true;
         let json = serde_json::to_string(&symbol).expect("serialisable");
         assert!(json.contains("name_offset"));
+        assert!(json.contains("inverted"));
         let back: Appearance = serde_json::from_str(&json).expect("readable");
         assert_eq!(back.pins[0].name_offset, (-SHAPE_SNAP, 2.0 * SHAPE_SNAP));
+        assert!(back.pins[0].inverted);
 
-        // And a pin written before the field existed still reads, at rest.
+        // And a pin written before either field existed still reads, at rest.
         let old = r#"{"at":[0.0,0.0],"facing":"Left","lead":10.0,"show_name":true}"#;
         let pin: PinSlot = serde_json::from_str(old).expect("readable");
         assert_eq!(pin.name_offset, (0.0, 0.0));
+        assert!(!pin.inverted);
     }
 
     #[test]
@@ -954,14 +990,17 @@ mod tests {
                 lead: 10.0,
                 show_name: false,
                 name_offset: (0.0, 0.0),
+                inverted: false,
             }],
             show_name: true,
         };
 
         let json = serde_json::to_string(&symbol).expect("serialisable");
-        // A symbol that never nudges a name says nothing about it, so one
-        // written by an earlier build is what a later one writes back.
+        // A symbol that never nudges a name nor inverts a pin says nothing
+        // about either, so one written by an earlier build is exactly what a
+        // later one writes back.
         assert!(!json.contains("name_offset"));
+        assert!(!json.contains("inverted"));
         let back: Appearance = serde_json::from_str(&json).expect("readable");
         assert_eq!(back, symbol);
     }

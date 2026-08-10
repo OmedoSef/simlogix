@@ -94,6 +94,7 @@ to do anything, and is written back as `.slgx` next time you save.
 | 8 | Wires can carry a colour. |
 | 9 | A circuit can carry a symbol of its own. |
 | 10 | A pin's name can be nudged clear of the line art. |
+| 11 | A pin can carry an inversion bubble. |
 
 ## Circuits
 

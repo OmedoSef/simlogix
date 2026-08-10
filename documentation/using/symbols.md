@@ -40,8 +40,15 @@ Select a pin and the properties panel shows:
 | **Points** | Which way the pin faces. The lead is drawn the other way, and the port's name is written at its inner end. |
 | **Position** | Where it sits, in whole grid steps. |
 | **Lead length** | How far the lead runs back towards the body. Zero draws none. |
+| **Inverted** | Draws the inversion bubble against the body, the lead starting past it. |
 | **Show the port's name** | Whether the name is written beside it. |
 | **Nudge the name** | Moves that name, in quarter-grid steps. |
+
+**Inverted** saves you drawing the bubble as a circle of your own. It is
+worth using rather than doing by hand: a circle you placed stays where you
+put it when the pin moves or its lead grows, and it comes out whatever size
+you happened to drag — while every bubble the application draws is one
+size, and a schematic mixing two reads as a mistake.
 
 **Nudge the name** exists because the automatic place — a fixed step in
 from the lead — is right until your line art is in the way. A name against
