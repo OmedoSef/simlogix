@@ -62,6 +62,12 @@ pub enum ComponentKind {
     OutputPort,
     InOutPort,
     Switch,
+    /// A source with three positions: driving high, driving low, and
+    /// letting go entirely. The engine component is the one a bidirectional
+    /// port uses — the same argument as `Switch` against `Button`: two
+    /// palette entries, two symbols, one component, because what differs is
+    /// what it *means* on a schematic, not what it does to a net.
+    TriStateSource,
     /// An instance of another circuit in this project, by its path —
     /// `adder`, or `alu/adder` when it's filed in a folder. Deliberately
     /// *not* qualified by library: a local reference must survive the
@@ -76,7 +82,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 24] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 25] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -101,6 +107,7 @@ impl ComponentKind {
         (ComponentKind::OutputPort, "OutputPort"),
         (ComponentKind::InOutPort, "InOutPort"),
         (ComponentKind::Switch, "Switch"),
+        (ComponentKind::TriStateSource, "TriStateSource"),
     ];
 
     fn saved_name(&self) -> Option<&'static str> {
@@ -200,6 +207,7 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
             &[
                 ComponentKind::Button,
                 ComponentKind::Switch,
+                ComponentKind::TriStateSource,
                 ComponentKind::Clock,
                 ComponentKind::Ground,
                 ComponentKind::Power,

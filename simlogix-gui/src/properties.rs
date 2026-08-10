@@ -66,6 +66,16 @@ impl Properties {
     }
 
     /// Whether this port's click cycle includes the undriven position.
+    /// Whether clicking this component offers the undriven position.
+    ///
+    /// A tri-state source always does — being able to let go is the whole of
+    /// what it is, and a two-state one would just be a `Switch`. A port
+    /// *declares* it, because there the number of states is a promise made
+    /// to whatever will drive the pin from outside.
+    pub fn cycles_undriven(&self, kind: &ComponentKind) -> bool {
+        *kind == ComponentKind::TriStateSource || self.is_tri_state()
+    }
+
     pub fn is_tri_state(&self) -> bool {
         self.tri_state.unwrap_or(false)
     }
@@ -571,18 +581,24 @@ pub fn show(
                 }
             });
         }
-        // The two ports that drive. An output only reads, so it has neither
-        // a resting value nor a say in how many states the interface has.
-        ComponentKind::InputPort | ComponentKind::InOutPort => {
-            ui.add_space(8.0);
-            let mut tri_state = properties.is_tri_state();
-            if ui
-                .checkbox(&mut tri_state, strings.property_tri_state)
-                .on_hover_text(strings.property_tri_state_hint)
-                .changed()
-            {
-                edit_started = true;
-                properties.tri_state = tri_state.then_some(true);
+        // Everything that drives a level you set by hand. An output port
+        // only reads, so it has neither a resting value nor a say in how
+        // many states the interface has.
+        ComponentKind::InputPort | ComponentKind::InOutPort | ComponentKind::TriStateSource => {
+            // A source has nothing to declare: three positions is what it
+            // is. A port's count is a promise to whatever drives its pin
+            // from outside, so there it is a choice.
+            if *kind != ComponentKind::TriStateSource {
+                ui.add_space(8.0);
+                let mut tri_state = properties.is_tri_state();
+                if ui
+                    .checkbox(&mut tri_state, strings.property_tri_state)
+                    .on_hover_text(strings.property_tri_state_hint)
+                    .changed()
+                {
+                    edit_started = true;
+                    properties.tri_state = tri_state.then_some(true);
+                }
             }
 
             ui.add_space(8.0);

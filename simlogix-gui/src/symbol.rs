@@ -14,6 +14,7 @@ use egui::{pos2, Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke};
 
 use crate::canvas::Rotation;
 use crate::palette::ComponentKind;
+use simlogix_core::PortLevel;
 
 const PIN_RADIUS: f32 = 3.0;
 
@@ -133,6 +134,10 @@ pub struct SymbolState<'a> {
     pub label_color: Option<Color32>,
     /// `Button`: whether its cap is currently down.
     pub pressed: bool,
+    /// `TriStateSource`: which way its lever is thrown. The readout says
+    /// what the *net* settled on, which is a different question — the whole
+    /// point of the component is to let go and watch something else answer.
+    pub level: Option<PortLevel>,
 }
 
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
@@ -176,6 +181,9 @@ pub fn draw(
         ),
         ComponentKind::InOutPort => {
             draw_port(painter, rect, rotation, stroke, color, 0, state, text_layer)
+        }
+        ComponentKind::TriStateSource => {
+            draw_tri_state_source(painter, rect, rotation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke, text_layer),
         // A circuit instance draws its own generated box, not a fixed symbol.
@@ -387,6 +395,93 @@ fn draw_switch(
 
     PinPositions {
         inputs: vec![],
+        outputs: vec![r(pin)],
+    }
+}
+
+/// A three-position source: a change-over lever whose pole is the pin, one
+/// throw on each rail, and a centre position touching neither.
+///
+/// The lever *is* the setting, the way a `Button`'s sunk cap is — up for
+/// high, down for low, level for letting go. Which throw is which is said by
+/// the rails themselves: a bar for the supply, a ground tick below. Marks
+/// rather than letters, so the appearance convention holds.
+///
+/// The readout is a different fact and is kept: with the lever centred, what
+/// the net carries is whatever *else* is driving it, which is precisely what
+/// you place this component to find out.
+#[allow(clippy::too_many_arguments)]
+fn draw_tri_state_source(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    color: Color32,
+    state: SymbolState<'_>,
+    text_layer: &TextLayer,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+
+    let pin = pos2(rect.right(), c.y);
+    let pivot = pos2(c.x + rect.width() * 0.14, c.y);
+    let throw = rect.height() * 0.3;
+    let contact_x = c.x - rect.width() * 0.06;
+
+    painter.line_segment([r(pivot), r(pin)], stroke);
+    painter.circle_stroke(r(pivot), 2.5, stroke);
+
+    // The supply, above; ground, below. Drawn as the two marks every
+    // schematic uses, which is what lets the lever's direction be read
+    // without writing "1" and "0" on it.
+    let bar = 5.0;
+    painter.line_segment(
+        [
+            r(pos2(contact_x - bar, c.y - throw - 4.0)),
+            r(pos2(contact_x + bar, c.y - throw - 4.0)),
+        ],
+        stroke,
+    );
+    for (index, half) in [bar, bar * 0.6, bar * 0.25].into_iter().enumerate() {
+        let y = c.y + throw + 4.0 + index as f32 * 2.5;
+        painter.line_segment(
+            [r(pos2(contact_x - half, y)), r(pos2(contact_x + half, y))],
+            stroke,
+        );
+    }
+    for side in [-1.0, 1.0] {
+        let contact = pos2(contact_x, c.y + throw * side);
+        painter.circle_stroke(r(contact), 2.0, stroke);
+        painter.line_segment(
+            [r(contact), r(pos2(contact_x, contact.y + 4.0 * side))],
+            stroke,
+        );
+    }
+
+    // Centred, the lever stops short of both contacts: the gap is the whole
+    // of what "not driving" looks like, so it is drawn wide enough to read.
+    let tip = match state.level.unwrap_or_default() {
+        PortLevel::High => pos2(contact_x, c.y - throw),
+        PortLevel::Low => pos2(contact_x, c.y + throw),
+        PortLevel::Undriven => pos2(contact_x - 3.0, c.y),
+    };
+    painter.line_segment([r(pivot), r(tip)], stroke);
+
+    text_layer.text(
+        r(pos2(rect.left() + 7.0, c.y)),
+        Align2::CENTER_CENTER,
+        state.label,
+        11.0,
+        state.label_color.unwrap_or(color),
+    );
+
+    draw_pin(painter, r(pin), color);
+
+    // The one point, in both lists — as `draw_port` does, and for the same
+    // reason: there is a single place to connect to, and it is not worth a
+    // caller having to know which side of the symbol calls it what.
+    PinPositions {
+        inputs: vec![r(pin)],
         outputs: vec![r(pin)],
     }
 }

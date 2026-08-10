@@ -40,7 +40,8 @@ the last one to drop back to Select.
 
 Clicking the highlighted palette entry again cancels it, as does Escape.
 
-The palette is grouped into **Sources** (Button, Clock, GND, PWR),
+The palette is grouped into **Sources** (Button, Switch, Tri-state source,
+Clock, GND, PWR),
 **Outputs** (LED, Probe), **Transistors** (NMOS, PMOS) and **Gates**
 (AND, OR, NAND, NOR, XOR, XNOR, NOT, Buffer). Each category folds away, and
 the panel edge can be dragged to resize it.
@@ -146,7 +147,7 @@ project file.
 | **Pressed at rest** | Button | The button rests pressed, so clicking it *releases* it. |
 | **Closed** | Switch | Where the switch is now, and how it will be saved. |
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
-| **Resting value** | Input, Bidirectional | Where the port sits when the project opens. |
+| **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
 
 Two of those look alike and are not. A **button's** setting is its *resting*
@@ -239,6 +240,27 @@ The states you'll see on a shared net:
 An enable that nothing drives isn't the same as an enable held low: the
 buffer reports that it doesn't know whether it should be driving, rather
 than assuming it shouldn't.
+
+### Driving a shared net by hand
+
+Testing any of this needs a source that can *stop* driving, and a switch
+cannot: open, it still puts a low on the wire. That is what the **Tri-state
+source** is for. Clicking it steps through three positions — driving high,
+driving low, and letting go — drawn as a change-over lever thrown to the
+supply, to ground, or to neither.
+
+Letting go is a real release, not a low: the net is then carried by whatever
+else is on it, which is exactly what you want to watch when you are testing
+a buffer or a transceiver.
+
+It shows the net's own value in the same one-letter readout a probe uses,
+and that is deliberately a different fact from the lever: with the lever
+centred, the letter is telling you what *something else* decided.
+
+A tri-state source has no three-state setting of its own, unlike the ports —
+three positions is the whole of what it is, and a two-position one is just a
+switch. It does have a **Resting value**, which is where it sits when the
+project is opened.
 
 ### Both ways at once
 

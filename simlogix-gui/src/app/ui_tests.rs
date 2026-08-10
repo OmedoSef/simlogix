@@ -34,7 +34,7 @@
 
 use egui_kittest::Harness;
 
-use simlogix_core::ComponentId;
+use simlogix_core::{ComponentId, Signal};
 
 use super::SimLogixApp;
 use super::WireEndpoint;
@@ -325,6 +325,38 @@ fn dragging_a_component_does_nothing_in_the_simulation_view() {
 fn click_at(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {
     press_at(harness, canvas);
     release(harness, canvas);
+}
+
+#[test]
+fn a_tri_state_source_can_be_clicked_into_letting_go() {
+    // The reason the component exists: without a third position there is
+    // no way to leave a bus undriven and watch something else answer for
+    // it, which is the only honest way to test a bidirectional buffer.
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::TriStateSource, at);
+    step(&mut harness);
+
+    let signal = |harness: &Harness<'_, SimLogixApp>| {
+        let app = harness.state();
+        let net = app.circuit.pins(id)[0].net;
+        app.circuit.signal_at(net)
+    };
+    // Nothing else is on this net, so what it reads *is* what the source
+    // is putting on it.
+    assert_eq!(signal(&harness), Signal::Unknown);
+
+    click_at(&mut harness, at);
+    assert_eq!(signal(&harness), Signal::High);
+    click_at(&mut harness, at);
+    assert_eq!(signal(&harness), Signal::Low);
+
+    // And round to letting go, without a property having to be set for it.
+    // A port would have gone back to high here: there the number of states
+    // is declared, because it is a promise to whatever drives the pin from
+    // outside. A source has nothing to declare.
+    click_at(&mut harness, at);
+    assert_eq!(signal(&harness), Signal::Unknown);
 }
 
 fn secondary_click_at(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {

@@ -149,11 +149,14 @@ enum Shape {
         /// built, rather than worked out again on every frame.
         appearance: Appearance,
     },
-    /// A circuit boundary port. `level` is present only on an input, the
-    /// one port whose value is set by hand — clicking it *latches*, unlike
-    /// a `Button`, because a port stands for what a parent will drive and
-    /// that doesn't spring back.
-    Port {
+    /// One pin carrying a level you set by hand, in three positions: the
+    /// circuit boundary ports, and the plain tri-state source. `level` is
+    /// absent on an output port, the one that only ever reads.
+    ///
+    /// Clicking *latches*, unlike a `Button`: a port stands for what a
+    /// parent will drive, and a source for a switch that stays where it is
+    /// put — neither springs back.
+    HandSet {
         kind: ComponentKind,
         level: Option<Rc<Cell<PortLevel>>>,
     },
@@ -218,13 +221,13 @@ impl PlacedComponent {
         Self::new(id, center, Shape::SrLatch)
     }
 
-    pub fn port(
+    pub fn hand_set(
         id: ComponentId,
         center: Pos2,
         kind: ComponentKind,
         level: Option<Rc<Cell<PortLevel>>>,
     ) -> Self {
-        Self::new(id, center, Shape::Port { kind, level })
+        Self::new(id, center, Shape::HandSet { kind, level })
     }
 
     pub fn instance(
@@ -317,7 +320,7 @@ impl PlacedComponent {
         // the engine reads — on load and whenever it's edited. Same idea as
         // a button's `pressed`, except a latching port has no "held" state
         // to settle itself from, so it's pushed explicitly.
-        if let Shape::Port {
+        if let Shape::HandSet {
             level: Some(level), ..
         } = &self.shape
         {
@@ -344,7 +347,7 @@ impl PlacedComponent {
             Shape::Button { .. } => ComponentKind::Button,
             Shape::Switch { .. } => ComponentKind::Switch,
             Shape::Led => ComponentKind::Led,
-            Shape::Port { kind, .. } => kind.clone(),
+            Shape::HandSet { kind, .. } => kind.clone(),
             Shape::Instance { path, .. } => ComponentKind::Circuit(path.clone()),
             Shape::Transistor(kind)
             | Shape::BusTransceiver(kind)
@@ -688,7 +691,7 @@ impl PlacedComponent {
                     pins,
                 }
             }
-            Shape::Port { level, .. } => {
+            Shape::HandSet { level, .. } => {
                 // Every port shows what its net resolves to, driving or not:
                 // on an output that's the whole point, and on the other two
                 // it's what tells you a value you set is being fought over.
@@ -720,6 +723,7 @@ impl PlacedComponent {
                     SymbolState {
                         label: readout,
                         label_color: Some(readout_color),
+                        level: level.as_ref().map(|level| level.get()),
                         ..Default::default()
                     },
                     &text_layer,
@@ -734,7 +738,7 @@ impl PlacedComponent {
                 // canvas can't also change what it carries.
                 if let Some(level) = level {
                     if response.clicked() {
-                        level.set(level.get().next(properties.is_tri_state()));
+                        level.set(level.get().next(properties.cycles_undriven(&kind)));
                         circuit.schedule_now(id);
                         input_changed = true;
                     }

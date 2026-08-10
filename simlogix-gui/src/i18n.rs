@@ -225,6 +225,7 @@ pub struct Strings {
 
     pub component_button: &'static str,
     pub component_switch: &'static str,
+    pub component_tri_state_source: &'static str,
     pub component_led: &'static str,
     pub component_nmos: &'static str,
     pub component_pmos: &'static str,
@@ -304,6 +305,7 @@ impl Strings {
         match kind {
             ComponentKind::Button => self.component_button,
             ComponentKind::Switch => self.component_switch,
+            ComponentKind::TriStateSource => self.component_tri_state_source,
             ComponentKind::Led => self.component_led,
             ComponentKind::NTransistor => self.component_nmos,
             ComponentKind::PTransistor => self.component_pmos,
@@ -537,6 +539,7 @@ static ENGLISH: Strings = Strings {
 
     component_button: "Button",
     component_switch: "Switch",
+    component_tri_state_source: "Tri-state source",
     component_led: "LED",
     component_nmos: "NMOS",
     component_pmos: "PMOS",
@@ -795,6 +798,7 @@ static FRENCH: Strings = Strings {
 
     component_button: "Bouton",
     component_switch: "Interrupteur",
+    component_tri_state_source: "Source trois états",
     component_led: "LED",
     component_nmos: "NMOS",
     component_pmos: "PMOS",
@@ -1053,6 +1057,7 @@ static ITALIAN: Strings = Strings {
 
     component_button: "Pulsante",
     component_switch: "Interruttore",
+    component_tri_state_source: "Sorgente tre stati",
     component_led: "LED",
     component_nmos: "NMOS",
     component_pmos: "PMOS",

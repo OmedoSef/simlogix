@@ -808,7 +808,10 @@ impl SimLogixApp {
                 // needs no variant of its own.
                 PlacedComponent::two_input_gate(id, center, kind)
             }
-            ComponentKind::InputPort | ComponentKind::OutputPort | ComponentKind::InOutPort => {
+            ComponentKind::InputPort
+            | ComponentKind::OutputPort
+            | ComponentKind::InOutPort
+            | ComponentKind::TriStateSource => {
                 let net = self.circuit.add_net();
                 // The pin points the way the value crosses the boundary: an
                 // input drives the internal net, an output reads it, and a
@@ -821,6 +824,13 @@ impl SimLogixApp {
                     ComponentKind::OutputPort => {
                         (Box::new(CircuitOutput), PinDirection::Input, None)
                     }
+                    // A source only ever drives, so `Output` rather than
+                    // `InOut`: what it shows is read off the net by the GUI,
+                    // not through a pin of its own.
+                    ComponentKind::TriStateSource => {
+                        let (port, level) = CircuitPort::bidirectional();
+                        (Box::new(port), PinDirection::Output, Some(level))
+                    }
                     _ => {
                         let (port, level) = CircuitPort::bidirectional();
                         (Box::new(port), PinDirection::InOut, Some(level))
@@ -830,7 +840,7 @@ impl SimLogixApp {
                     .circuit
                     .add_component(component, vec![Pin { direction, net }]);
                 self.circuit.schedule_now(id);
-                PlacedComponent::port(id, center, kind, level)
+                PlacedComponent::hand_set(id, center, kind, level)
             }
             ComponentKind::Circuit(path) => {
                 // Refusing (a missing circuit, or one that contains itself)
