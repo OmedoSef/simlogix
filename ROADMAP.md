@@ -97,43 +97,16 @@ Not user-visible, but they decide how expensive everything above is.
   The seams are visible enough: the canvas interaction, the menu bar, the
   panels, and the appearance editor are four things sharing one file.
 
-- [ ] 🚧 **Tests at the interface level**
+- [x] **Tests at the interface level** — done; see `simlogix-gui/src/ui_tests.rs`
+  and the note in [CLAUDE.md](CLAUDE.md). Fourteen tests drive the real
+  application through `egui_kittest`, each checked to fail against the bug it
+  describes.
 
-  A pattern worth naming: the group drag, copy/paste, the view framing, two
-  leaks in the simulation mode, and the paint order of the text layer were
-  all bugs in the *wiring* between correct pieces — and the unit tests stayed
-  green through all of them. Five occurrences is a category, not bad luck.
-
-  `egui_kittest` drives the real application in `src/ui_tests.rs`. Every
-  test there was checked to *fail* against the bug it describes, by putting
-  the bug back — a regression test that has never failed proves nothing, and
-  that stays the rule for the ones below.
-
-  - [x] A harness running the whole application, `Ui` and all
-  - [x] `Delete` removes a selected component, and does nothing in the
-        simulation view
-  - [x] Copy and paste, which is where egui's `Event::Copy` caught us out
-  - [x] Pasting refused in the simulation view
-  - [x] A way to reach canvas coordinates from a test — the transform is
-        recorded while drawing, since that is the only place it is known
-  - [x] Dragging a multi-selection, which once came apart by one frame's
-        delta. Asserted **mid-drag**: everything snaps to the grid on release
-        and snapping hides an error smaller than a grid step, so a released
-        drag came out equal with the bug back in
-  - [x] Dragging a component in the simulation view does nothing
-  - [x] Dragging a wire's waypoint, and the right-click that cuts a wire —
-        cutting a *middle* segment, since cutting the first leaves nothing
-        before the cut and correctly gives one piece rather than two
-  - [x] The rubber band, including that it catches what it merely touches
-  - [x] Placing on the canvas, which broke once when a widget covered the
-        scene's own background response
-  - [x] The view framing on switching circuit — the logic was right and the
-        wiring threw the result away
-  - [ ] Paint order: circuit labels behind the floating windows. Needs either
-        a snapshot or a way to read the layer order back; worth deciding
-        which before writing it — the last one left, and the only one whose
-        approach isn't settled
-
+  What would extend it, if the need arises: rendered snapshots for the
+  *appearance* of symbols. Deliberately not done here — CI runs on three
+  platforms and text rasterises differently on each, so a pixel reference
+  could not hold across them. It would suit a Linux-only job, which is a
+  different decision.
 ## Known gaps in what ships
 
 - [ ] **Signing** — the macOS and Windows artefacts are unsigned, so both

@@ -499,6 +499,13 @@ pub struct SimLogixApp {
     /// one extra assignment.
     #[cfg(test)]
     canvas_to_screen: egui::emath::TSTransform,
+    /// The layer the canvas was drawn into last frame.
+    ///
+    /// Test-only for the same reason as `canvas_to_screen`: the running
+    /// application never asks, and the one test that does needs it to work
+    /// out where the labels sit in egui's ordering.
+    #[cfg(test)]
+    canvas_layer: Option<egui::LayerId>,
     /// The camera belonging to the view that *isn't* showing. Swapped on
     /// switch: the two views look at unrelated places, so carrying one
     /// camera between them would drop you somewhere arbitrary.
@@ -562,6 +569,8 @@ impl Default for SimLogixApp {
             scene_rect: egui::Rect::ZERO,
             #[cfg(test)]
             canvas_to_screen: egui::emath::TSTransform::IDENTITY,
+            #[cfg(test)]
+            canvas_layer: None,
             view: toolbar::View::default(),
             shape_tool: toolbar::ShapeTool::default(),
             sim_tool: toolbar::SimTool::default(),
@@ -4459,6 +4468,7 @@ impl SimLogixApp {
                     #[cfg(test)]
                     {
                         self.canvas_to_screen = to_scene.inverse();
+                        self.canvas_layer = Some(ui.layer_id());
                     }
                     // Only the pointer while it's actually over the canvas.
                     // Panels are laid out first, so a click on the palette

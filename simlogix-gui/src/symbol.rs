@@ -58,10 +58,7 @@ impl TextLayer {
         // order is inherited from the canvas (`Scene` does the same thing for
         // its own layer, for the same reason), so windows, which are
         // `Order::Middle`, are above it again.
-        let layer = egui::LayerId::new(
-            ui.layer_id().order,
-            egui::Id::new(("symbol_text", ui.layer_id().id)),
-        );
+        let layer = Self::layer_id(ui.layer_id());
         ui.ctx().set_sublayer(ui.layer_id(), layer);
 
         Self {
@@ -74,6 +71,15 @@ impl TextLayer {
                 .with_clip_rect(to_screen * ui.clip_rect()),
             to_screen,
         }
+    }
+
+    /// Which layer the text for a given canvas layer goes into.
+    ///
+    /// Derived rather than stored, and exposed so the one test that checks
+    /// the paint order asks the same question the drawing answers — a second
+    /// copy of this rule in a test is a second thing to keep in step.
+    pub fn layer_id(canvas: egui::LayerId) -> egui::LayerId {
+        egui::LayerId::new(canvas.order, egui::Id::new(("symbol_text", canvas.id)))
     }
 
     /// A plain painter, for callers with no transform to undo.

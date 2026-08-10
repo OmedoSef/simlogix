@@ -476,3 +476,59 @@ fn switching_circuit_brings_the_drawing_into_view() {
         "the camera should be looking at the drawing, not where it was before"
     );
 }
+
+#[test]
+fn circuit_labels_are_painted_behind_the_floating_windows() {
+    // Opening About over a schematic once printed the circuit's text across
+    // it: the label layer was `Order::Foreground`, which is where menus and
+    // popups go — above every window.
+    //
+    // Checked by reading egui's layer ordering rather than by rendering and
+    // comparing images. The bug *was* an ordering fact, so this asserts the
+    // thing itself; and a pixel snapshot of text could not hold across the
+    // three platforms CI runs on, where rasterisation differs.
+    let mut harness = harness();
+    {
+        let app = harness.state_mut();
+        // A probe draws its readout, which is what puts a label layer on
+        // screen at all.
+        app.place(ComponentKind::Probe, egui::pos2(200.0, 200.0));
+        app.show_about = true;
+    }
+    step(&mut harness);
+
+    let canvas = harness
+        .state()
+        .canvas_layer
+        .expect("the canvas was drawn this frame");
+    // Asked through the same function the drawing uses, so the test cannot
+    // come to disagree with it about which layer that is.
+    let labels = crate::symbol::TextLayer::layer_id(canvas);
+
+    // Back to front, top last.
+    let order: Vec<egui::LayerId> = harness.ctx.memory(|m| m.layer_ids().collect());
+    let position = |layer: egui::LayerId| {
+        order
+            .iter()
+            .position(|held| *held == layer)
+            .expect("painted this frame")
+    };
+
+    // Stated without naming the window: egui registers it under an id
+    // derived from its title in a way that is its own business, and copying
+    // that into a test would be pinning an implementation detail rather than
+    // the rule. A floating window is any `Order::Middle` layer, and there is
+    // one here only because About is open.
+    let first_window = order
+        .iter()
+        .position(|layer| layer.order == egui::Order::Middle)
+        .expect("About is open, so a floating window exists");
+
+    assert!(
+        position(labels) < first_window,
+        "labels belong under the windows that cover them"
+    );
+    // The other end of the same rule: still above the drawing, or the fix
+    // would have pushed them behind the circuit instead.
+    assert!(position(canvas) < position(labels));
+}
