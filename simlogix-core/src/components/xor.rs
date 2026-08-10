@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{bitwise_eval, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -15,9 +15,9 @@ pub struct Xor;
 
 impl Component for Xor {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a, b] => vec![xor(*a, *b)],
-            _ => vec![Level::Unknown],
+        bitwise_eval(inputs, |inputs| match inputs {
+            [a, b] => xor(*a, *b),
+            _ => Level::Unknown,
         })
     }
 }

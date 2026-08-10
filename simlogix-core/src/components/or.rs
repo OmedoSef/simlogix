@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{bitwise_eval, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -14,9 +14,9 @@ pub struct Or;
 
 impl Component for Or {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a, b] => vec![or(*a, *b)],
-            _ => vec![Level::Unknown],
+        bitwise_eval(inputs, |inputs| match inputs {
+            [a, b] => or(*a, *b),
+            _ => Level::Unknown,
         })
     }
 }

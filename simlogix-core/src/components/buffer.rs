@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{bitwise_eval, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -10,9 +10,9 @@ pub struct Buffer;
 
 impl Component for Buffer {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a] => vec![*a],
-            _ => vec![Level::Unknown],
+        bitwise_eval(inputs, |inputs| match inputs {
+            [a] => *a,
+            _ => Level::Unknown,
         })
     }
 }

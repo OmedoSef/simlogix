@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{bitwise_eval, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -15,9 +15,9 @@ pub struct And;
 
 impl Component for And {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a, b] => vec![and(*a, *b)],
-            _ => vec![Level::Unknown],
+        bitwise_eval(inputs, |inputs| match inputs {
+            [a, b] => and(*a, *b),
+            _ => Level::Unknown,
         })
     }
 }
@@ -57,6 +57,30 @@ mod tests {
         assert_eq!(
             eval_levels(&And, &[Level::Low, Level::Low]),
             vec![Level::Low]
+        );
+    }
+
+    #[test]
+    fn a_bus_is_the_same_gate_on_every_bit() {
+        // An 8-bit AND is eight AND gates side by side. Bit 0 is the least
+        // significant, so this is 0b10 AND 0b11 = 0b10.
+        let a = Signal::from_levels(vec![Level::Low, Level::High]);
+        let b = Signal::from_levels(vec![Level::High, Level::High]);
+        assert_eq!(
+            And.eval(&[a, b]),
+            vec![Signal::from_levels(vec![Level::Low, Level::High])]
+        );
+    }
+
+    #[test]
+    fn each_bit_resolves_on_its_own() {
+        // The dominance rules are per bit: a definite Low forces its own
+        // bit Low without saying anything about the one beside it.
+        let a = Signal::from_levels(vec![Level::Low, Level::High]);
+        let b = Signal::from_levels(vec![Level::Unknown, Level::Unknown]);
+        assert_eq!(
+            And.eval(&[a, b]),
+            vec![Signal::from_levels(vec![Level::Low, Level::Unknown])]
         );
     }
 

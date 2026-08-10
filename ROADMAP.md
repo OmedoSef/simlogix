@@ -130,13 +130,22 @@ better at the thing it's for.
     are different claims, and a three-state port needs both. On a one-bit
     port it degenerates to the 0/1/undriven cycle that exists, so nothing is
     lost.
-  - [ ] 🚧 **A width property** on the components that are built in rather
-    than drawn. **The ports have it**, and `rebuild_nets` reads it — the same
-    pass that says what a net joins now says how wide it is. The widest pin
-    on a net wins, so a narrower one contributes the wrong width and the
-    engine faults every bit: taking the maximum rather than refusing is what
-    makes a mismatch *visible* instead of quietly dropped. The gates are
-    next.
+  - [x] **A width property** on the components that are built in rather
+    than drawn. **The ports and the plain gates have it**, and `rebuild_nets`
+    reads it — the same pass that says what a net joins now says how wide it
+    is. The widest pin on a net wins, so a narrower one contributes the wrong
+    width and the engine faults every bit: taking the maximum rather than
+    refusing is what makes a mismatch *visible* instead of quietly dropped.
+    A gate on a bus is that gate applied bit by bit, so its truth table is
+    untouched and every one of its pins is that same width.
+  - [ ] **A width per pin, not per component** — what stands between here
+    and a tri-state buffer, a transceiver, a latch or a sub-circuit instance
+    on a bus. Their pins are *not* all alike: an enable, a direction, a set
+    and a reset stay one bit whatever the data is, and an instance's pins are
+    as wide as the ports they stand for, one by one. Today `rebuild_nets`
+    declares a width per component, so offering the setting on those would
+    promise something false. It wants `declared` keyed by pin and each shape
+    saying which of its pins carry data.
   - [ ] **Reading a bus.** The `Probe` gains a **base** — binary, hex,
     decimal — because eight letters in a row is not a reading. Its *width*
     stays derived from its net: that is a fact it can already look up, and a

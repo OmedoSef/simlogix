@@ -158,7 +158,13 @@ project file.
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
 | **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
-| **Bits** | the three ports | How many bits its pin carries. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
+| **Bits** | the three ports, and the plain gates | How many bits its pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
+
+A gate told it is four bits wide is four gates side by side: it computes on
+every bit on its own, and all of its pins are that width. That is also why
+the setting isn't offered on a tri-state buffer, a transceiver or a latch —
+their control pins stay one bit whatever the data is, and a width is
+declared per component rather than per pin.
 
 Two of those look alike and are not. A **button's** setting is its *resting*
 state: a press springs back, so what is saved is where it returns to. A

@@ -1584,3 +1584,58 @@ fn a_clock_still_ticks_after_the_project_is_reopened() {
         "sixty ticks after a reopen and the clock never moved"
     );
 }
+
+#[test]
+fn a_gate_told_it_is_wide_answers_bit_by_bit() {
+    // The end-to-end claim: a width set in the properties reaches the
+    // engine, the nets between the ports and the gate carry it, and the
+    // gate computes on every bit rather than refusing the bus.
+    let mut app = SimLogixApp::default();
+    let a = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let b = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let gate = app.place(ComponentKind::And, egui::pos2(200.0, 80.0));
+    let out = app.place(ComponentKind::OutputPort, egui::pos2(360.0, 80.0));
+    for (from, to) in [
+        ((a, 0), (gate, 0)),
+        ((b, 0), (gate, 1)),
+        ((gate, 2), (out, 0)),
+    ] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+
+    let wide = Properties {
+        width: Some(4),
+        ..Default::default()
+    };
+    for id in [a, b, gate, out] {
+        if let Some(placed) = app.placed.iter_mut().find(|placed| placed.id() == id) {
+            placed.set_properties(wide.clone());
+        }
+    }
+    app.rebuild_nets();
+
+    // Mixed bits on purpose: all-alike values would pass just as well if
+    // the gate only ever looked at bit 0.
+    for (id, value) in [(a, 0b1010), (b, 0b1100)] {
+        app.placed
+            .iter()
+            .find(|placed| placed.id() == id)
+            .and_then(|placed| placed.hand_set_level())
+            .expect("a driving port has a level")
+            .set(PortDrive::Driving(value));
+        app.circuit.schedule_now(id);
+    }
+    app.advance_circuit(SETTLE_TICKS);
+
+    let net = app.circuit.pins(out)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4, "the net carries the width");
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        // 0b1010 AND 0b1100 = 0b1000, least significant bit first.
+        [Level::Low, Level::Low, Level::Low, Level::High],
+    );
+}

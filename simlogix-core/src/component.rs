@@ -25,16 +25,42 @@ pub trait Component {
 /// boundary: every input read with [`Signal::only_level`], every output a
 /// plain one-bit wire.
 ///
-/// Every component is like this today, which is why this exists rather than
-/// the conversion being written out eighteen times. It stops being true one
-/// component at a time, as each learns what a bus means *for it* — a gate
-/// maps over the bits, a rail drives them all alike, a latch on a bus is a
-/// register. Until then, `only_level` answering `Error` for a wider signal
-/// is the right refusal: a component that has no meaning on a bus should
-/// say so on the wire rather than report its first bit.
+/// This is what a component looks like until it learns what a bus means
+/// *for it* — a gate maps over the bits ([`bitwise_eval`]), a rail drives
+/// them all alike, a latch on a bus is a register. Until then, `only_level`
+/// answering `Error` for a wider signal is the right refusal: a component
+/// that has no meaning on a bus should say so on the wire rather than
+/// report its first bit.
 pub fn scalar_eval(inputs: &[Signal], eval: impl Fn(&[Level]) -> Vec<Level>) -> Vec<Signal> {
     let levels: Vec<Level> = inputs.iter().map(Signal::only_level).collect();
     eval(&levels).into_iter().map(Signal::bit).collect()
+}
+
+/// Adapts a component that means the same thing on every bit: `bit` is
+/// handed one level per input and answers the one level of the output.
+///
+/// This is the whole of what a gate on a bus is — an 8-bit AND is eight AND
+/// gates side by side — so the truth tables underneath are untouched and
+/// still say exactly what they said when a wire was one bit wide.
+///
+/// **Inputs of differing widths have no bit-by-bit answer**, and the output
+/// is `Error` on every bit of the widest. That case is already ringed on the
+/// schematic, since a pin whose declared width disagrees with its net is a
+/// reported fault; what matters here is that the gate makes the loudest
+/// claim it can rather than quietly answering about the bits that happen to
+/// line up.
+pub fn bitwise_eval(inputs: &[Signal], bit: impl Fn(&[Level]) -> Level) -> Vec<Signal> {
+    let width = inputs.iter().map(Signal::width).max().unwrap_or(1);
+    if inputs.iter().any(|input| input.width() != width) {
+        return vec![Signal::splat(Level::Error, width)];
+    }
+    let levels = (0..width)
+        .map(|index| {
+            let bits: Vec<Level> = inputs.iter().map(|input| input.levels()[index]).collect();
+            bit(&bits)
+        })
+        .collect();
+    vec![Signal::from_levels(levels)]
 }
 
 /// Evaluates a component that is scalar on both sides, in levels.
@@ -83,6 +109,35 @@ mod tests {
     fn component_eval_computes_outputs_from_inputs() {
         assert_eq!(eval_levels(&NotGate, &[Level::High]), vec![Level::Low]);
         assert_eq!(eval_levels(&NotGate, &[Level::Low]), vec![Level::High]);
+    }
+
+    #[test]
+    fn a_bitwise_component_answers_as_wide_as_it_was_asked() {
+        let a = Signal::from_levels(vec![Level::Low, Level::High, Level::Low]);
+        let b = Signal::splat(Level::High, 3);
+        assert_eq!(
+            bitwise_eval(&[a, b], |bits| match bits {
+                [a, b] if *a == Level::High && *b == Level::High => Level::High,
+                _ => Level::Low,
+            }),
+            vec![Signal::from_levels(vec![
+                Level::Low,
+                Level::High,
+                Level::Low
+            ])]
+        );
+    }
+
+    #[test]
+    fn inputs_of_differing_widths_have_no_bit_by_bit_answer() {
+        // Loud rather than quiet: answering about the bits that happen to
+        // line up would hide a mismatch the schematic is already ringing.
+        let narrow = Signal::bit(Level::High);
+        let wide = Signal::splat(Level::High, 4);
+        assert_eq!(
+            bitwise_eval(&[narrow, wide], |_| Level::High),
+            vec![Signal::splat(Level::Error, 4)]
+        );
     }
 
     #[test]

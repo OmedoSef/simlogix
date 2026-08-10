@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{bitwise_eval, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -12,9 +12,9 @@ pub struct Not;
 
 impl Component for Not {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a] => vec![not(*a)],
-            _ => vec![Level::Unknown],
+        bitwise_eval(inputs, |inputs| match inputs {
+            [a] => not(*a),
+            _ => Level::Unknown,
         })
     }
 }

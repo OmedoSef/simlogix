@@ -90,6 +90,34 @@ impl Properties {
         self.width.unwrap_or(1).max(1)
     }
 
+    /// Whether this kind can be told how wide its pins are.
+    ///
+    /// The ports, because a boundary has to declare what it carries, and the
+    /// plain gates, because a gate on a bus is that gate applied bit by bit
+    /// and every one of its pins is that same width.
+    ///
+    /// What is deliberately absent is everything whose pins are *not* all
+    /// alike — a tri-state buffer's enable, a transceiver's direction, a
+    /// latch's set and reset are one bit whatever the data is. A width is
+    /// declared per component today, not per pin, so offering it there
+    /// would widen the control pins too and promise something false.
+    pub fn has_width(kind: &ComponentKind) -> bool {
+        matches!(
+            kind,
+            ComponentKind::InputPort
+                | ComponentKind::OutputPort
+                | ComponentKind::InOutPort
+                | ComponentKind::And
+                | ComponentKind::Or
+                | ComponentKind::Nand
+                | ComponentKind::Nor
+                | ComponentKind::Xor
+                | ComponentKind::Xnor
+                | ComponentKind::Not
+                | ComponentKind::Buffer
+        )
+    }
+
     pub fn is_tri_state(&self) -> bool {
         self.tri_state.unwrap_or(false)
     }
@@ -753,13 +781,10 @@ pub fn show(
         _ => {}
     }
 
-    // Every port, an output included: it reads a bus as much as an input
-    // drives one. Outside the match because it is not one kind's extra —
-    // the gates and the rest get it next.
-    if matches!(
-        kind,
-        ComponentKind::InputPort | ComponentKind::OutputPort | ComponentKind::InOutPort
-    ) {
+    // Outside the match because it is not one kind's extra: a port declares
+    // what its boundary carries, and a gate is the same gate on every bit of
+    // it. `has_width` is what says which, in one place rather than here.
+    if Properties::has_width(kind) {
         ui.add_space(8.0);
         ui.label(strings.property_width);
         let mut width = properties.width();

@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{bitwise_eval, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -12,9 +12,9 @@ pub struct Nor;
 
 impl Component for Nor {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a, b] => vec![nor(*a, *b)],
-            _ => vec![Level::Unknown],
+        bitwise_eval(inputs, |inputs| match inputs {
+            [a, b] => nor(*a, *b),
+            _ => Level::Unknown,
         })
     }
 }
