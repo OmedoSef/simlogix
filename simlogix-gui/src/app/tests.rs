@@ -272,6 +272,7 @@ fn a_circuit_with_a_symbol_of_its_own_stops_showing_the_generated_box() {
             facing: crate::appearance::Facing::Left,
             lead: 10.0,
             show_name: true,
+            name_offset: (0.0, 0.0),
         }],
         show_name: true,
     });
@@ -307,6 +308,7 @@ fn a_symbol_drawn_away_from_its_origin_still_lands_under_the_pointer() {
             facing: crate::appearance::Facing::Left,
             lead: 20.0,
             show_name: false,
+            name_offset: (0.0, 0.0),
         }],
         show_name: false,
     });

@@ -197,6 +197,25 @@ pub struct PinSlot {
     pub lead: f32,
     /// Whether to write the port's name at the lead's inner end.
     pub show_name: bool,
+    /// Nudges that name away from where it would otherwise land, in the
+    /// symbol's own coordinates.
+    ///
+    /// The automatic place is a fixed step in from the lead, which is right
+    /// until the line art is somewhere else: a name against a sloped edge —
+    /// the side of a multiplexer, say — is unreadable, and nothing about the
+    /// pin can work out where the drawing left room. So this is set by hand,
+    /// in the same coordinates every other field is typed in rather than
+    /// along the pin's facing, which would flip meaning as the pin is moved
+    /// from one edge to another.
+    ///
+    /// Absent means no nudge, so a symbol that never asks for one is written
+    /// exactly as it was before this existed.
+    #[serde(default, skip_serializing_if = "is_no_offset")]
+    pub name_offset: (f32, f32),
+}
+
+fn is_no_offset(offset: &(f32, f32)) -> bool {
+    *offset == (0.0, 0.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +290,7 @@ impl Appearance {
                     },
                     lead,
                     show_name: true,
+                    name_offset: (0.0, 0.0),
                 }
             })
             .collect();
@@ -346,7 +366,10 @@ impl Appearance {
 
                 if pin.show_name {
                     if let Some(name) = port_names.get(index).filter(|name| !name.is_empty()) {
-                        let label = (inner.0 + dx * LABEL_INSET, inner.1 + dy * LABEL_INSET);
+                        let label = (
+                            inner.0 + dx * LABEL_INSET + pin.name_offset.0,
+                            inner.1 + dy * LABEL_INSET + pin.name_offset.1,
+                        );
                         text_layer.text(
                             at(label),
                             pin.facing.label_align(),
@@ -688,6 +711,21 @@ mod tests {
     }
 
     #[test]
+    fn a_nudged_name_is_stored_and_an_old_symbol_reads_back_without_one() {
+        let mut symbol = Appearance::generated(&ports(1, 0));
+        symbol.pins[0].name_offset = (-SHAPE_SNAP, 2.0 * SHAPE_SNAP);
+        let json = serde_json::to_string(&symbol).expect("serialisable");
+        assert!(json.contains("name_offset"));
+        let back: Appearance = serde_json::from_str(&json).expect("readable");
+        assert_eq!(back.pins[0].name_offset, (-SHAPE_SNAP, 2.0 * SHAPE_SNAP));
+
+        // And a pin written before the field existed still reads, at rest.
+        let old = r#"{"at":[0.0,0.0],"facing":"Left","lead":10.0,"show_name":true}"#;
+        let pin: PinSlot = serde_json::from_str(old).expect("readable");
+        assert_eq!(pin.name_offset, (0.0, 0.0));
+    }
+
+    #[test]
     fn something_drawn_low_down_does_not_push_the_name_up_away_from_the_symbol() {
         let mut symbol = Appearance::generated(&ports(1, 1));
         let before = symbol.name_anchor(Pos2::ZERO);
@@ -915,11 +953,15 @@ mod tests {
                 facing: Facing::Left,
                 lead: 10.0,
                 show_name: false,
+                name_offset: (0.0, 0.0),
             }],
             show_name: true,
         };
 
         let json = serde_json::to_string(&symbol).expect("serialisable");
+        // A symbol that never nudges a name says nothing about it, so one
+        // written by an earlier build is what a later one writes back.
+        assert!(!json.contains("name_offset"));
         let back: Appearance = serde_json::from_str(&json).expect("readable");
         assert_eq!(back, symbol);
     }

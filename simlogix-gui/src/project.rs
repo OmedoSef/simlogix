@@ -47,7 +47,7 @@ use crate::properties::Properties;
 ///   such as a button's resting state or a LED's colour). Absent means the
 ///   behaviour that was there before, so nothing needed migrating.
 /// - `8` — a wire can carry a colour of its own.
-pub const CURRENT_VERSION: u32 = 9;
+pub const CURRENT_VERSION: u32 = 10;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";

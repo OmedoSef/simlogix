@@ -41,6 +41,15 @@ Select a pin and the properties panel shows:
 | **Position** | Where it sits, in whole grid steps. |
 | **Lead length** | How far the lead runs back towards the body. Zero draws none. |
 | **Show the port's name** | Whether the name is written beside it. |
+| **Nudge the name** | Moves that name, in quarter-grid steps. |
+
+**Nudge the name** exists because the automatic place — a fixed step in
+from the lead — is right until your line art is in the way. A name against
+a sloped edge, on the side of a multiplexer say, comes out unreadable, and
+nothing about the pin can work out where you left room. The nudge is in the
+symbol's own coordinates, the same ones every other field is typed in, so
+it does not change meaning when you move the pin to another edge. *Reset*
+puts it back.
 
 The panel names which port a pin belongs to. On a symbol with four
 identical-looking pins that's the only thing telling them apart — which is

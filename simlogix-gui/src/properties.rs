@@ -348,6 +348,21 @@ pub fn show_pin(
         result.edit_started = true;
     }
 
+    // Only worth offering while there is a name on screen to move.
+    if pin.show_name {
+        ui.add_space(8.0);
+        ui.label(strings.pin_name_offset);
+        // On a shape's step rather than a pin's: this moves a label clear of
+        // the line art, and a nudge of a whole grid space is not a nudge.
+        result.edit_started |= point_row(ui, &mut pin.name_offset, crate::appearance::SHAPE_SNAP);
+        ui.horizontal(|ui| {
+            if pin.name_offset != (0.0, 0.0) && ui.button(strings.property_reset).clicked() {
+                result.edit_started = true;
+                pin.name_offset = (0.0, 0.0);
+            }
+        });
+    }
+
     result
 }
 

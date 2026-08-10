@@ -93,6 +93,7 @@ to do anything, and is written back as `.slgx` next time you save.
 | 7 | Components can carry properties. |
 | 8 | Wires can carry a colour. |
 | 9 | A circuit can carry a symbol of its own. |
+| 10 | A pin's name can be nudged clear of the line art. |
 
 ## Circuits
 
