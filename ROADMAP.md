@@ -34,7 +34,7 @@ better at the thing it's for.
 
 ## Next
 
-- [ ] **Multi-bit buses**
+- [ ] 🚧 **Multi-bit buses**
 
   A byte-wide datapath drawn in single-bit wires is eight times everything:
   eight wires, eight pins per port, eight probes to read one value. For a CPU
@@ -43,6 +43,68 @@ better at the thing it's for.
   It reaches into `Signal` and therefore into the engine, which is the
   argument for doing it sooner rather than later — the cost grows with
   everything built on top of the current shape.
+
+  ### How a signal is represented
+
+  The current seven-state scalar is renamed **`Level`**, and **`Signal`
+  becomes a list of `Level`** — a plain wire being a list of one. Every truth
+  table that exists keeps working on `Level` untouched, and a gate is a gate
+  applied bit by bit.
+
+  The alternative, recorded because it was considered and refused: pack the
+  whole bus into fixed-size masks — `value`, `known`, `driving` over 64 bits
+  — which stays `Copy`, allocates nothing, and does a 32-bit operation in one
+  instruction. Seven states do not fit in two masks, so it needs three and an
+  encoding to remember, and every truth table stops being a readable `match`
+  and becomes mask algebra. The engine's core is what gets re-read most —
+  it is where the transistor bug and the CMOS NAND bug were both found — and
+  that is not worth trading for speed nobody has needed yet.
+
+  The cost of the chosen way is that `Signal` loses `Copy`. That is
+  mechanical, and the compiler shows the whole of it at once.
+
+  ### Width belongs to the net, not to the wire
+
+  A wire does not know what it carries; it takes it from what it joins. So
+  width is derived in `rebuild_nets`, alongside connectivity, by the same
+  pass and from the same drawing. **One bit unless something on the net says
+  otherwise**, which is why every project that exists stays exactly as it is,
+  with no migration.
+
+  Two pins of different widths on one net is a **fault to report, not to
+  guess at** — and a different fault from `Error`. "Two drivers disagree" is
+  fixed by unplugging one; "four bits against eight" is fixed by changing a
+  property. Two messages, not one.
+
+  ### What has to exist
+
+  - [ ] **A splitter**, one component and bidirectional: its pins are
+    `InOut`, and which side drives falls out of what is connected, which is
+    what multi-driver resolution already does. So there is no separate
+    merger. One thing to check when building it — not before — is the
+    question the transceiver already answered: an `InOut` pin reads the net
+    it drives, so it must not send back to the bus what it has just read.
+  - [ ] **A constant**, whose value is typed in a base of your choosing. It
+    works on a one-bit wire too, where it is simply 0 or 1.
+  - [ ] **A width property** on the components that are built in rather than
+    drawn — the ports first, then the gates.
+  - [ ] **Reading a bus.** The `Probe` gains a **base** — binary, hex,
+    decimal — because eight letters in a row is not a reading. Its *width*
+    stays derived from its net: that is a fact it can already look up, and a
+    probe told the wrong number would quietly show something false.
+  - [ ] **Seeing a bus.** Drawn thicker than a wire, with its width written
+    on it. Until it can be told apart at a glance, nothing else here is
+    usable.
+
+  **Bit 0 is the least significant**, fixed once and written down, because
+  the splitter has to say which bits go where and that convention is
+  expensive to leave implicit.
+
+  ### Order
+
+  The engine first, with width defaulting to one and the existing tests as
+  the net: if all of them still pass, the semantics that exist are intact.
+  Then the drawing, then the components.
 
 - [ ] **A clock's period and phase, and a component's delay**
 
