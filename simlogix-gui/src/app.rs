@@ -1897,6 +1897,23 @@ impl SimLogixApp {
     /// and surfaces the offending net in the status bar — the alternative
     /// would be looping forever or taking the whole program down, and the
     /// circuit is still there to be inspected and fixed either way.
+    /// Whether something is queued for *now* and has not run yet.
+    ///
+    /// Only possible while paused: clicking a port or a switch schedules its
+    /// component and asks the circuit to settle, and settling is what a
+    /// pause refuses. So the value you set is in, and nothing on the wires
+    /// has been told about it yet.
+    ///
+    /// It is the difference between "due now, not run" and "due later" that
+    /// matters — a clock's next beat is pending in the plain sense and is
+    /// not what anyone is waiting on, so the test is against *now* rather
+    /// than merely being scheduled at all.
+    fn change_pending(&self) -> bool {
+        self.circuit
+            .next_event_tick()
+            .is_some_and(|tick| tick <= self.circuit.now())
+    }
+
     fn advance_circuit(&mut self, ticks: u64) {
         if !self.running || self.unstable_net.is_some() {
             return;
@@ -2422,7 +2439,16 @@ impl SimLogixApp {
             } else if !self.show_signal_state {
                 Some(strings.status_signals_hidden.to_string())
             } else if !self.running {
-                Some(strings.status_paused.to_string())
+                // A switch draws its own lever, so a click on one looks like
+                // it worked whatever the engine is doing. A port draws what
+                // its *net* resolves to, which cannot change until time
+                // moves — so without this, clicking one while paused looks
+                // like nothing happened at all.
+                Some(if self.change_pending() {
+                    strings.status_paused_pending.to_string()
+                } else {
+                    strings.status_paused.to_string()
+                })
             } else if self.view == toolbar::View::Simulation {
                 // Everything below this arm offers an editing gesture, and
                 // this mode has taken them all away. A selection is still

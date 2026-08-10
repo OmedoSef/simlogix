@@ -1261,6 +1261,46 @@ fn a_switch_saved_open_is_open_when_the_project_is_opened() {
 }
 
 #[test]
+fn clicking_a_port_while_paused_is_reported_as_waiting() {
+    let mut app = SimLogixApp::default();
+    let port = app.place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
+    app.step(0); // pauses without moving time
+    app.circuit.advance(SETTLE_TICKS).expect("stable");
+    assert!(!app.change_pending(), "nothing has been asked for yet");
+
+    // What a click on a port does: set the level, ask for it to be taken
+    // into account. Settling is what the pause refuses, so the value is in
+    // and the wires have not been told.
+    let level = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == port)
+        .and_then(|placed| placed.hand_set_level())
+        .expect("a driving port has a level");
+    level.set(PortLevel::High);
+    app.circuit.schedule_now(port);
+    assert!(app.change_pending(), "the click is waiting for a step");
+
+    app.step(1);
+    assert!(!app.change_pending(), "and the step took it");
+}
+
+#[test]
+fn a_clock_beat_still_to_come_is_not_a_change_waiting() {
+    // The distinction the report rests on: a clock always has something
+    // scheduled, and saying so every time you pause would make the message
+    // meaningless.
+    let mut app = SimLogixApp::default();
+    app.place(ComponentKind::Clock, egui::pos2(200.0, 200.0));
+    app.step(1);
+    assert!(
+        app.circuit.next_event_tick().is_some(),
+        "a clock is pending"
+    );
+    assert!(!app.change_pending(), "but not *now*");
+}
+
+#[test]
 fn a_clock_still_ticks_after_the_project_is_reopened() {
     let mut app = SimLogixApp::default();
     app.place(ComponentKind::Clock, egui::pos2(200.0, 200.0));

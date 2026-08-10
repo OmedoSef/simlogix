@@ -102,6 +102,37 @@ pub fn snap_coord_to_grid(value: f32) -> f32 {
 }
 
 /// Snaps a canvas position to the nearest grid intersection.
+/// A short notice across the top of the canvas.
+///
+/// Painted rather than laid out, and with no widget of its own, so it can
+/// never take a click: the canvas underneath is where wires get drawn, and
+/// the one thing a notice must not do is get in the way of the work it is
+/// commenting on.
+///
+/// It says what the status bar says. Both, because the bar is at the far
+/// edge of the window and the eye is on the circuit — and a notice over the
+/// drawing is only tolerable while it is *transient*, which is why the bar
+/// keeps the standing version.
+pub fn draw_notice(ui: &egui::Ui, within: Rect, text: &str, color: Color32) {
+    let painter = ui.painter_at(within);
+    let galley = painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(13.0), color);
+    let padding = egui::vec2(10.0, 5.0);
+    let box_size = galley.size() + padding * 2.0;
+    let at = pos2(within.center().x - box_size.x / 2.0, within.top() + 10.0);
+    let rect = Rect::from_min_size(at, box_size);
+
+    // The panel's own fill, so the drawing behind never shows through the
+    // letters, with the accent only on the border and the text.
+    painter.rect(
+        rect,
+        6.0,
+        ui.visuals().panel_fill,
+        egui::Stroke::new(1.0, color),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(at + padding, galley, color);
+}
+
 pub fn snap_to_grid(pos: Pos2) -> Pos2 {
     pos2(snap_coord_to_grid(pos.x), snap_coord_to_grid(pos.y))
 }

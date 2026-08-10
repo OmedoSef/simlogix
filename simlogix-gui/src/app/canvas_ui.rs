@@ -1427,6 +1427,19 @@ impl SimLogixApp {
                 self.advance_circuit(SETTLE_TICKS);
             }
 
+            // Over the canvas as well as in the status bar: the bar is at
+            // the far edge of the window while the eye is on the circuit,
+            // and a click that appears to do nothing is exactly the moment
+            // nobody is looking down there.
+            if !self.running && self.change_pending() {
+                canvas::draw_notice(
+                    ui,
+                    ui.clip_rect(),
+                    crate::i18n::Strings::for_language(self.language).status_pending_short,
+                    ui.visuals().warn_fg_color,
+                );
+            }
+
             // Wheel zoom, applied to the framed region for the next frame:
             // shrinking it zooms in. Anchored on the pointer so the point
             // under the cursor stays put, which is what makes zooming feel

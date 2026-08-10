@@ -88,6 +88,26 @@ port's current level is runtime state, like a button press, and only its
 *resting* level is saved. A switch is deliberately not offered as a source
 for the opposite reason — its position **is** part of the document.
 
+### What a click does while paused
+
+Nothing, until the next step — and that is deliberate: settling a circuit
+moves time, which is exactly what a pause refuses. Setting `D` and *then*
+clocking it is the whole point of stepping a flip-flop.
+
+But the two things you can click do not look alike while stopped. A
+**switch** draws its own lever, so it visibly flips whatever the engine is
+doing; a **port** draws what its *net* resolves to, and no net can change
+until time moves. So a click on a port used to look like nothing at all.
+
+So a notice says **a change is waiting for the next step** whenever
+something is queued for the current tick and has not run — across the top
+of the canvas, where your eyes already are, and in the status bar. A
+clock's next beat does not count: it is due later, and saying so every time
+you paused would make the message meaningless.
+
+The notice is painted rather than laid out and has no widget of its own, so
+it can never take a click meant for the canvas underneath.
+
 One thing to know: [unstable circuits](#unstable-circuits) are detected
 within a single run, by counting how often a net changes. Stepping a tick at
 a time never reaches that count, so it will not stop you — which is the
