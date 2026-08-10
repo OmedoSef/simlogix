@@ -1193,11 +1193,18 @@ impl SimLogixApp {
                                     in_progress.waypoints.push(at);
                                 }
                             }
-                            // With the wire tool, a click on empty canvas starts
-                            // a wire there rather than doing nothing: it begins
-                            // on a loose end, which can be dropped onto something
-                            // later.
-                            None if self.tool == Tool::Wire => {
+                            // With the wire tool, a click on **empty canvas**
+                            // starts a wire there rather than doing nothing: it
+                            // begins on a loose end, which can be dropped onto
+                            // something later.
+                            //
+                            // `!click_consumed` is what makes it *empty*. A
+                            // click that a component already answered is not a
+                            // place to begin a wire — the wire would start at a
+                            // loose point under the middle of a gate, which is
+                            // not something anyone means. Its pins are the way
+                            // in, and they are checked before this.
+                            None if self.tool == Tool::Wire && !click_consumed => {
                                 // Started on an existing wire: tap it, so the
                                 // new wire is connected from its first click
                                 // rather than merely beginning next to it.

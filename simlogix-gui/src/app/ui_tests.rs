@@ -532,3 +532,37 @@ fn circuit_labels_are_painted_behind_the_floating_windows() {
     // would have pushed them behind the circuit instead.
     assert!(position(canvas) < position(labels));
 }
+
+#[test]
+fn the_wire_tool_does_not_start_a_wire_from_the_middle_of_a_component() {
+    // Clicking a gate while wiring used to begin a wire at a loose point
+    // under it, which is not something anyone means: a component's pins are
+    // the way in. The click selects it instead, as it would with any tool.
+    let mut harness = harness();
+    let at = egui::pos2(240.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::Led, at);
+    harness.state_mut().tool = toolbar::Tool::Wire;
+    step(&mut harness);
+
+    click_at(&mut harness, at);
+
+    assert!(
+        harness.state().wiring_from.is_none(),
+        "no wire should have been started"
+    );
+    assert!(harness.state().selection.components.contains(&id));
+}
+
+#[test]
+fn the_wire_tool_still_starts_a_wire_on_empty_canvas() {
+    // The other half: the tool exists so a wire can be drawn ahead of what
+    // it will connect to, and a fix that simply stopped clicks from starting
+    // wires would pass the test above.
+    let mut harness = harness();
+    harness.state_mut().tool = toolbar::Tool::Wire;
+    step(&mut harness);
+
+    click_at(&mut harness, egui::pos2(240.0, 200.0));
+
+    assert!(harness.state().wiring_from.is_some());
+}
