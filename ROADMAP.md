@@ -100,6 +100,7 @@ that is what's wanted.
 - [ ] Adder
 - [ ] Multiplexer
 - [ ] Demultiplexer
+- [ ] D latch
 
 The last two carry a question the others don't: how many ways. A selector
 of *n* bits picks between 2ⁿ, so either the width is a property and the
