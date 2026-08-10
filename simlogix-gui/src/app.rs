@@ -490,6 +490,15 @@ pub struct SimLogixApp {
     /// being held: a click that never moves must not snapshot for undo, and
     /// must not snap anything on release either.
     moving_shape: Option<(egui::Pos2, bool)>,
+    /// Canvas coordinates to screen coordinates, as of the last frame.
+    ///
+    /// Test-only, and deliberately absent otherwise: nothing in the running
+    /// application asks where a canvas position is on screen, and carrying a
+    /// field that nobody reads is how dead state accumulates. The unit tests
+    /// compile the same crate, so what they exercise is the real thing with
+    /// one extra assignment.
+    #[cfg(test)]
+    canvas_to_screen: egui::emath::TSTransform,
     /// The camera belonging to the view that *isn't* showing. Swapped on
     /// switch: the two views look at unrelated places, so carrying one
     /// camera between them would drop you somewhere arbitrary.
@@ -551,6 +560,8 @@ impl Default for SimLogixApp {
             // canvas's own size, which is the only value that gives a zoom
             // of exactly 1. See where it's filled in.
             scene_rect: egui::Rect::ZERO,
+            #[cfg(test)]
+            canvas_to_screen: egui::emath::TSTransform::IDENTITY,
             view: toolbar::View::default(),
             shape_tool: toolbar::ShapeTool::default(),
             sim_tool: toolbar::SimTool::default(),
@@ -1829,6 +1840,17 @@ impl SimLogixApp {
         // a new one anyway.
         self.symbol_selection = SymbolSelection::default();
         true
+    }
+
+    /// Where a canvas position is on screen, as of the last frame drawn.
+    #[cfg(test)]
+    ///
+    /// The mapping depends on how the panels divided the window and on what
+    /// `Scene` made of the rest, so it is recorded while drawing rather than
+    /// worked out again — a second copy of that arithmetic would be a second
+    /// thing to keep in step with egui.
+    fn screen_pos(&self, canvas: egui::Pos2) -> egui::Pos2 {
+        self.canvas_to_screen * canvas
     }
 
     fn content_rect(&self) -> Option<egui::Rect> {
@@ -4429,6 +4451,15 @@ impl SimLogixApp {
                         .ctx()
                         .layer_transform_from_global(ui.layer_id())
                         .unwrap_or_default();
+                    // Recorded because this is the only place it is known:
+                    // it depends on how the panels divided the window and on
+                    // what `Scene` then did with what was left. Deriving it
+                    // again elsewhere would mean copying `Scene`'s own fitting
+                    // rule and drifting from it.
+                    #[cfg(test)]
+                    {
+                        self.canvas_to_screen = to_scene.inverse();
+                    }
                     // Only the pointer while it's actually over the canvas.
                     // Panels are laid out first, so a click on the palette
                     // still reaches this code -- and, mapped into scene

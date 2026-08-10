@@ -177,3 +177,145 @@ fn pasting_is_refused_while_the_simulation_view_is_showing() {
     // changes nothing, adding something does.
     assert_eq!(harness.state().placed.len(), 1);
 }
+
+/// The three halves of a drag, kept apart so a test can look *during* one.
+///
+/// That matters more than it sounds: everything on the canvas snaps to the
+/// grid when the button comes up, and snapping hides any error smaller than
+/// a grid step. A drag that is wrong by one frame's worth of movement is
+/// invisible once released, and that is precisely a bug this file exists to
+/// catch — so the interesting assertions happen mid-flight.
+///
+/// Positions are in *canvas* coordinates, which is how the application
+/// stores everything; the mapping to the screen comes from the frame just
+/// drawn — see `SimLogixApp::screen_pos` for why it is recorded rather than
+/// recomputed.
+fn press_at(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {
+    let pos = harness.state().screen_pos(canvas);
+    harness
+        .input_mut()
+        .events
+        .push(egui::Event::PointerMoved(pos));
+    step(harness);
+    harness.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    step(harness);
+}
+
+/// Moves the pointer there through several positions, because egui reads a
+/// drag from successive ones: a single jump is a press and a release
+/// somewhere else.
+///
+/// Small steps on purpose. `interact_box` deliberately doesn't move anything
+/// on the frame a drag *starts* — that is what makes the undo snapshot the
+/// true pre-drag state — so with coarse steps a test loses a whole grid step
+/// and reads it as the application being wrong.
+/// `from` is passed rather than remembered: the event queue is drained every
+/// frame, so by the time this runs there is nothing left in it to read the
+/// pointer's last position out of.
+fn move_to(harness: &mut Harness<'_, SimLogixApp>, from: egui::Pos2, canvas: egui::Pos2) {
+    let target = harness.state().screen_pos(canvas);
+    let from = harness.state().screen_pos(from);
+    for index in 1..=DRAG_STEPS {
+        let at = from + (target - from) * (index as f32 / DRAG_STEPS as f32);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerMoved(at));
+        step(harness);
+    }
+}
+
+fn release(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {
+    let pos = harness.state().screen_pos(canvas);
+    harness.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    step(harness);
+}
+
+fn drag(harness: &mut Harness<'_, SimLogixApp>, from: egui::Pos2, to: egui::Pos2) {
+    press_at(harness, from);
+    move_to(harness, from, to);
+    release(harness, to);
+}
+
+const DRAG_STEPS: usize = 16;
+
+/// Where a component sits now.
+fn position_of(harness: &Harness<'_, SimLogixApp>, id: ComponentId) -> egui::Pos2 {
+    harness
+        .state()
+        .placed
+        .iter()
+        .find(|placed| placed.id() == id)
+        .expect("still placed")
+        .center()
+}
+
+#[test]
+fn dragging_a_component_moves_it() {
+    // Proves the coordinate mapping before anything is built on it: if
+    // `screen_pos` were wrong, the press would land on empty canvas and this
+    // would fail rather than the tests below failing mysteriously.
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::Led, at);
+    step(&mut harness);
+
+    drag(&mut harness, at, egui::pos2(280.0, 200.0));
+
+    assert_eq!(position_of(&harness, id), egui::pos2(280.0, 200.0));
+}
+
+#[test]
+fn dragging_one_of_several_selected_components_carries_the_others() {
+    // It once came apart by exactly one frame's delta: the grabbed component
+    // deliberately doesn't move on the frame a drag starts, so that the undo
+    // snapshot is the true pre-drag state, while the rest of the selection
+    // was being moved from the frame the pointer first reported a drag.
+    let mut harness = harness();
+    let (first, second) = (egui::pos2(200.0, 200.0), egui::pos2(200.0, 280.0));
+    let (a, b) = {
+        let app = harness.state_mut();
+        let a = app.place(ComponentKind::Led, first);
+        let b = app.place(ComponentKind::Led, second);
+        app.selection.pick_component(a, false);
+        app.selection.pick_component(b, true);
+        (a, b)
+    };
+    step(&mut harness);
+
+    // Looked at *mid-drag*, before the button comes up: on release every
+    // position snaps to the grid, and one frame's worth of drift is smaller
+    // than a grid step — so a released drag would come out equal either way
+    // and this test would pass while the bug was back.
+    press_at(&mut harness, first);
+    move_to(&mut harness, first, egui::pos2(300.0, 200.0));
+
+    let moved_a = position_of(&harness, a) - first;
+    let moved_b = position_of(&harness, b) - second;
+    assert_ne!(moved_a, egui::Vec2::ZERO, "the grabbed one moved");
+    assert_eq!(moved_a, moved_b, "and the rest of the selection by as much");
+    release(&mut harness, egui::pos2(300.0, 200.0));
+}
+
+#[test]
+fn dragging_a_component_does_nothing_in_the_simulation_view() {
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::Led, at);
+    harness.state_mut().switch_view(toolbar::View::Simulation);
+    step(&mut harness);
+
+    drag(&mut harness, at, egui::pos2(300.0, 260.0));
+
+    assert_eq!(position_of(&harness, id), at);
+}

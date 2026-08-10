@@ -104,15 +104,32 @@ Not user-visible, but they decide how expensive everything above is.
   all bugs in the *wiring* between correct pieces — and the unit tests stayed
   green through all of them. Five occurrences is a category, not bad luck.
 
-  `egui_kittest` now drives the real application in `src/ui_tests.rs`, and
-  covers copy/paste and the two gestures the simulation view takes away —
-  each checked to *fail* against the bug it describes, since a regression
-  test that has never failed proves nothing.
+  `egui_kittest` drives the real application in `src/ui_tests.rs`. Every
+  test there was checked to *fail* against the bug it describes, by putting
+  the bug back — a regression test that has never failed proves nothing, and
+  that stays the rule for the ones below.
 
-  What is left is anything needing canvas **coordinates**: the group drag,
-  moving a wire's waypoint, the rubber band. A test has no way yet to work
-  out where a scene position lands on screen, and that is the piece to build
-  next.
+  - [x] A harness running the whole application, `Ui` and all
+  - [x] `Delete` removes a selected component, and does nothing in the
+        simulation view
+  - [x] Copy and paste, which is where egui's `Event::Copy` caught us out
+  - [x] Pasting refused in the simulation view
+  - [x] A way to reach canvas coordinates from a test — the transform is
+        recorded while drawing, since that is the only place it is known
+  - [x] Dragging a multi-selection, which once came apart by one frame's
+        delta. Asserted **mid-drag**: everything snaps to the grid on release
+        and snapping hides an error smaller than a grid step, so a released
+        drag came out equal with the bug back in
+  - [x] Dragging a component in the simulation view does nothing
+  - [ ] Dragging a wire's waypoint, and the right-click that cuts a wire
+  - [ ] The rubber band, including that it catches what it merely touches
+  - [ ] Placing from the palette, which broke once when a widget covered the
+        scene's own background response
+  - [ ] The view framing on open and on switching circuit — the logic was
+        right and the wiring threw the result away
+  - [ ] Paint order: circuit labels behind the floating windows. Needs either
+        a snapshot or a way to read the layer order back; worth deciding
+        which before writing it
 
 ## Known gaps in what ships
 
