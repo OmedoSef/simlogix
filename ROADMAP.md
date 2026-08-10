@@ -29,17 +29,59 @@ better at the thing it's for.
 
 ## Next
 
-- [ ] **Single-stepping and simulation speed**
+- [ ] 🚧 **Single-stepping and simulation speed**
 
   Time advances continuously at sixty ticks a second, and a clock beats once
   a second. There is no way to advance one tick and look at the result.
 
   For anything sequential — a register, a counter, a state machine — that is
-  *the* debugging tool, and it doesn't exist. It is also the first thing that
-  belongs in the simulation view's tool row, which was built with room for
-  exactly this.
+  *the* debugging tool, and it doesn't exist. It is also what the simulation
+  view's tool row was built with room for.
 
-  Small: `advance(1)` behind a button, plus a multiplier on the tick budget.
+  In this order, each usable on its own, and the first is what makes the rest
+  legible:
+
+  - [ ] **A tick counter in the status bar.** Without it, pressing *step* at
+    an instant where nothing changes is indistinguishable from a broken
+    button. Needs a read-only accessor on `Circuit` for the logical clock.
+  - [ ] **Step one tick.** `advance(1)`. A tick is one gate delay, so each
+    press moves the propagation on by one stage — which is exactly what a
+    ripple counter has to be watched through. One tick processes *all* the
+    events at that instant, not one of them, and that is the right
+    granularity.
+  - [ ] **Run to the next event.** Between two clock edges there are 59 ticks
+    where nothing happens, and crossing them one at a time is tedious. The
+    event queue already knows when the next one falls; it needs an accessor.
+  - [ ] **Step one clock edge**, with an explicit **source selector** — see
+    below.
+  - [ ] **A speed multiplier** on the tick budget (¼×, 1×, 4×). The natural
+    companion: slowing down before freezing.
+
+  **Stepping implies pausing.** Pressing *step* while it runs stops it first.
+
+  **The clock source is chosen, not guessed.** A step is "advance to the next
+  edge", and with several clocks that needs an answer. The selector lists the
+  `Clock` components *and the input ports*, because a circuit drawn to be
+  used inside another has its clock on a port — a flip-flop tested on its own
+  has no `Clock` in it at all, and refusing to step there would refuse the
+  very circuit you want to step through. With a single clock it settles
+  itself and is never seen. Guessing from a name (`CLK`, `H`) is shorter and
+  is not worth it: when it guesses wrong nothing on screen says why.
+
+  Acting on a port costs nothing, which is what makes this honest: a port's
+  *current* level is runtime state, like a button press — only its resting
+  level is stored. So stepping a port writes nothing to the document and
+  leaves no undo step. (A `Switch` is the exception, since its position *is*
+  saved.) On a port a step is high ↔ low; undriven is not part of a cycle.
+
+  The selection cannot be a `ComponentId` — those are handed out afresh every
+  time the circuit is rebuilt. It goes by position in the circuit, as
+  changing a component's variant already does to recover the selection.
+
+  **Known consequence**: `MAX_TOGGLES_PER_NET` counts per `advance` call, so
+  stepping one tick at a time never trips it. That is what you want — you are
+  watching the oscillation on purpose — but it means stepping cannot warn you
+  the way running does.
 
 - [ ] **Multi-bit buses**
 
@@ -101,13 +143,47 @@ that is what's wanted.
 - [ ] Multiplexer
 - [ ] Demultiplexer
 - [ ] D latch
+- [ ] D flip-flop, triggered on the rising or the falling edge
+- [ ] T flip-flop
+- [ ] Counter
 
-The last two carry a question the others don't: how many ways. A selector
-of *n* bits picks between 2ⁿ, so either the width is a property and the
-symbol grows pins with it, or each width is its own entry in the palette.
+The **multiplexer** and **demultiplexer** carry a question of their own:
+how many ways. A selector of *n* bits picks between 2ⁿ, so either the
+width is a property and the symbol grows pins with it, or each width is
+its own entry in the palette.
 Worth settling when they are built rather than now — and worth building
 after [multi-bit buses](#next), since a mux is the component that changes
 most if a wire can carry more than one bit.
+
+The flip-flop's edge is a **variant**, and the shape of that answer is
+already settled: it lives in the `ComponentKind`, as the transistor's
+channel and the transceiver's enable polarity do, with a selector in the
+properties panel. From your side it is a property; it just isn't *stored*
+as one, because the symbol has to follow — a falling-edge clock input
+carries a bubble, and that mark is what tells the two apart on a printed
+schematic. Two palette entries, one component.
+
+The counter's **number** needs saying which number before it is built:
+how many bits it counts *in*, or the value it counts *to* — a 4-bit
+counter and a modulo-10 counter are different components, and a divider
+wants the second. It also wants [multi-bit buses](#next) first, or its
+output is one pin per bit.
+
+It carries **two** synchronous-or-not settings, which is what a real part
+names too — they are independent and mean different things:
+
+- the **counter**: every stage on one clock, against a ripple counter where
+  each stage clocks the next. Invisible at rest; it shows only at a
+  transition, as the stages settle one after another. This engine can model
+  that honestly, since every component already carries a delay — one of the
+  few places the discrete-event model would be visible on screen rather than
+  only correct.
+- the **reset**: taken at the next edge, or the moment it is asserted.
+
+Which of the two is a *variant* rather than a stored property is the same
+question the flip-flop's edge answers, and probably gets the same answer for
+the reset — an asynchronous clear is drawn differently — while the counter's
+own kind may be better as two palette entries outright.
 
 ## Internal
 
