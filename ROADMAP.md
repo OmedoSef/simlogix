@@ -60,6 +60,50 @@ better at the thing it's for.
   natural companion to single-stepping, and the usual next question after
   "what is it doing right now".
 
+- [ ] **Looking inside an instance while it runs**
+
+  Flattening puts every nested component into the one engine, at any depth,
+  so watching a circuit means its sub-circuits' innards are right there,
+  live — and invisible. Seeing what a gate you built is doing means opening
+  it as its own circuit, which rebuilds it cold and loses the very state you
+  were looking at.
+
+  **The expensive half is already done, and thrown away.** `flatten` builds
+  `ids: Vec<Option<ComponentId>>` — one entry per saved component of the
+  sub-circuit, `None` for a port, which isn't instantiated — uses it to map
+  the pin groups, and drops it. Keeping it on the instance, recursively for
+  nested ones, *is* the map a live inner view needs.
+
+  **A tree of instances, not of circuits.** Two `nand` on a schematic are
+  two copies with two different states, so this cannot reuse the tree on the
+  left: that one lists definitions, this lists occurrences.
+
+  **It goes where the properties panel sits**, which in the simulation view
+  is greyed from edge to edge and says nothing. The tree on top, and the
+  selection's read-only properties underneath — what a component is *set to*
+  is still worth reading while you watch it work. Each mode then owns its
+  right-hand panel, the way each already owns its tool row.
+
+  Two things known in advance:
+
+  - a resizable panel only keeps the size it is given while its content
+    fills it. `set_min_height` was needed for the palette and again for the
+    circuit tree; this is the third, and it costs a line rather than a
+    discovery;
+  - descending is effectively a **third view**, so it needs its own camera
+    and a way back — a breadcrumb. Without the camera you arrive on blank
+    canvas, which is exactly the bug `switch_view` was fixed for.
+
+  Read-only inside, and structurally so: editing there is editing the
+  *definition*, which means a rebuild — and rebuilding cold is the thing
+  being avoided. The ids only hold until the next rebuild, and nearly every
+  edit rebuilds; the simulation view is the one place they can be trusted,
+  which is the argument for it living there and nowhere else.
+
+  Worth building **after** [multi-bit buses](#next): those reach into
+  `Signal` and the engine, so their cost grows with everything stacked on
+  top, while this one only waits.
+
 - [ ] **Importing a circuit from another project**
 
   The groundwork is done and unused: projects carry a library name,
