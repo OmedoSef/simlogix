@@ -98,6 +98,15 @@ that is what's wanted.
 
 - [ ] Half adder
 - [ ] Adder
+- [ ] Multiplexer
+- [ ] Demultiplexer
+
+The last two carry a question the others don't: how many ways. A selector
+of *n* bits picks between 2ⁿ, so either the width is a property and the
+symbol grows pins with it, or each width is its own entry in the palette.
+Worth settling when they are built rather than now — and worth building
+after [multi-bit buses](#next), since a mux is the component that changes
+most if a wire can carry more than one bit.
 
 ## Internal
 
