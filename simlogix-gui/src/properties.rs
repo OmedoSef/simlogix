@@ -110,11 +110,15 @@ impl Properties {
     /// plain gates, because a gate on a bus is that gate applied bit by bit
     /// and every one of its pins is that same width.
     ///
-    /// What is deliberately absent is everything whose pins are *not* all
-    /// alike — a tri-state buffer's enable, a transceiver's direction, a
-    /// latch's set and reset are one bit whatever the data is. A width is
-    /// declared per component today, not per pin, so offering it there
-    /// would widen the control pins too and promise something false.
+    /// A component whose pins are *not* all alike is offered it too — a
+    /// tri-state buffer, a transceiver — because
+    /// [`crate::placed_component::PlacedComponent::pin_width`] answers per
+    /// pin, so the enable and the direction stay one bit while the data
+    /// widens.
+    ///
+    /// The SR latch is still absent: a wide one is a register, and what
+    /// `S` and `R` would mean for it is a design question rather than a
+    /// width.
     pub fn has_width(kind: &ComponentKind) -> bool {
         matches!(
             kind,
@@ -130,6 +134,11 @@ impl Properties {
                 | ComponentKind::Not
                 | ComponentKind::Buffer
                 | ComponentKind::Constant
+                // Their data pins are as wide as they are told; the enable
+                // and the direction stay one bit, which `pin_width` says.
+                | ComponentKind::TriStateBuffer
+                | ComponentKind::BusTransceiver
+                | ComponentKind::BusTransceiverOe
         )
     }
 

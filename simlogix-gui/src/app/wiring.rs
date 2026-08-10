@@ -596,27 +596,42 @@ impl SimLogixApp {
             }
         }
 
-        // How wide each component's pins are, from its properties. The same
+        // How wide each pin is, from the component's properties. The same
         // pass that says what a net *joins* is the one that says how wide it
         // is: both are read off the drawing, and neither can be restated
         // without the other.
-        let declared: HashMap<ComponentId, usize> = self
+        //
+        // Per *pin* rather than per component, because a component's pins
+        // are not always alike — a transceiver's direction is one bit while
+        // its two bus sides are as wide as they are told, and an instance's
+        // pins are as wide as the ports they stand for, one by one.
+        // Everything an instance carried up about its innards, which are in
+        // the engine but not in the drawing.
+        let inner_widths: HashMap<(ComponentId, usize), usize> = self
             .placed
             .iter()
-            .map(|placed| (placed.id(), placed.properties().width()))
+            .flat_map(|placed| placed.inner_pin_widths().iter().copied())
             .collect();
+        let by_id: HashMap<ComponentId, &crate::placed_component::PlacedComponent> = self
+            .placed
+            .iter()
+            .map(|placed| (placed.id(), placed))
+            .collect();
+        // A component the drawing does not list is one flattened in from a
+        // sub-circuit; its declared widths were carried up with its wiring.
+        let declared = |&(component, index): &(ComponentId, usize)| -> usize {
+            by_id
+                .get(&component)
+                .map(|placed| placed.pin_width(index))
+                .or_else(|| inner_widths.get(&(component, index)).copied())
+                .unwrap_or(1)
+        };
         // The widest pin on the net wins, and a narrower one then contributes
         // the wrong width — which the engine already faults, on every bit.
         // Taking the maximum rather than refusing here is what makes the
         // mismatch *visible* instead of silently dropped.
-        let width_of = |group: &[(ComponentId, usize)]| {
-            group
-                .iter()
-                .filter_map(|(component, _)| declared.get(component))
-                .copied()
-                .max()
-                .unwrap_or(1)
-        };
+        let width_of =
+            |group: &[(ComponentId, usize)]| group.iter().map(declared).max().unwrap_or(1);
 
         // A lone pin is its own net anyway, which `rewire` already does for
         // anything it isn't told about — but only at one bit, so a wide pin
@@ -641,9 +656,7 @@ impl SimLogixApp {
                 group
                     .pins
                     .iter()
-                    .filter(|(component, _)| {
-                        declared.get(component).copied().unwrap_or(1) != group.width
-                    })
+                    .filter(|pin| declared(pin) != group.width)
                     .copied()
             })
             .collect();

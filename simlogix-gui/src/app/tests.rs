@@ -1700,3 +1700,94 @@ fn a_constant_comes_back_from_a_saved_project_still_driving() {
         "0b0110 came back"
     );
 }
+
+#[test]
+fn a_transceivers_controls_stay_one_bit_while_its_bus_sides_widen() {
+    // The case a width declared per *component* could not express: `Dir`
+    // and the enable are one bit whatever passes through `A` and `B`.
+    let mut app = SimLogixApp::default();
+    let transceiver = app.place(ComponentKind::BusTransceiver, egui::pos2(200.0, 80.0));
+    let enable = app.place(ComponentKind::InputPort, egui::pos2(40.0, 160.0));
+    app.add_wire(
+        WireEndpoint::Pin(enable, 0),
+        WireEndpoint::Pin(transceiver, 3),
+        Vec::new(),
+    );
+    if let Some(placed) = app
+        .placed
+        .iter_mut()
+        .find(|placed| placed.id() == transceiver)
+    {
+        placed.set_properties(Properties {
+            width: Some(4),
+            ..Default::default()
+        });
+    }
+    app.rebuild_nets();
+
+    let pins = app.circuit.pins(transceiver).to_vec();
+    assert_eq!(app.circuit.net_width(pins[0].net), 4, "A carries the data");
+    assert_eq!(app.circuit.net_width(pins[1].net), 4, "so does B");
+    assert_eq!(app.circuit.net_width(pins[2].net), 1, "Dir does not");
+    assert_eq!(
+        app.circuit.net_width(pins[3].net),
+        1,
+        "nor does the enable, and the one-bit port on it is no fault"
+    );
+    assert!(
+        app.width_faults.is_empty(),
+        "nothing here disagrees: {:?}",
+        app.width_faults
+    );
+}
+
+#[test]
+fn an_instances_pins_are_as_wide_as_the_ports_they_stand_for() {
+    // A sub-circuit whose boundary is four bits wide. Its instance's pins
+    // have to say so, or every wire drawn to one is faulted.
+    let mut app = SimLogixApp::default();
+    app.rename_circuit(0, "wide");
+    let input = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let output = app.place(ComponentKind::OutputPort, egui::pos2(200.0, 40.0));
+    let gate = app.place(ComponentKind::Buffer, egui::pos2(120.0, 40.0));
+    for (from, to) in [((input, 0), (gate, 0)), ((gate, 1), (output, 0))] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    let wide = Properties {
+        width: Some(4),
+        ..Default::default()
+    };
+    for id in [input, output, gate] {
+        if let Some(placed) = app.placed.iter_mut().find(|placed| placed.id() == id) {
+            placed.set_properties(wide.clone());
+        }
+    }
+    app.rebuild_nets();
+
+    // A second circuit, and an instance of the wide one in it.
+    app.create_circuit(String::new());
+    let instance = app.place(
+        ComponentKind::Circuit("wide".to_string()),
+        egui::pos2(200.0, 200.0),
+    );
+    app.rebuild_nets();
+
+    let pins = app.circuit.pins(instance).to_vec();
+    assert_eq!(pins.len(), 2, "one pin per port");
+    for pin in &pins {
+        assert_eq!(
+            app.circuit.net_width(pin.net),
+            4,
+            "an instance pin is as wide as its port"
+        );
+    }
+    assert!(
+        app.width_faults.is_empty(),
+        "including the innards, which are in the engine but not the drawing: {:?}",
+        app.width_faults
+    );
+}

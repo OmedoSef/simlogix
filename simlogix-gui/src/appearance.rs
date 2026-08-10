@@ -612,6 +612,7 @@ mod tests {
         InstancePort {
             name: String::new(),
             kind,
+            width: 1,
             group: None,
         }
     }

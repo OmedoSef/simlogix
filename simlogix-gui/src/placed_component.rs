@@ -13,11 +13,21 @@ use crate::palette::ComponentKind;
 use crate::properties::{Properties, DEFAULT_LED_COLOR};
 use crate::symbol::{self, SymbolState};
 
-/// A flattened sub-circuit's ports and its own internal connections — what
-/// `SimLogixApp::flatten` hands back and `Shape::Instance` keeps.
-pub type InstanceWiring = (Vec<InstancePort>, Vec<Vec<(ComponentId, usize)>>);
+/// A flattened sub-circuit's ports, its own internal connections and how
+/// wide its innards' pins are — what `SimLogixApp::flatten` hands back and
+/// `Shape::Instance` keeps.
+///
+/// A struct rather than a tuple of three, and it earned that on the third
+/// member: two `Vec`s of pin pairs side by side is a call site where
+/// transposing them still compiles.
+#[derive(Default)]
+pub struct InstanceWiring {
+    pub ports: Vec<InstancePort>,
+    pub inner_groups: Vec<Vec<(ComponentId, usize)>>,
+    pub inner_widths: Vec<((ComponentId, usize), usize)>,
+}
 
-/// The same pair, borrowed — what the net rebuild reads back off an instance.
+/// The pair the net rebuild reads back off an instance.
 pub type InstanceWiringRef<'a> = (&'a [InstancePort], &'a [Vec<(ComponentId, usize)>]);
 
 /// One pin an instance exposes, and where it lands inside the flattened
@@ -25,6 +35,11 @@ pub type InstanceWiringRef<'a> = (&'a [InstancePort], &'a [Vec<(ComponentId, usi
 #[derive(Debug, Clone)]
 pub struct InstancePort {
     pub name: String,
+    /// How many bits this port's pin carries, from the port's own
+    /// properties inside the sub-circuit. Read there rather than declared
+    /// out here: the sub-circuit's boundary is what says how wide it is,
+    /// and an instance repeating the number is one that can disagree.
+    pub width: usize,
     /// `InputPort`, `OutputPort` or `InOutPort` — which side of the box it
     /// goes on, and which way the arrow points.
     pub kind: ComponentKind,
@@ -144,6 +159,9 @@ enum Shape {
         /// has to re-apply — it derives everything else from the *open*
         /// drawing, and these wires aren't in it.
         inner_groups: Vec<Vec<(ComponentId, usize)>>,
+        /// How wide each of the innards' pins is, since they are not in the
+        /// drawing for `rebuild_nets` to ask.
+        inner_widths: Vec<((ComponentId, usize), usize)>,
         /// What it looks like: the circuit's own symbol if it has one, and
         /// otherwise the generated box. Resolved once, when the instance is
         /// built, rather than worked out again on every frame.
@@ -255,8 +273,7 @@ impl PlacedComponent {
         id: ComponentId,
         center: Pos2,
         path: String,
-        ports: Vec<InstancePort>,
-        inner_groups: Vec<Vec<(ComponentId, usize)>>,
+        wiring: InstanceWiring,
         appearance: Appearance,
     ) -> Self {
         Self::new(
@@ -264,8 +281,9 @@ impl PlacedComponent {
             center,
             Shape::Instance {
                 path,
-                ports,
-                inner_groups,
+                ports: wiring.ports,
+                inner_groups: wiring.inner_groups,
+                inner_widths: wiring.inner_widths,
                 appearance,
             },
         )
@@ -293,6 +311,19 @@ impl PlacedComponent {
                 ..
             } => Some((ports, inner_groups)),
             _ => None,
+        }
+    }
+
+    /// How wide each pin of this instance's *innards* is.
+    ///
+    /// Those components are not in the drawing — they were built into the
+    /// engine and their `PlacedComponent`s dropped — so nothing else can be
+    /// asked. Carried up with the wiring, and for the same reason: the
+    /// record would otherwise go with the entry that held it.
+    pub fn inner_pin_widths(&self) -> &[((ComponentId, usize), usize)] {
+        match &self.shape {
+            Shape::Instance { inner_widths, .. } => inner_widths,
+            _ => &[],
         }
     }
 
@@ -349,6 +380,42 @@ impl PlacedComponent {
     /// The width its pins carry, as its properties say.
     pub fn width(&self) -> usize {
         self.properties.width()
+    }
+
+    /// How many bits pin `index` carries.
+    ///
+    /// Per *pin*, because a component's pins are not always alike: a
+    /// tri-state buffer's enable and a transceiver's direction are one bit
+    /// whatever the data beside them is, and an instance's pins are as wide
+    /// as the ports they stand for, one by one.
+    ///
+    /// A kind that is never offered the setting answers one whatever its
+    /// properties happen to hold — a width pasted onto a LED is not a claim
+    /// it ever made.
+    pub fn pin_width(&self, index: usize) -> usize {
+        let declared = self.properties.width();
+        match &self.shape {
+            Shape::Instance { ports, .. } => ports.get(index).map_or(1, |port| port.width),
+            // It shares `TwoInputGate`'s shape but not its pins: the enable
+            // at index 1 is one bit whatever passes through.
+            Shape::TwoInputGate(kind) if *kind == ComponentKind::TriStateBuffer => {
+                if index == 1 {
+                    1
+                } else {
+                    declared
+                }
+            }
+            // `A` and `B` carry the data; `Dir` and the enable do not.
+            Shape::BusTransceiver(_) => {
+                if index < 2 {
+                    declared
+                } else {
+                    1
+                }
+            }
+            _ if Properties::has_width(&self.kind()) => declared,
+            _ => 1,
+        }
     }
 
     pub fn properties(&self) -> &Properties {
@@ -1435,6 +1502,7 @@ mod tests {
         InstancePort {
             name: String::new(),
             kind,
+            width: 1,
             group: None,
         }
     }

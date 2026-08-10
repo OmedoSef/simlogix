@@ -931,8 +931,9 @@ impl SimLogixApp {
                 // still places the box, empty: an instance you can see and
                 // delete beats a click that silently does nothing, and
                 // `flatten` has already said why in the status window.
-                let (ports, inner_groups) = self.flatten(&path).unwrap_or_default();
-                let pins = ports
+                let wiring = self.flatten(&path).unwrap_or_default();
+                let pins = wiring
+                    .ports
                     .iter()
                     .map(|_| Pin {
                         // `InOut` whatever the port's own direction: the
@@ -944,10 +945,10 @@ impl SimLogixApp {
                     .collect();
                 let id = self
                     .circuit
-                    .add_component(Box::new(CircuitAnchor::new(ports.len())), pins);
+                    .add_component(Box::new(CircuitAnchor::new(wiring.ports.len())), pins);
                 self.circuit.schedule_now(id);
-                let appearance = self.appearance_of(&path, &ports);
-                PlacedComponent::instance(id, center, path, ports, inner_groups, appearance)
+                let appearance = self.appearance_of(&path, &wiring.ports);
+                PlacedComponent::instance(id, center, path, wiring, appearance)
             }
             ComponentKind::SrLatch => {
                 let nets = [
@@ -1558,8 +1559,17 @@ impl SimLogixApp {
         // Carrying it up rather than flattening recursively into one list is
         // what makes the depth unbounded — each level hands its parent a
         // finished description of everything below it.
+        //
+        // The declared widths go up with it, and for the same reason: the
+        // only record of how wide an inner pin is lives in the entry about
+        // to be dropped, and `rebuild_nets` has no other way to ask.
         let mut nested: Vec<Vec<(ComponentId, usize)>> = Vec::new();
+        let mut inner_widths: Vec<((ComponentId, usize), usize)> = Vec::new();
         for placed in &self.placed[first_inner..] {
+            for index in 0..self.circuit.try_pins(placed.id()).map_or(0, <[_]>::len) {
+                inner_widths.push(((placed.id(), index), placed.pin_width(index)));
+            }
+            inner_widths.extend_from_slice(placed.inner_pin_widths());
             let Some((ports, groups)) = placed.instance_wiring() else {
                 continue;
             };
@@ -1595,10 +1605,11 @@ impl SimLogixApp {
         // one; anything carried up from a nested instance is appended after.
         let mut inner_groups: Vec<Vec<(ComponentId, usize)>> = groups.iter().map(live).collect();
         inner_groups.extend(nested);
-        Some((
-            ports.into_iter().map(|(_, port)| port).collect(),
+        Some(InstanceWiring {
+            ports: ports.into_iter().map(|(_, port)| port).collect(),
             inner_groups,
-        ))
+            inner_widths,
+        })
     }
 
     /// A saved circuit's ports, paired with their index in it, in the order
@@ -1633,6 +1644,11 @@ impl SimLogixApp {
                             .map(str::to_string)
                             .unwrap_or_else(|| index.to_string()),
                         kind: component.kind.clone(),
+                        // The port's own declared width: the boundary is
+                        // what says how wide it is, and it is read here so
+                        // the preview and the real instance cannot come to
+                        // disagree about it either.
+                        width: component.properties.width(),
                         // Only `flatten` knows the sub-circuit's nets.
                         group: None,
                     },

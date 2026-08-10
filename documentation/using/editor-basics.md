@@ -158,7 +158,7 @@ project file.
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
 | **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
-| **Bits** | the three ports, the plain gates, Constant | How many bits its pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
+| **Bits** | the three ports, the plain gates, Constant, Tri-state buffer, the transceivers | How many bits its *data* pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
 | **Value** | Constant | What it puts on its wire. Typed in decimal, or `0x…` / `0b…`. |
 
 A **constant** is the one component that is nothing but its value: it puts
@@ -168,10 +168,17 @@ setting, so changing it is an ordinary edit that `Ctrl+Z` undoes, unlike a
 port's value which is runtime state. On a one-bit wire it is simply 0 or 1.
 
 A gate told it is four bits wide is four gates side by side: it computes on
-every bit on its own, and all of its pins are that width. That is also why
-the setting isn't offered on a tri-state buffer, a transceiver or a latch —
-their control pins stay one bit whatever the data is, and a width is
-declared per component rather than per pin.
+every bit on its own, and all of its pins are that width.
+
+Not every component's pins are alike, and the setting only widens the ones
+that carry data: a tri-state buffer's enable and a transceiver's direction
+stay one bit whatever passes through. A **sub-circuit instance** has no such
+setting at all — each of its pins is as wide as the port it stands for, so
+you set the width on the ports inside and the instance follows.
+
+The SR latch is deliberately left out: a wide one would be a register, and
+what `S` and `R` should mean for it is a design question rather than a
+width.
 
 Two of those look alike and are not. A **button's** setting is its *resting*
 state: a press springs back, so what is saved is where it returns to. A
