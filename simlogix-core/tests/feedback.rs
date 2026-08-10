@@ -15,7 +15,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use simlogix_core::{Button, Circuit, ComponentId, Nand, Nor, Not, Pin, PinDirection, Signal};
+use simlogix_core::{Button, Circuit, ComponentId, Level, Nand, Nor, Not, Pin, PinDirection};
 
 /// A cross-coupled NAND latch, with a button on each of its two active-low
 /// inputs so a test can drive them.
@@ -43,12 +43,12 @@ impl Latch {
         self.circuit.run()
     }
 
-    fn q(&self) -> Signal {
+    fn q(&self) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.q_gate)[2].net)
     }
 
-    fn q_bar(&self) -> Signal {
+    fn q_bar(&self) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.q_bar_gate)[2].net)
     }
@@ -148,19 +148,19 @@ fn an_sr_nand_latch_holds_its_value_when_both_inputs_are_released() {
 
     // Assert set (active low), leave reset alone.
     latch.drive(false, true).expect("a latch settles");
-    assert_eq!(latch.q(), Signal::High, "asserting set should set Q");
+    assert_eq!(latch.q(), Level::High, "asserting set should set Q");
 
     // Release it: both inputs now read the same, and the only thing that can
     // decide Q is what the loop is already holding.
     latch.drive(true, true).expect("a latch settles");
     assert_eq!(
         latch.q(),
-        Signal::High,
+        Level::High,
         "Q should hold after set is released"
     );
 
     latch.drive(true, false).expect("a latch settles");
-    assert_eq!(latch.q(), Signal::Low, "asserting reset should clear Q");
+    assert_eq!(latch.q(), Level::Low, "asserting reset should clear Q");
 
     // The point of the whole test: identical inputs to two lines above, and
     // the opposite output. That is memory, produced by nothing but a
@@ -169,7 +169,7 @@ fn an_sr_nand_latch_holds_its_value_when_both_inputs_are_released() {
     latch.drive(true, true).expect("a latch settles");
     assert_eq!(
         latch.q(),
-        Signal::Low,
+        Level::Low,
         "Q should hold after reset is released"
     );
 }
@@ -182,8 +182,8 @@ fn a_latch_released_from_its_forbidden_state_settles_into_a_legal_one() {
     // truth table calls forbidden, since Q and Q̄ are meant to be
     // complementary.
     latch.drive(false, false).expect("a latch settles");
-    assert_eq!(latch.q(), Signal::High);
-    assert_eq!(latch.q_bar(), Signal::High);
+    assert_eq!(latch.q(), Level::High);
+    assert_eq!(latch.q_bar(), Level::High);
 
     // Releasing both at the same instant is the classic race. Real hardware
     // resolves it on the difference between two gates that are never quite
@@ -199,7 +199,7 @@ fn a_latch_released_from_its_forbidden_state_settles_into_a_legal_one() {
     // than a promise.
     let (q, q_bar) = (latch.q(), latch.q_bar());
     assert!(
-        (q == Signal::High && q_bar == Signal::Low) || (q == Signal::Low && q_bar == Signal::High),
+        (q == Level::High && q_bar == Level::Low) || (q == Level::Low && q_bar == Level::High),
         "expected complementary outputs, got q={q:?} q_bar={q_bar:?}"
     );
 }
@@ -286,7 +286,7 @@ fn started_ring() -> (Circuit, ComponentId) {
     let output = circuit.pins(nor)[2].net;
     assert_eq!(
         circuit.signal_at(output),
-        Signal::Low,
+        Level::Low,
         "the enable should have seeded the ring with a definite value"
     );
 
@@ -311,7 +311,7 @@ fn a_ring_oscillator_oscillates_instead_of_hanging() {
     }
 
     assert!(
-        seen.contains(&Signal::High) && seen.contains(&Signal::Low),
+        seen.contains(&Level::High) && seen.contains(&Level::Low),
         "the ring should be swinging between both levels, saw {seen:?}"
     );
 }

@@ -13,7 +13,7 @@
 use egui::{RichText, Ui};
 use serde::{Deserialize, Serialize};
 
-use simlogix_core::PortLevel;
+use simlogix_core::PortSetting;
 
 use crate::appearance::{Appearance, Facing, PinSlot, Shape, TextAlign};
 use crate::canvas;
@@ -55,7 +55,7 @@ pub struct Properties {
     /// loaded. Like a button's `pressed`, this is the *resting* value, not
     /// the current one: runtime state is still never saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub initial: Option<PortLevel>,
+    pub initial: Option<PortSetting>,
 }
 
 impl Properties {
@@ -82,7 +82,7 @@ impl Properties {
 
     /// Where a driving port rests. Undriven unless told otherwise — the
     /// honest starting point, since nothing has said what it carries yet.
-    pub fn initial_level(&self) -> PortLevel {
+    pub fn initial_level(&self) -> PortSetting {
         self.initial.unwrap_or_default()
     }
 
@@ -631,9 +631,9 @@ pub fn show(
             ui.label(strings.property_initial);
             let current = properties.initial_level();
             for (level, label) in [
-                (PortLevel::Undriven, strings.port_level_undriven),
-                (PortLevel::Low, strings.port_level_low),
-                (PortLevel::High, strings.port_level_high),
+                (PortSetting::Undriven, strings.port_level_undriven),
+                (PortSetting::Low, strings.port_level_low),
+                (PortSetting::High, strings.port_level_high),
             ] {
                 // Undriven stays offered even on a two-state port: it is
                 // still where a port sits before anything drives it, and
@@ -643,7 +643,7 @@ pub fn show(
                     edit_started = true;
                     // Back to unset when it's the default again, so a
                     // project that says nothing keeps saying nothing.
-                    properties.initial = (level != PortLevel::default()).then_some(level);
+                    properties.initial = (level != PortSetting::default()).then_some(level);
                 }
             }
         }
@@ -763,20 +763,28 @@ mod tests {
             pressed: Some(true),
             color: Some([1, 2, 3]),
             tri_state: Some(true),
-            initial: Some(PortLevel::High),
+            initial: Some(PortSetting::High),
         };
 
         let json = serde_json::to_string(&properties).expect("serializes");
         let parsed: Properties = serde_json::from_str(&json).expect("parses");
 
         assert_eq!(parsed, properties);
+        // And the *text*, not only the round trip. What reaches the file is
+        // the field and variant names, never the Rust type names — which is
+        // what makes renaming a type free, and is worth checking rather than
+        // asserting: `PortLevel` became `PortSetting` on the strength of it.
+        assert_eq!(
+            json,
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High"}"#
+        );
     }
 
     #[test]
     fn a_ports_resting_level_defaults_to_undriven() {
         // Nothing has said what it carries yet, so claiming a level would be
         // inventing one — and undriven is the case worth being able to test.
-        assert_eq!(Properties::default().initial_level(), PortLevel::Undriven);
+        assert_eq!(Properties::default().initial_level(), PortSetting::Undriven);
         assert!(!Properties::default().is_tri_state());
     }
 

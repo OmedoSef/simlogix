@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A buffer with an enable: it passes its data input through while enabled,
 /// and stops driving altogether when it isn't.
@@ -17,26 +17,26 @@ use crate::signal::Signal;
 pub struct TriStateBuffer;
 
 impl Component for TriStateBuffer {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [data, enable] => vec![gated(*data, *enable)],
-            _ => vec![Signal::Unknown],
+            _ => vec![Level::Unknown],
         }
     }
 }
 
-fn gated(data: Signal, enable: Signal) -> Signal {
+fn gated(data: Level, enable: Level) -> Level {
     match enable {
-        Signal::High => data,
-        Signal::Low => Signal::HighZ,
+        Level::High => data,
+        Level::Low => Level::HighZ,
         // A faulted enable is a faulted output — the same dominance the
         // gates use, and the alternative would be to quietly pick one of
         // "driving" or "not driving" and hide the fault.
-        Signal::Error => Signal::Error,
+        Level::Error => Level::Error,
         // Neither driven nor known. Answering `HighZ` would claim this
         // buffer is deliberately off, which is a stronger statement than
         // the truth: nobody knows whether it's on.
-        _ => Signal::Unknown,
+        _ => Level::Unknown,
     }
 }
 
@@ -51,21 +51,21 @@ mod tests {
     #[test]
     fn it_passes_its_input_through_while_enabled() {
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::High, Signal::High]),
-            vec![Signal::High]
+            TriStateBuffer.eval(&[Level::High, Level::High]),
+            vec![Level::High]
         );
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::Low, Signal::High]),
-            vec![Signal::Low]
+            TriStateBuffer.eval(&[Level::Low, Level::High]),
+            vec![Level::Low]
         );
     }
 
     #[test]
     fn it_stops_driving_when_disabled_whatever_its_input_says() {
-        for data in [Signal::High, Signal::Low, Signal::Unknown, Signal::Error] {
+        for data in [Level::High, Level::Low, Level::Unknown, Level::Error] {
             assert_eq!(
-                TriStateBuffer.eval(&[data, Signal::Low]),
-                vec![Signal::HighZ],
+                TriStateBuffer.eval(&[data, Level::Low]),
+                vec![Level::HighZ],
                 "a disabled buffer drives nothing, even with {data:?} on its input"
             );
         }
@@ -76,28 +76,28 @@ mod tests {
         // `HighZ` here would assert that the buffer is deliberately off,
         // which would let the rest of the bus resolve as if it were absent.
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::High, Signal::Unknown]),
-            vec![Signal::Unknown]
+            TriStateBuffer.eval(&[Level::High, Level::Unknown]),
+            vec![Level::Unknown]
         );
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::High, Signal::HighZ]),
-            vec![Signal::Unknown]
+            TriStateBuffer.eval(&[Level::High, Level::HighZ]),
+            vec![Level::Unknown]
         );
     }
 
     #[test]
     fn a_faulted_enable_dominates() {
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::High, Signal::Error]),
-            vec![Signal::Error]
+            TriStateBuffer.eval(&[Level::High, Level::Error]),
+            vec![Level::Error]
         );
     }
 
     #[test]
     fn a_faulted_input_passes_through_while_enabled() {
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::Error, Signal::High]),
-            vec![Signal::Error]
+            TriStateBuffer.eval(&[Level::Error, Level::High]),
+            vec![Level::Error]
         );
     }
 }

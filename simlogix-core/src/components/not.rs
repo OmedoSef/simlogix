@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// An inverter, combinational (no internal state): its single output
 /// follows `NOT input` at every evaluation. `Error` stays `Error`
@@ -10,24 +10,24 @@ use crate::signal::Signal;
 pub struct Not;
 
 impl Component for Not {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [a] => vec![not(*a)],
-            _ => vec![Signal::Unknown],
+            _ => vec![Level::Unknown],
         }
     }
 }
 
-fn not(a: Signal) -> Signal {
+fn not(a: Level) -> Level {
     // A weak level can't reach an input: `Circuit` resolves a net before any
     // component reads it, and it never hands out a weak one. The arms exist
     // because the compiler is right to insist, and treating them as their
     // full-strength selves is the only answer that could ever be correct.
     match a.strengthened() {
-        Signal::High => Signal::Low,
-        Signal::Low => Signal::High,
-        Signal::Error => Signal::Error,
-        _ => Signal::Unknown,
+        Level::High => Level::Low,
+        Level::Low => Level::High,
+        Level::Error => Level::Error,
+        _ => Level::Unknown,
     }
 }
 
@@ -41,18 +41,18 @@ mod tests {
 
     #[test]
     fn inverts_a_definite_input() {
-        assert_eq!(Not.eval(&[Signal::High]), vec![Signal::Low]);
-        assert_eq!(Not.eval(&[Signal::Low]), vec![Signal::High]);
+        assert_eq!(Not.eval(&[Level::High]), vec![Level::Low]);
+        assert_eq!(Not.eval(&[Level::Low]), vec![Level::High]);
     }
 
     #[test]
     fn error_stays_error() {
-        assert_eq!(Not.eval(&[Signal::Error]), vec![Signal::Error]);
+        assert_eq!(Not.eval(&[Level::Error]), vec![Level::Error]);
     }
 
     #[test]
     fn unknown_and_high_z_both_resolve_to_unknown() {
-        assert_eq!(Not.eval(&[Signal::Unknown]), vec![Signal::Unknown]);
-        assert_eq!(Not.eval(&[Signal::HighZ]), vec![Signal::Unknown]);
+        assert_eq!(Not.eval(&[Level::Unknown]), vec![Level::Unknown]);
+        assert_eq!(Not.eval(&[Level::HighZ]), vec![Level::Unknown]);
     }
 }

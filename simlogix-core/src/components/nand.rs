@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A 2-input NAND gate, combinational (no internal state): its output
 /// follows `NOT (a AND b)` at every evaluation — `And`'s dominance rule,
@@ -10,20 +10,20 @@ use crate::signal::Signal;
 pub struct Nand;
 
 impl Component for Nand {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [a, b] => vec![nand(*a, *b)],
-            _ => vec![Signal::Unknown],
+            _ => vec![Level::Unknown],
         }
     }
 }
 
-fn nand(a: Signal, b: Signal) -> Signal {
+fn nand(a: Level, b: Level) -> Level {
     match (a, b) {
-        (Signal::Low, _) | (_, Signal::Low) => Signal::High,
-        (Signal::Error, _) | (_, Signal::Error) => Signal::Error,
-        (Signal::High, Signal::High) => Signal::Low,
-        _ => Signal::Unknown,
+        (Level::Low, _) | (_, Level::Low) => Level::High,
+        (Level::Error, _) | (_, Level::Error) => Level::Error,
+        (Level::High, Level::High) => Level::Low,
+        _ => Level::Unknown,
     }
 }
 
@@ -37,39 +37,33 @@ mod tests {
 
     #[test]
     fn outputs_low_only_when_both_inputs_are_high() {
-        assert_eq!(Nand.eval(&[Signal::High, Signal::High]), vec![Signal::Low]);
-        assert_eq!(Nand.eval(&[Signal::High, Signal::Low]), vec![Signal::High]);
-        assert_eq!(Nand.eval(&[Signal::Low, Signal::High]), vec![Signal::High]);
-        assert_eq!(Nand.eval(&[Signal::Low, Signal::Low]), vec![Signal::High]);
+        assert_eq!(Nand.eval(&[Level::High, Level::High]), vec![Level::Low]);
+        assert_eq!(Nand.eval(&[Level::High, Level::Low]), vec![Level::High]);
+        assert_eq!(Nand.eval(&[Level::Low, Level::High]), vec![Level::High]);
+        assert_eq!(Nand.eval(&[Level::Low, Level::Low]), vec![Level::High]);
     }
 
     #[test]
     fn a_definite_low_dominates_an_uncertain_other_input() {
-        assert_eq!(
-            Nand.eval(&[Signal::Low, Signal::Unknown]),
-            vec![Signal::High]
-        );
-        assert_eq!(Nand.eval(&[Signal::Low, Signal::Error]), vec![Signal::High]);
-        assert_eq!(Nand.eval(&[Signal::Low, Signal::HighZ]), vec![Signal::High]);
+        assert_eq!(Nand.eval(&[Level::Low, Level::Unknown]), vec![Level::High]);
+        assert_eq!(Nand.eval(&[Level::Low, Level::Error]), vec![Level::High]);
+        assert_eq!(Nand.eval(&[Level::Low, Level::HighZ]), vec![Level::High]);
     }
 
     #[test]
     fn error_propagates_when_no_input_is_definitely_low() {
-        assert_eq!(
-            Nand.eval(&[Signal::High, Signal::Error]),
-            vec![Signal::Error]
-        );
+        assert_eq!(Nand.eval(&[Level::High, Level::Error]), vec![Level::Error]);
     }
 
     #[test]
     fn anything_uncertain_without_a_low_or_error_is_unknown() {
         assert_eq!(
-            Nand.eval(&[Signal::High, Signal::Unknown]),
-            vec![Signal::Unknown]
+            Nand.eval(&[Level::High, Level::Unknown]),
+            vec![Level::Unknown]
         );
         assert_eq!(
-            Nand.eval(&[Signal::High, Signal::HighZ]),
-            vec![Signal::Unknown]
+            Nand.eval(&[Level::High, Level::HighZ]),
+            vec![Level::Unknown]
         );
     }
 }

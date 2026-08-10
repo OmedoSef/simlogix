@@ -367,7 +367,7 @@ static ENGLISH: Strings = Strings {
     menu_simulation_run: "Run",
     menu_simulation_pause: "Pause",
     menu_simulation_signals: "Show signal state",
-    status_signals_hidden: "Signal state hidden — C shows it again",
+    status_signals_hidden: "Level state hidden — C shows it again",
     menu_settings: "Settings",
     menu_settings_theme: "Theme",
     menu_settings_language: "Language",

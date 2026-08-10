@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A 2-input XNOR gate, combinational (no internal state): its output
 /// follows `NOT (a XOR b)` at every evaluation — same "neither input alone
@@ -10,20 +10,20 @@ use crate::signal::Signal;
 pub struct Xnor;
 
 impl Component for Xnor {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [a, b] => vec![xnor(*a, *b)],
-            _ => vec![Signal::Unknown],
+            _ => vec![Level::Unknown],
         }
     }
 }
 
-fn xnor(a: Signal, b: Signal) -> Signal {
+fn xnor(a: Level, b: Level) -> Level {
     match (a, b) {
-        (Signal::Error, _) | (_, Signal::Error) => Signal::Error,
-        (Signal::High, Signal::High) | (Signal::Low, Signal::Low) => Signal::High,
-        (Signal::High, Signal::Low) | (Signal::Low, Signal::High) => Signal::Low,
-        _ => Signal::Unknown,
+        (Level::Error, _) | (_, Level::Error) => Level::Error,
+        (Level::High, Level::High) | (Level::Low, Level::Low) => Level::High,
+        (Level::High, Level::Low) | (Level::Low, Level::High) => Level::Low,
+        _ => Level::Unknown,
     }
 }
 
@@ -37,37 +37,28 @@ mod tests {
 
     #[test]
     fn outputs_high_only_when_inputs_match() {
-        assert_eq!(Xnor.eval(&[Signal::Low, Signal::Low]), vec![Signal::High]);
-        assert_eq!(Xnor.eval(&[Signal::Low, Signal::High]), vec![Signal::Low]);
-        assert_eq!(Xnor.eval(&[Signal::High, Signal::Low]), vec![Signal::Low]);
-        assert_eq!(Xnor.eval(&[Signal::High, Signal::High]), vec![Signal::High]);
+        assert_eq!(Xnor.eval(&[Level::Low, Level::Low]), vec![Level::High]);
+        assert_eq!(Xnor.eval(&[Level::Low, Level::High]), vec![Level::Low]);
+        assert_eq!(Xnor.eval(&[Level::High, Level::Low]), vec![Level::Low]);
+        assert_eq!(Xnor.eval(&[Level::High, Level::High]), vec![Level::High]);
     }
 
     #[test]
     fn error_propagates_regardless_of_the_other_input() {
-        assert_eq!(
-            Xnor.eval(&[Signal::Low, Signal::Error]),
-            vec![Signal::Error]
-        );
-        assert_eq!(
-            Xnor.eval(&[Signal::High, Signal::Error]),
-            vec![Signal::Error]
-        );
+        assert_eq!(Xnor.eval(&[Level::Low, Level::Error]), vec![Level::Error]);
+        assert_eq!(Xnor.eval(&[Level::High, Level::Error]), vec![Level::Error]);
     }
 
     #[test]
     fn no_single_input_dominates_uncertainty() {
         assert_eq!(
-            Xnor.eval(&[Signal::Low, Signal::Unknown]),
-            vec![Signal::Unknown]
+            Xnor.eval(&[Level::Low, Level::Unknown]),
+            vec![Level::Unknown]
         );
         assert_eq!(
-            Xnor.eval(&[Signal::High, Signal::Unknown]),
-            vec![Signal::Unknown]
+            Xnor.eval(&[Level::High, Level::Unknown]),
+            vec![Level::Unknown]
         );
-        assert_eq!(
-            Xnor.eval(&[Signal::Low, Signal::HighZ]),
-            vec![Signal::Unknown]
-        );
+        assert_eq!(Xnor.eval(&[Level::Low, Level::HighZ]), vec![Level::Unknown]);
     }
 }

@@ -1,4 +1,4 @@
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A circuit element that computes its output signals from its input signals.
 ///
@@ -6,7 +6,7 @@ use crate::signal::Signal;
 /// (a circuit reused as a component inside another circuit) is not a special case.
 pub trait Component {
     /// Compute output signals from the given input signals.
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal>;
+    fn eval(&self, inputs: &[Level]) -> Vec<Level>;
 
     /// Delay, in logical ticks, between an input change and the resulting output change.
     /// Defaults to 1 tick.
@@ -26,19 +26,19 @@ mod tests {
     struct NotGate;
 
     impl Component for NotGate {
-        fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, inputs: &[Level]) -> Vec<Level> {
             match inputs {
-                [Signal::High] => vec![Signal::Low],
-                [Signal::Low] => vec![Signal::High],
-                _ => vec![Signal::Unknown],
+                [Level::High] => vec![Level::Low],
+                [Level::Low] => vec![Level::High],
+                _ => vec![Level::Unknown],
             }
         }
     }
 
     #[test]
     fn component_eval_computes_outputs_from_inputs() {
-        assert_eq!(NotGate.eval(&[Signal::High]), vec![Signal::Low]);
-        assert_eq!(NotGate.eval(&[Signal::Low]), vec![Signal::High]);
+        assert_eq!(NotGate.eval(&[Level::High]), vec![Level::Low]);
+        assert_eq!(NotGate.eval(&[Level::Low]), vec![Level::High]);
     }
 
     #[test]

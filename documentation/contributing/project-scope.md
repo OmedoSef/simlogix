@@ -7,7 +7,7 @@
 - **Done** — schematic editing: placement, rotation, and wire routing with grid snapping (see [Wiring](../using/wiring.md)). Multi-select is still outstanding.
 - **Done** — real-time simulation wired into the UI loop.
 - **Done** — save/load a circuit (via `serde`), as a versioned project file.
-- **Not yet** — bidirectional/tri-state buffer (bus transceiver). The groundwork is there — `Signal::HighZ`, `PinDirection::InOut`, and multi-driver net resolution (see [simulation-engine.md](../architecture/simulation-engine.md#data-model)) — and `Transistor` already drives `HighZ`, but no component exposes a true bidirectional pass yet.
+- **Not yet** — bidirectional/tri-state buffer (bus transceiver). The groundwork is there — `Level::HighZ`, `PinDirection::InOut`, and multi-driver net resolution (see [simulation-engine.md](../architecture/simulation-engine.md#data-model)) — and `Transistor` already drives `HighZ`, but no component exposes a true bidirectional pass yet.
 
 ## Out of scope for v1 (future roadmap, not being built now)
 

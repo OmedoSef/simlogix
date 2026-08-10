@@ -4,13 +4,13 @@
 //! `Transistor` leans on it by going `HighZ` when it isn't conducting — but
 //! nothing exercised the case the rule was actually written for: two
 //! outputs deliberately wired together, taking turns. That's what a
-//! tri-state buffer is for, and it's why `Signal::HighZ` is a state of its
+//! tri-state buffer is for, and it's why `Level::HighZ` is a state of its
 //! own rather than a flavour of `Unknown`.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use simlogix_core::{Button, Circuit, ComponentId, Pin, PinDirection, Signal, TriStateBuffer};
+use simlogix_core::{Button, Circuit, ComponentId, Level, Pin, PinDirection, TriStateBuffer};
 
 /// Two tri-state buffers with their outputs tied together, each with a
 /// button on its data input and another on its enable.
@@ -35,7 +35,7 @@ impl Bus {
     }
 
     /// What the shared net resolves to.
-    fn level(&self) -> Signal {
+    fn level(&self) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.shared)[2].net)
     }
@@ -105,12 +105,12 @@ fn only_the_enabled_driver_decides_what_a_shared_net_carries() {
 
     // A drives High, B is switched off.
     bus.drive([true, true, false, false]);
-    assert_eq!(bus.level(), Signal::High);
+    assert_eq!(bus.level(), Level::High);
 
     // Hand over: A off, B drives Low. The net follows B even though A's
     // data input hasn't changed — this is the whole trick.
     bus.drive([true, false, false, true]);
-    assert_eq!(bus.level(), Signal::Low);
+    assert_eq!(bus.level(), Level::Low);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn a_net_nobody_is_driving_reads_as_unknown_rather_than_low() {
     // leaving none. A floating bus is not the same thing as a bus held low,
     // and reporting `Low` here would invent a pull-down that isn't drawn.
     bus.drive([true, false, false, false]);
-    assert_eq!(bus.level(), Signal::Unknown);
+    assert_eq!(bus.level(), Level::Unknown);
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn two_drivers_fighting_over_a_net_is_reported_as_an_error() {
     // Both enabled, disagreeing: in hardware this is a short between a
     // driver pulling up and one pulling down.
     bus.drive([true, true, false, true]);
-    assert_eq!(bus.level(), Signal::Error);
+    assert_eq!(bus.level(), Level::Error);
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn two_drivers_agreeing_is_not_an_error() {
     // Redundant, wasteful, and harmless — there's nothing to report, so
     // the net carries the value both of them agree on.
     bus.drive([true, true, true, true]);
-    assert_eq!(bus.level(), Signal::High);
+    assert_eq!(bus.level(), Level::High);
 }
 
 /// A transceiver between two buses, each bus with a tri-state source of its
@@ -169,7 +169,7 @@ impl Transceiver {
     }
 
     /// Bus A is the transceiver's pin 0, bus B its pin 1.
-    fn bus(&self, pin: usize) -> Signal {
+    fn bus(&self, pin: usize) -> Level {
         self.circuit
             .signal_at(self.circuit.pins(self.transceiver)[pin].net)
     }
@@ -279,16 +279,16 @@ fn a_transceiver_carries_a_to_b_and_then_b_to_a() {
     // A drives High, B's own source is off, direction A to B.
     bus.drive([true, true, false, false, true, false])
         .expect("settles");
-    assert_eq!(bus.bus(1), Signal::High, "B should follow A");
+    assert_eq!(bus.bus(1), Level::High, "B should follow A");
     // The listening side adds nothing to its own net, so bus A is still
     // just what its source puts there rather than a fight.
-    assert_eq!(bus.bus(0), Signal::High);
+    assert_eq!(bus.bus(0), Level::High);
 
     // Turn it round: A's source lets go, B drives Low, direction B to A.
     bus.drive([true, false, false, true, false, false])
         .expect("settles");
-    assert_eq!(bus.bus(0), Signal::Low, "A should follow B");
-    assert_eq!(bus.bus(1), Signal::Low);
+    assert_eq!(bus.bus(0), Level::Low, "A should follow B");
+    assert_eq!(bus.bus(1), Level::Low);
 }
 
 #[test]
@@ -296,13 +296,13 @@ fn a_disabled_transceiver_leaves_the_far_bus_floating() {
     let mut bus = build_transceiver();
     bus.drive([true, true, false, false, true, false])
         .expect("settles");
-    assert_eq!(bus.bus(1), Signal::High);
+    assert_eq!(bus.bus(1), Level::High);
 
     // `OE` high switches it off — it is active low. Both sides let go, and
     // nothing else drives bus B, so it floats: unknown, not low.
     bus.drive([true, true, false, false, true, true])
         .expect("settles");
-    assert_eq!(bus.bus(1), Signal::Unknown);
+    assert_eq!(bus.bus(1), Level::Unknown);
 }
 
 #[test]
@@ -314,7 +314,7 @@ fn a_transceiver_driving_against_a_live_source_is_reported() {
     // of `InOut` is that it resolves by the same rule as any other net.
     bus.drive([false, true, true, true, true, false])
         .expect("settles");
-    assert_eq!(bus.bus(1), Signal::Error);
+    assert_eq!(bus.bus(1), Level::Error);
 }
 
 /// The construct the weak-level model exists for: an NMOS and a PMOS in
@@ -408,7 +408,7 @@ fn a_transmission_gate_passes_a_high_at_full_strength() {
     // The NMOS half can only deliver a weak high; the PMOS half delivers a
     // strong one and overrides it.
     let output = circuit.pins(n)[2].net;
-    assert_eq!(circuit.signal_at(output), Signal::High);
+    assert_eq!(circuit.signal_at(output), Level::High);
     assert!(
         !circuit.is_weakly_driven(output),
         "the PMOS half is what makes this a full-strength high"
@@ -466,7 +466,7 @@ fn a_lone_n_type_delivers_a_high_that_is_real_but_weak() {
     // threshold, which the next gate still reads as a one. Reporting
     // anything else here would make a working circuit look broken.
     let output = circuit.pins(n)[2].net;
-    assert_eq!(circuit.signal_at(output), Signal::High);
+    assert_eq!(circuit.signal_at(output), Level::High);
     // What's true and worth seeing is that it has no margin left.
     assert!(circuit.is_weakly_driven(output));
 }
@@ -535,5 +535,5 @@ fn a_lone_pass_transistor_loses_to_anything_pulling_the_other_way() {
 
     // Not a conflict: the strong driver simply wins, which is what a weak
     // level *means*. With the old ideal-switch model this was `Error`.
-    assert_eq!(circuit.signal_at(circuit.pins(n)[2].net), Signal::Low);
+    assert_eq!(circuit.signal_at(circuit.pins(n)[2].net), Level::Low);
 }

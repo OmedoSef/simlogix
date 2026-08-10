@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
-use simlogix_core::{Circuit, ComponentId, NetId, PortLevel, Signal};
+use simlogix_core::{Circuit, ComponentId, Level, NetId, PortSetting};
 
 use crate::appearance::Appearance;
 use crate::canvas::{self, Rotation, BOX_SIZE};
@@ -158,7 +158,7 @@ enum Shape {
     /// put — neither springs back.
     HandSet {
         kind: ComponentKind,
-        level: Option<Rc<Cell<PortLevel>>>,
+        level: Option<Rc<Cell<PortSetting>>>,
     },
     /// Two `InOut` bus sides at pin indices 0/1 (`A`, `B`) and two control
     /// inputs at 2/3 (`Dir`, `Enable`) — the only component whose pins both
@@ -225,7 +225,7 @@ impl PlacedComponent {
         id: ComponentId,
         center: Pos2,
         kind: ComponentKind,
-        level: Option<Rc<Cell<PortLevel>>>,
+        level: Option<Rc<Cell<PortSetting>>>,
     ) -> Self {
         Self::new(id, center, Shape::HandSet { kind, level })
     }
@@ -318,7 +318,7 @@ impl PlacedComponent {
     /// reads. A `Switch` is deliberately not one of these: its position is
     /// part of the saved document, so anything driving it from outside
     /// would be making an edit.
-    pub fn hand_set_level(&self) -> Option<&Rc<Cell<PortLevel>>> {
+    pub fn hand_set_level(&self) -> Option<&Rc<Cell<PortSetting>>> {
         match &self.shape {
             Shape::HandSet { level, .. } => level.as_ref(),
             _ => None,
@@ -547,8 +547,8 @@ impl PlacedComponent {
                     .pins(id)
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or(Signal::Unknown);
-                let color = if signal == Signal::High {
+                    .unwrap_or(Level::Unknown);
+                let color = if signal == Level::High {
                     let [r, g, b] = properties.color.unwrap_or(DEFAULT_LED_COLOR);
                     Color32::from_rgb(r, g, b)
                 } else {
@@ -713,7 +713,7 @@ impl PlacedComponent {
                     .pins(id)
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or(Signal::Unknown);
+                    .unwrap_or(Level::Unknown);
                 let readout = signal_letter(signal);
                 // The readout follows the signal, the body doesn't: which way
                 // the value crosses the boundary is structure and shouldn't
@@ -929,7 +929,7 @@ impl PlacedComponent {
                     .pins(id)
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or(Signal::Unknown);
+                    .unwrap_or(Level::Unknown);
                 // A probe reads out the net it's attached to, so it uses the
                 // very colour code that net is drawn in — its own duplicate
                 // of the five states was the one place they could disagree.
@@ -979,7 +979,7 @@ impl PlacedComponent {
                     .pins(id)
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or(Signal::Unknown);
+                    .unwrap_or(Level::Unknown);
                 // A clock is a signal source, so its symbol follows the same
                 // colour code as the wire it drives (`canvas::signal_color`)
                 // rather than a lit/unlit one of its own — green while high,
@@ -1128,15 +1128,15 @@ impl PlacedComponent {
 /// The interactive area is inset by [`PIN_HIT_MARGIN`] so it never overlaps
 /// a pin's own hit-rect — see that constant.
 /// The one-character readout a `Probe` or a port shows for a signal.
-fn signal_letter(signal: Signal) -> &'static str {
+fn signal_letter(signal: Level) -> &'static str {
     // A net never resolves to a weak level, so those arms are unreachable;
     // reading them as their full-strength selves is the only answer that
     // could ever be right.
     match signal.strengthened() {
-        Signal::High => "1",
-        Signal::Low => "0",
-        Signal::Error => "E",
-        Signal::HighZ => "Z",
+        Level::High => "1",
+        Level::Low => "0",
+        Level::Error => "E",
+        Level::HighZ => "Z",
         _ => "?",
     }
 }

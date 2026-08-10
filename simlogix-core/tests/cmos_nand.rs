@@ -19,7 +19,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use simlogix_core::{
-    Button, Circuit, ComponentId, NetId, Pin, PinDirection, Rail, Signal, Transistor,
+    Button, Circuit, ComponentId, Level, NetId, Pin, PinDirection, Rail, Transistor,
 };
 
 struct Nand {
@@ -102,10 +102,10 @@ fn build() -> Nand {
 fn the_four_rows_of_a_nand() {
     let mut nand = build();
     for (a, b, expected) in [
-        (false, false, Signal::High),
-        (false, true, Signal::High),
-        (true, false, Signal::High),
-        (true, true, Signal::Low),
+        (false, false, Level::High),
+        (false, true, Level::High),
+        (true, false, Level::High),
+        (true, true, Level::Low),
     ] {
         nand.drive(a, b);
         assert_eq!(nand.circuit.signal_at(nand.y), expected, "A={a}, B={b}");
@@ -119,7 +119,7 @@ fn the_series_node_is_undriven_when_the_lower_transistor_is_off() {
     // with no driver resolves to.
     let mut nand = build();
     nand.drive(true, false);
-    assert_eq!(nand.circuit.signal_at(nand.mid), Signal::Unknown);
+    assert_eq!(nand.circuit.signal_at(nand.mid), Level::Unknown);
 }
 
 /// The mirror: two PMOS in series to VDD, two NMOS in parallel to ground.
@@ -182,10 +182,10 @@ fn build_nor() -> Nand {
 fn the_four_rows_of_a_nor() {
     let mut nor = build_nor();
     for (a, b, expected) in [
-        (false, false, Signal::High),
-        (false, true, Signal::Low),
-        (true, false, Signal::Low),
-        (true, true, Signal::Low),
+        (false, false, Level::High),
+        (false, true, Level::Low),
+        (true, false, Level::Low),
+        (true, true, Level::Low),
     ] {
         nor.drive(a, b);
         assert_eq!(nor.circuit.signal_at(nor.y), expected, "A={a}, B={b}");

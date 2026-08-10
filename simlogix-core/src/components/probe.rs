@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A read-only measurement point: a single input pin and no outputs, used to
 /// observe a net's signal without affecting the circuit.
@@ -12,7 +12,7 @@ use crate::signal::Signal;
 pub struct Probe;
 
 impl Component for Probe {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
         Vec::new()
     }
 }
@@ -27,7 +27,7 @@ mod tests {
 
     #[test]
     fn probe_has_no_outputs_regardless_of_its_input() {
-        assert_eq!(Probe.eval(&[Signal::High]), Vec::new());
-        assert_eq!(Probe.eval(&[Signal::Unknown]), Vec::new());
+        assert_eq!(Probe.eval(&[Level::High]), Vec::new());
+        assert_eq!(Probe.eval(&[Level::Unknown]), Vec::new());
     }
 }

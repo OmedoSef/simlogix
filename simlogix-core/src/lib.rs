@@ -3,9 +3,9 @@
 mod circuit;
 mod component;
 mod components;
+mod level;
 mod net;
 mod pin;
-mod signal;
 
 pub use circuit::{Circuit, ComponentId, UnstableCircuit};
 pub use component::Component;
@@ -19,7 +19,7 @@ pub use components::nand::Nand;
 pub use components::nor::Nor;
 pub use components::not::Not;
 pub use components::or::Or;
-pub use components::port::{CircuitAnchor, CircuitOutput, CircuitPort, PortLevel};
+pub use components::port::{CircuitAnchor, CircuitOutput, CircuitPort, PortSetting};
 pub use components::probe::Probe;
 pub use components::rail::Rail;
 pub use components::sr_latch::SrLatch;
@@ -27,6 +27,6 @@ pub use components::transistor::Transistor;
 pub use components::tri_state_buffer::TriStateBuffer;
 pub use components::xnor::Xnor;
 pub use components::xor::Xor;
+pub use level::Level;
 pub use net::NetId;
 pub use pin::{Pin, PinDirection};
-pub use signal::Signal;

@@ -5,7 +5,7 @@
 
 use egui::{pos2, Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use serde::{Deserialize, Serialize};
-use simlogix_core::Signal;
+use simlogix_core::Level;
 
 /// What colour a net at `signal` is drawn in — the single place the signal
 /// colour code is defined, so wires and anything else reading out a net
@@ -16,7 +16,7 @@ use simlogix_core::Signal;
 /// at 8:1 on the dark canvas manages only 2:1 on the light one, and a true
 /// midnight blue is the reverse. Every value below clears 4.5:1 against the
 /// background it is used on.
-pub fn signal_color(signal: Signal, dark_mode: bool) -> Color32 {
+pub fn signal_color(signal: Level, dark_mode: bool) -> Color32 {
     // A net never resolves to a weak level -- `Circuit` normalises those
     // away, so only a *contribution* is ever weak. Folding them back here
     // keeps the match honest without inventing two more colours nothing
@@ -24,23 +24,23 @@ pub fn signal_color(signal: Signal, dark_mode: bool) -> Color32 {
     let signal = signal.strengthened();
     if dark_mode {
         match signal {
-            Signal::High => Color32::from_rgb(72, 200, 96),
-            Signal::Low => Color32::from_rgb(235, 193, 60),
-            Signal::Unknown => Color32::from_rgb(116, 138, 240),
-            Signal::Error => Color32::from_rgb(240, 78, 78),
+            Level::High => Color32::from_rgb(72, 200, 96),
+            Level::Low => Color32::from_rgb(235, 193, 60),
+            Level::Unknown => Color32::from_rgb(116, 138, 240),
+            Level::Error => Color32::from_rgb(240, 78, 78),
             // Not one of the four states with a colour of its own: `HighZ`
             // is a driver deliberately not driving, so it reads as "nothing
             // here" rather than as a value.
-            Signal::HighZ => Color32::from_gray(150),
+            Level::HighZ => Color32::from_gray(150),
             _ => Color32::from_gray(150),
         }
     } else {
         match signal {
-            Signal::High => Color32::from_rgb(22, 120, 45),
-            Signal::Low => Color32::from_rgb(146, 104, 6),
-            Signal::Unknown => Color32::from_rgb(40, 52, 150),
-            Signal::Error => Color32::from_rgb(186, 24, 24),
-            Signal::HighZ => Color32::from_gray(105),
+            Level::High => Color32::from_rgb(22, 120, 45),
+            Level::Low => Color32::from_rgb(146, 104, 6),
+            Level::Unknown => Color32::from_rgb(40, 52, 150),
+            Level::Error => Color32::from_rgb(186, 24, 24),
+            Level::HighZ => Color32::from_gray(105),
             _ => Color32::from_gray(105),
         }
     }

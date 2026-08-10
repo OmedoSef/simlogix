@@ -26,7 +26,7 @@ See [simulation-engine.md](simulation-engine.md) for the discrete-event model th
 
 ## Current status
 
-**`simlogix-core`** — `Signal` (`High`/`Low`/`Unknown`/`Error`/`HighZ`), `NetId`, `PinDirection` (`Input`/`Output`/`InOut`), `Pin`, the `Component` trait, and `Circuit`: a discrete-event engine (`schedule_now`, `schedule_periodic`, `advance`, `run`, logical clock, `UnstableCircuit` detection) plus structural editing after the fact — `rewire` (replace the whole pin-to-net mapping from groups of pins the caller says are connected) and `remove_component`. Connectivity is *derived*, not accumulated: the GUI owns the drawing and hands over the resulting groups after each edit, so a net always states what the schematic currently shows. Sixteen concrete components:
+**`simlogix-core`** — `Level` (`High`/`Low`/`Unknown`/`Error`/`HighZ`, the state of one bit), `NetId`, `PinDirection` (`Input`/`Output`/`InOut`), `Pin`, the `Component` trait, and `Circuit`: a discrete-event engine (`schedule_now`, `schedule_periodic`, `advance`, `run`, logical clock, `UnstableCircuit` detection) plus structural editing after the fact — `rewire` (replace the whole pin-to-net mapping from groups of pins the caller says are connected) and `remove_component`. Connectivity is *derived*, not accumulated: the GUI owns the drawing and hands over the resulting groups after each edit, so a net always states what the schematic currently shows. Sixteen concrete components:
 
 - sources — `Button`, `Clock` (periodic), `Rail` (fixed `Ground`/`Power`);
 - outputs — `Led`, `Probe`;

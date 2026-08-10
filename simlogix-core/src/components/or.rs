@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A 2-input OR gate, combinational (no internal state): its output follows
 /// `a OR b` at every evaluation.
@@ -12,20 +12,20 @@ use crate::signal::Signal;
 pub struct Or;
 
 impl Component for Or {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [a, b] => vec![or(*a, *b)],
-            _ => vec![Signal::Unknown],
+            _ => vec![Level::Unknown],
         }
     }
 }
 
-fn or(a: Signal, b: Signal) -> Signal {
+fn or(a: Level, b: Level) -> Level {
     match (a, b) {
-        (Signal::High, _) | (_, Signal::High) => Signal::High,
-        (Signal::Error, _) | (_, Signal::Error) => Signal::Error,
-        (Signal::Low, Signal::Low) => Signal::Low,
-        _ => Signal::Unknown,
+        (Level::High, _) | (_, Level::High) => Level::High,
+        (Level::Error, _) | (_, Level::Error) => Level::Error,
+        (Level::Low, Level::Low) => Level::Low,
+        _ => Level::Unknown,
     }
 }
 
@@ -39,40 +39,31 @@ mod tests {
 
     #[test]
     fn outputs_low_only_when_both_inputs_are_low() {
-        assert_eq!(Or.eval(&[Signal::Low, Signal::Low]), vec![Signal::Low]);
-        assert_eq!(Or.eval(&[Signal::Low, Signal::High]), vec![Signal::High]);
-        assert_eq!(Or.eval(&[Signal::High, Signal::Low]), vec![Signal::High]);
-        assert_eq!(Or.eval(&[Signal::High, Signal::High]), vec![Signal::High]);
+        assert_eq!(Or.eval(&[Level::Low, Level::Low]), vec![Level::Low]);
+        assert_eq!(Or.eval(&[Level::Low, Level::High]), vec![Level::High]);
+        assert_eq!(Or.eval(&[Level::High, Level::Low]), vec![Level::High]);
+        assert_eq!(Or.eval(&[Level::High, Level::High]), vec![Level::High]);
     }
 
     #[test]
     fn a_definite_high_dominates_an_uncertain_other_input() {
-        assert_eq!(
-            Or.eval(&[Signal::High, Signal::Unknown]),
-            vec![Signal::High]
-        );
-        assert_eq!(Or.eval(&[Signal::High, Signal::Error]), vec![Signal::High]);
-        assert_eq!(Or.eval(&[Signal::High, Signal::HighZ]), vec![Signal::High]);
+        assert_eq!(Or.eval(&[Level::High, Level::Unknown]), vec![Level::High]);
+        assert_eq!(Or.eval(&[Level::High, Level::Error]), vec![Level::High]);
+        assert_eq!(Or.eval(&[Level::High, Level::HighZ]), vec![Level::High]);
     }
 
     #[test]
     fn error_propagates_when_no_input_is_definitely_high() {
-        assert_eq!(Or.eval(&[Signal::Low, Signal::Error]), vec![Signal::Error]);
+        assert_eq!(Or.eval(&[Level::Low, Level::Error]), vec![Level::Error]);
     }
 
     #[test]
     fn anything_uncertain_without_a_high_or_error_is_unknown() {
+        assert_eq!(Or.eval(&[Level::Low, Level::Unknown]), vec![Level::Unknown]);
         assert_eq!(
-            Or.eval(&[Signal::Low, Signal::Unknown]),
-            vec![Signal::Unknown]
+            Or.eval(&[Level::Unknown, Level::Unknown]),
+            vec![Level::Unknown]
         );
-        assert_eq!(
-            Or.eval(&[Signal::Unknown, Signal::Unknown]),
-            vec![Signal::Unknown]
-        );
-        assert_eq!(
-            Or.eval(&[Signal::Low, Signal::HighZ]),
-            vec![Signal::Unknown]
-        );
+        assert_eq!(Or.eval(&[Level::Low, Level::HighZ]), vec![Level::Unknown]);
     }
 }

@@ -433,7 +433,7 @@ fn one_level_of_nesting_inverts() {
     let (app, _, instance) = nested_inverters(1);
     let out = app.circuit.pins(instance)[1].net;
     // The switch rests off, so the inverter's output is high.
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::High);
+    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::High);
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn a_sub_circuit_inside_a_sub_circuit_stays_connected() {
     // wiring went missing, leaving the output driven by nobody.
     let (app, _, instance) = nested_inverters(2);
     let out = app.circuit.pins(instance)[1].net;
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::High);
+    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::High);
 }
 
 #[test]
@@ -455,7 +455,7 @@ fn nesting_has_no_depth_limit() {
     // depth.
     let (mut app, switch, instance) = nested_inverters(8);
     let out = app.circuit.pins(instance)[1].net;
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::High);
+    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::High);
 
     // Driven, not merely connected: a net can be `High` because
     // something reaches it, and the only proof it is the *input* that
@@ -470,7 +470,7 @@ fn nesting_has_no_depth_limit() {
     app.circuit.schedule_now(switch);
     app.advance_circuit(SETTLE_TICKS);
 
-    assert_eq!(app.circuit.signal_at(out), simlogix_core::Signal::Low);
+    assert_eq!(app.circuit.signal_at(out), simlogix_core::Level::Low);
 }
 
 #[test]
@@ -1266,7 +1266,7 @@ fn a_switch_saved_closed_is_closed_when_the_project_is_opened() {
 
     let switch = app.placed[0].id();
     let net = app.circuit.pins(switch)[0].net;
-    assert_eq!(app.circuit.signal_at(net), simlogix_core::Signal::High);
+    assert_eq!(app.circuit.signal_at(net), simlogix_core::Level::High);
 }
 
 #[test]
@@ -1285,7 +1285,7 @@ fn a_switch_saved_open_is_open_when_the_project_is_opened() {
     let app = SimLogixApp::from_project(&project, 0);
 
     let net = app.circuit.pins(app.placed[0].id())[0].net;
-    assert_eq!(app.circuit.signal_at(net), simlogix_core::Signal::Low);
+    assert_eq!(app.circuit.signal_at(net), simlogix_core::Level::Low);
 }
 
 #[test]
@@ -1308,22 +1308,22 @@ fn a_free_running_port_beats_only_in_the_simulation_view() {
     // the control for is one you cannot stop.
     app.circuit.advance(CLOCK_PERIOD_TICKS).expect("stable");
     app.beat_free_running_source(strings);
-    assert_eq!(level(&app), PortLevel::Undriven);
+    assert_eq!(level(&app), PortSetting::Undriven);
 
     app.switch_view(toolbar::View::Simulation);
     app.beat_free_running_source(strings);
     assert_eq!(
         level(&app),
-        PortLevel::High,
+        PortSetting::High,
         "due, and now in the right view"
     );
 
     // And not again until the next period is up.
     app.beat_free_running_source(strings);
-    assert_eq!(level(&app), PortLevel::High);
+    assert_eq!(level(&app), PortSetting::High);
     app.circuit.advance(CLOCK_PERIOD_TICKS).expect("stable");
     app.beat_free_running_source(strings);
-    assert_eq!(level(&app), PortLevel::Low);
+    assert_eq!(level(&app), PortSetting::Low);
 }
 
 #[test]
@@ -1343,7 +1343,7 @@ fn clicking_a_port_while_paused_is_reported_as_waiting() {
         .find(|placed| placed.id() == port)
         .and_then(|placed| placed.hand_set_level())
         .expect("a driving port has a level");
-    level.set(PortLevel::High);
+    level.set(PortSetting::High);
     app.circuit.schedule_now(port);
     assert!(app.change_pending(), "the click is waiting for a step");
 

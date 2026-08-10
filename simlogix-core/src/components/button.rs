@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A source with a single output pin and no inputs, carrying whichever level
 /// its handle is set to.
@@ -37,11 +37,11 @@ impl Button {
 }
 
 impl Component for Button {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
         vec![if self.pressed.get() {
-            Signal::High
+            Level::High
         } else {
-            Signal::Low
+            Level::Low
         }]
     }
 }
@@ -57,13 +57,13 @@ mod tests {
     #[test]
     fn unpressed_button_outputs_low() {
         let (button, _pressed) = Button::new();
-        assert_eq!(button.eval(&[]), vec![Signal::Low]);
+        assert_eq!(button.eval(&[]), vec![Level::Low]);
     }
 
     #[test]
     fn pressing_the_handle_makes_the_button_output_high() {
         let (button, pressed) = Button::new();
         pressed.set(true);
-        assert_eq!(button.eval(&[]), vec![Signal::High]);
+        assert_eq!(button.eval(&[]), vec![Level::High]);
     }
 }

@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RailLevel {
@@ -31,10 +31,10 @@ impl Rail {
 }
 
 impl Component for Rail {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
         match self.level {
-            RailLevel::Ground => vec![Signal::Low],
-            RailLevel::Power => vec![Signal::High],
+            RailLevel::Ground => vec![Level::Low],
+            RailLevel::Power => vec![Level::High],
         }
     }
 }
@@ -49,11 +49,11 @@ mod tests {
 
     #[test]
     fn ground_always_outputs_low() {
-        assert_eq!(Rail::ground().eval(&[]), vec![Signal::Low]);
+        assert_eq!(Rail::ground().eval(&[]), vec![Level::Low]);
     }
 
     #[test]
     fn power_always_outputs_high() {
-        assert_eq!(Rail::power().eval(&[]), vec![Signal::High]);
+        assert_eq!(Rail::power().eval(&[]), vec![Level::High]);
     }
 }

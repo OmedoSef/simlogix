@@ -2,9 +2,9 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
 use crate::component::Component;
+use crate::level::Level;
 use crate::net::NetId;
 use crate::pin::{Pin, PinDirection};
-use crate::signal::Signal;
 
 /// Identifies a component instance registered in a `Circuit`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -62,9 +62,9 @@ pub struct Circuit {
     /// with two output pins on one net would otherwise have the second
     /// overwrite the first, and a contribution has to be able to follow its
     /// pin when [`Circuit::rewire`] moves that pin to a different net.
-    drivers: HashMap<NetId, HashMap<(ComponentId, usize), Signal>>,
+    drivers: HashMap<NetId, HashMap<(ComponentId, usize), Level>>,
     /// Each net's last resolved signal, used to detect real changes.
-    settled: HashMap<NetId, Signal>,
+    settled: HashMap<NetId, Level>,
     clock: u64,
     events: BinaryHeap<Reverse<ScheduledEvent>>,
     /// Components that reschedule themselves forever after every evaluation
@@ -139,12 +139,12 @@ impl Circuit {
     pub fn rewire(&mut self, groups: &[Vec<(ComponentId, usize)>]) {
         // What each pin drives, and what each reading pin currently sees.
         // Both are indexed by pin so they survive the remap below.
-        let contributions: HashMap<(ComponentId, usize), Signal> = self
+        let contributions: HashMap<(ComponentId, usize), Level> = self
             .drivers
             .values()
             .flat_map(|on_net| on_net.iter().map(|(&pin, &signal)| (pin, signal)))
             .collect();
-        let previously_read: HashMap<(ComponentId, usize), Signal> = self
+        let previously_read: HashMap<(ComponentId, usize), Level> = self
             .reading_pins()
             .map(|(pin, net)| (pin, self.signal_at(net)))
             .collect();
@@ -192,7 +192,7 @@ impl Circuit {
                 .drivers
                 .get(&net)
                 .map(Self::resolve)
-                .unwrap_or(Signal::Unknown);
+                .unwrap_or(Level::Unknown);
             self.settled.insert(net, resolved);
         }
 
@@ -200,10 +200,7 @@ impl Circuit {
         let disturbed: Vec<ComponentId> = self
             .reading_pins()
             .filter(|&(pin, net)| {
-                let before = previously_read
-                    .get(&pin)
-                    .copied()
-                    .unwrap_or(Signal::Unknown);
+                let before = previously_read.get(&pin).copied().unwrap_or(Level::Unknown);
                 self.signal_at(net) != before
             })
             .map(|((component, _), _)| component)
@@ -256,8 +253,8 @@ impl Circuit {
 
     /// The net's current resolved signal: `Unknown` if undriven, the shared value
     /// if every active driver agrees (ignoring `HighZ`), or `Error` if they disagree.
-    pub fn signal_at(&self, net: NetId) -> Signal {
-        self.settled.get(&net).copied().unwrap_or(Signal::Unknown)
+    pub fn signal_at(&self, net: NetId) -> Level {
+        self.settled.get(&net).copied().unwrap_or(Level::Unknown)
     }
 
     /// The logical clock: how many ticks this circuit has been advanced by.
@@ -397,7 +394,7 @@ impl Circuit {
     ) -> Result<(), UnstableCircuit> {
         let pins = self.components[&component].pins.clone();
 
-        let inputs: Vec<Signal> = pins
+        let inputs: Vec<Level> = pins
             .iter()
             .filter(|pin| pin.direction != PinDirection::Output)
             .map(|pin| self.signal_at(pin.net))
@@ -420,7 +417,7 @@ impl Circuit {
                 .settled
                 .get(&pin.net)
                 .copied()
-                .unwrap_or(Signal::Unknown);
+                .unwrap_or(Level::Unknown);
 
             if resolved == previous {
                 continue;
@@ -456,8 +453,8 @@ impl Circuit {
             .drivers
             .get(&net)
             .map(Self::resolve)
-            .unwrap_or(Signal::Unknown);
-        let previous = self.settled.get(&net).copied().unwrap_or(Signal::Unknown);
+            .unwrap_or(Level::Unknown);
+        let previous = self.settled.get(&net).copied().unwrap_or(Level::Unknown);
         if resolved == previous {
             return;
         }
@@ -487,16 +484,16 @@ impl Circuit {
         let mut active = drivers
             .values()
             .copied()
-            .filter(|&signal| signal != Signal::HighZ)
+            .filter(|&signal| signal != Level::HighZ)
             .peekable();
         active.peek().is_some() && active.all(|signal| signal.is_weak())
     }
 
-    fn resolve(drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
-        let active: Vec<Signal> = drivers
+    fn resolve(drivers: &HashMap<(ComponentId, usize), Level>) -> Level {
+        let active: Vec<Level> = drivers
             .values()
             .copied()
-            .filter(|&signal| signal != Signal::HighZ)
+            .filter(|&signal| signal != Level::HighZ)
             .collect();
 
         // A full-strength driver simply wins: that is what a pass
@@ -504,19 +501,19 @@ impl Circuit {
         // transmission gate work — the PMOS half drives a strong high that
         // overrides the NMOS half's weak one, instead of the two being
         // called a conflict.
-        let strong: Vec<Signal> = active.iter().copied().filter(|s| !s.is_weak()).collect();
+        let strong: Vec<Level> = active.iter().copied().filter(|s| !s.is_weak()).collect();
         let deciding = if strong.is_empty() { &active } else { &strong };
 
         let mut levels = deciding.iter().map(|signal| signal.strengthened());
         let Some(first) = levels.next() else {
-            return Signal::Unknown;
+            return Level::Unknown;
         };
         if levels.all(|signal| signal == first) {
             // Never weak on the way out: a net carries a level, and only a
             // *contribution* carries a strength.
             first
         } else {
-            Signal::Error
+            Level::Error
         }
     }
 }
@@ -541,17 +538,17 @@ mod tests {
     fn undriven_net_is_unknown() {
         let mut circuit = Circuit::new();
         let net = circuit.add_net();
-        assert_eq!(circuit.signal_at(net), Signal::Unknown);
+        assert_eq!(circuit.signal_at(net), Level::Unknown);
     }
 
     struct NotGate;
 
     impl Component for NotGate {
-        fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, inputs: &[Level]) -> Vec<Level> {
             match inputs {
-                [Signal::High] => vec![Signal::Low],
-                [Signal::Low] => vec![Signal::High],
-                _ => vec![Signal::Unknown],
+                [Level::High] => vec![Level::Low],
+                [Level::Low] => vec![Level::High],
+                _ => vec![Level::Unknown],
             }
         }
     }
@@ -560,8 +557,8 @@ mod tests {
     struct AlwaysHigh;
 
     impl Component for AlwaysHigh {
-        fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
-            vec![Signal::High]
+        fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
+            vec![Level::High]
         }
     }
 
@@ -593,7 +590,7 @@ mod tests {
         circuit.schedule_now(source);
         circuit.run().unwrap();
 
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
     }
 
     #[test]
@@ -626,8 +623,8 @@ mod tests {
         circuit.schedule_now(source);
         circuit.run().unwrap();
 
-        assert_eq!(circuit.signal_at(source_net), Signal::High);
-        assert_eq!(circuit.signal_at(inverted_net), Signal::Low);
+        assert_eq!(circuit.signal_at(source_net), Level::High);
+        assert_eq!(circuit.signal_at(inverted_net), Level::Low);
     }
 
     #[test]
@@ -660,10 +657,10 @@ mod tests {
     struct Inverter;
 
     impl Component for Inverter {
-        fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, inputs: &[Level]) -> Vec<Level> {
             match inputs {
-                [Signal::High] => vec![Signal::Low],
-                _ => vec![Signal::High],
+                [Level::High] => vec![Level::Low],
+                _ => vec![Level::High],
             }
         }
     }
@@ -716,12 +713,12 @@ mod tests {
 
         circuit.schedule_now(button);
         circuit.run().unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::Low);
+        assert_eq!(circuit.signal_at(net), Level::Low);
 
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
     }
 
     #[test]
@@ -756,14 +753,14 @@ mod tests {
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().expect("settles");
-        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Signal::High);
+        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Level::High);
 
         // Drop one of the two wires: the remaining one still groups them.
         circuit.rewire(&connected);
         circuit.run().expect("settles");
         assert_eq!(
             circuit.signal_at(circuit.pins(led)[0].net),
-            Signal::High,
+            Level::High,
             "the surviving wire should still carry the button through"
         );
     }
@@ -793,17 +790,17 @@ mod tests {
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().expect("settles");
-        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Signal::High);
+        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Level::High);
 
         // Now nothing groups them: each pin gets a net of its own, and the
         // LED's goes back to undriven.
         circuit.rewire(&[]);
         circuit.run().expect("settles");
         assert_ne!(circuit.pins(button)[0].net, circuit.pins(led)[0].net);
-        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Signal::Unknown);
+        assert_eq!(circuit.signal_at(circuit.pins(led)[0].net), Level::Unknown);
         // The button is still driving its own net -- a contribution follows
         // its pin rather than belonging to whichever net it sat on.
-        assert_eq!(circuit.signal_at(circuit.pins(button)[0].net), Signal::High);
+        assert_eq!(circuit.signal_at(circuit.pins(button)[0].net), Level::High);
     }
 
     #[test]
@@ -886,7 +883,7 @@ mod tests {
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().expect("settles");
-        assert_eq!(circuit.signal_at(circuit.pins(button)[0].net), Signal::High);
+        assert_eq!(circuit.signal_at(circuit.pins(button)[0].net), Level::High);
 
         // led_a's wire to the group is deleted, so it no longer appears in
         // it: the button and led_b must stay connected to each other.
@@ -894,11 +891,11 @@ mod tests {
         circuit.run().expect("settles");
         let shared = circuit.pins(button)[0].net;
         assert_eq!(circuit.pins(led_b)[0].net, shared);
-        assert_eq!(circuit.signal_at(shared), Signal::High);
+        assert_eq!(circuit.signal_at(shared), Level::High);
         // led_a is on a net of its own now, driven by nobody.
         let led_a_net = circuit.pins(led_a)[0].net;
         assert_ne!(led_a_net, shared);
-        assert_eq!(circuit.signal_at(led_a_net), Signal::Unknown);
+        assert_eq!(circuit.signal_at(led_a_net), Level::Unknown);
     }
 
     #[test]
@@ -925,10 +922,10 @@ mod tests {
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
 
         circuit.remove_component(button);
-        assert_eq!(circuit.signal_at(net), Signal::Unknown);
+        assert_eq!(circuit.signal_at(net), Level::Unknown);
     }
 
     #[test]
@@ -966,13 +963,13 @@ mod tests {
 
         circuit.schedule_periodic(clock, 5);
         circuit.advance(0).unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
 
         circuit.advance(5).unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::Low);
+        assert_eq!(circuit.signal_at(net), Level::Low);
 
         circuit.advance(5).unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
     }
 
     #[test]
@@ -989,11 +986,11 @@ mod tests {
 
         circuit.schedule_periodic(clock, 100);
         circuit.advance(0).unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
 
         // Advancing by far less than the period must not fast-forward it.
         circuit.advance(1).unwrap();
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
     }
 
     #[test]
@@ -1042,7 +1039,7 @@ mod tests {
 
         // Twice would have brought it back where it started, which is
         // indistinguishable from a clock that never ran at all.
-        assert_eq!(circuit.signal_at(net), Signal::High);
+        assert_eq!(circuit.signal_at(net), Level::High);
     }
 
     #[test]

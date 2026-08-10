@@ -11,7 +11,7 @@ pub enum PinDirection {
 
 /// An input or output terminal of a component, connected to a `Net`.
 ///
-/// A `Pin` doesn't carry a `Signal` itself — the `Net` it's connected to does,
+/// A `Pin` doesn't carry a `Level` itself — the `Net` it's connected to does,
 /// so that every pin sharing that net observes the same value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pin {

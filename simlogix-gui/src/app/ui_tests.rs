@@ -35,7 +35,7 @@
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
-use simlogix_core::{ComponentId, Signal};
+use simlogix_core::{ComponentId, Level};
 
 use super::SimLogixApp;
 use super::WireEndpoint;
@@ -234,17 +234,13 @@ fn a_clock_step_drives_a_port_when_that_is_where_the_clock_comes_from() {
     press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
     step(&mut harness);
     let first = level(&harness);
-    assert_eq!(
-        first,
-        Signal::High,
-        "an undriven port starts the cycle high"
-    );
+    assert_eq!(first, Level::High, "an undriven port starts the cycle high");
 
     // And back, because a cycle is two levels: undriven is a third position
     // of the switch, not part of one.
     press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
     step(&mut harness);
-    assert_eq!(level(&harness), Signal::Low);
+    assert_eq!(level(&harness), Level::Low);
 }
 
 #[test]
@@ -545,19 +541,19 @@ fn a_tri_state_source_can_be_clicked_into_letting_go() {
     };
     // Nothing else is on this net, so what it reads *is* what the source
     // is putting on it.
-    assert_eq!(signal(&harness), Signal::Unknown);
+    assert_eq!(signal(&harness), Level::Unknown);
 
     click_at(&mut harness, at);
-    assert_eq!(signal(&harness), Signal::High);
+    assert_eq!(signal(&harness), Level::High);
     click_at(&mut harness, at);
-    assert_eq!(signal(&harness), Signal::Low);
+    assert_eq!(signal(&harness), Level::Low);
 
     // And round to letting go, without a property having to be set for it.
     // A port would have gone back to high here: there the number of states
     // is declared, because it is a promise to whatever drives the pin from
     // outside. A source has nothing to declare.
     click_at(&mut harness, at);
-    assert_eq!(signal(&harness), Signal::Unknown);
+    assert_eq!(signal(&harness), Level::Unknown);
 }
 
 fn secondary_click_at(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {

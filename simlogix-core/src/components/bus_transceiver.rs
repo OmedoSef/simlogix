@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// A bus transceiver: two bus-side pins, and a direction that says which one
 /// is listening and which one is talking.
@@ -50,23 +50,23 @@ impl BusTransceiver {
     /// the pin is. Only the two definite levels flip: `Unknown`, `HighZ` and
     /// `Error` say nothing about polarity, so inverting them would invent
     /// information.
-    fn asserted(&self, enable: Signal) -> Signal {
+    fn asserted(&self, enable: Level) -> Level {
         if !self.active_low_enable {
             return enable;
         }
         match enable {
-            Signal::High => Signal::Low,
-            Signal::Low => Signal::High,
+            Level::High => Level::Low,
+            Level::Low => Level::High,
             other => other,
         }
     }
 }
 
 impl Component for BusTransceiver {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [a, b, dir, enable] => drive(*a, *b, *dir, self.asserted(*enable)),
-            _ => vec![Signal::Unknown, Signal::Unknown],
+            _ => vec![Level::Unknown, Level::Unknown],
         }
     }
 }
@@ -74,19 +74,19 @@ impl Component for BusTransceiver {
 /// What to drive on `A` and `B`, in that order. `enabled` has already been
 /// normalised to active-high by the caller, so there is one truth table
 /// rather than one per polarity.
-fn drive(a: Signal, b: Signal, dir: Signal, enabled: Signal) -> Vec<Signal> {
+fn drive(a: Level, b: Level, dir: Level, enabled: Level) -> Vec<Level> {
     let both = |signal| vec![signal, signal];
     match (enabled, dir) {
         // Disabled wins over everything, including a faulted direction: a
         // chip that isn't driving can't put a fault on anything.
-        (Signal::Low, _) => both(Signal::HighZ),
-        (Signal::Error, _) | (Signal::High, Signal::Error) => both(Signal::Error),
-        (Signal::High, Signal::High) => vec![Signal::HighZ, a],
-        (Signal::High, Signal::Low) => vec![b, Signal::HighZ],
+        (Level::Low, _) => both(Level::HighZ),
+        (Level::Error, _) | (Level::High, Level::Error) => both(Level::Error),
+        (Level::High, Level::High) => vec![Level::HighZ, a],
+        (Level::High, Level::Low) => vec![b, Level::HighZ],
         // Enabled-ness or direction is undriven or not yet known. `HighZ`
         // would claim the chip is deliberately out of the way, which is more
         // than is known.
-        _ => both(Signal::Unknown),
+        _ => both(Level::Unknown),
     }
 }
 
@@ -99,22 +99,16 @@ mod tests {
     use super::*;
 
     /// `[drive on A, drive on B]`.
-    fn eval(
-        part: BusTransceiver,
-        a: Signal,
-        b: Signal,
-        dir: Signal,
-        enable: Signal,
-    ) -> Vec<Signal> {
+    fn eval(part: BusTransceiver, a: Level, b: Level, dir: Level, enable: Level) -> Vec<Level> {
         part.eval(&[a, b, dir, enable])
     }
 
     /// The pin level that switches each variant *on*.
-    fn on(part: BusTransceiver) -> Signal {
+    fn on(part: BusTransceiver) -> Level {
         if part.active_low_enable {
-            Signal::Low
+            Level::Low
         } else {
-            Signal::High
+            Level::High
         }
     }
 
@@ -126,8 +120,8 @@ mod tests {
     fn direction_high_sends_a_to_b() {
         for part in both_variants() {
             assert_eq!(
-                eval(part, Signal::High, Signal::Unknown, Signal::High, on(part)),
-                vec![Signal::HighZ, Signal::High]
+                eval(part, Level::High, Level::Unknown, Level::High, on(part)),
+                vec![Level::HighZ, Level::High]
             );
         }
     }
@@ -136,8 +130,8 @@ mod tests {
     fn direction_low_sends_b_to_a() {
         for part in both_variants() {
             assert_eq!(
-                eval(part, Signal::Unknown, Signal::Low, Signal::Low, on(part)),
-                vec![Signal::Low, Signal::HighZ]
+                eval(part, Level::Unknown, Level::Low, Level::Low, on(part)),
+                vec![Level::Low, Level::HighZ]
             );
         }
     }
@@ -147,8 +141,8 @@ mod tests {
         // The half that makes reading a net you also drive a non-issue: the
         // side being read is always the side driving `HighZ`.
         for part in both_variants() {
-            let out = eval(part, Signal::High, Signal::Low, Signal::High, on(part));
-            assert_eq!(out[0], Signal::HighZ, "A is listening, so A drives nothing");
+            let out = eval(part, Level::High, Level::Low, Level::High, on(part));
+            assert_eq!(out[0], Level::HighZ, "A is listening, so A drives nothing");
         }
     }
 
@@ -160,13 +154,13 @@ mod tests {
         // The same pin level does opposite things — which is the whole
         // reason both exist, and why the symbol has to say which is which.
         assert_eq!(
-            eval(oe, Signal::High, Signal::Low, Signal::High, Signal::Low),
-            vec![Signal::HighZ, Signal::High],
+            eval(oe, Level::High, Level::Low, Level::High, Level::Low),
+            vec![Level::HighZ, Level::High],
             "OE low is on"
         );
         assert_eq!(
-            eval(en, Signal::High, Signal::Low, Signal::High, Signal::Low),
-            vec![Signal::HighZ, Signal::HighZ],
+            eval(en, Level::High, Level::Low, Level::High, Level::Low),
+            vec![Level::HighZ, Level::HighZ],
             "EN low is off"
         );
     }
@@ -175,14 +169,14 @@ mod tests {
     fn disabled_it_lets_go_of_both_sides() {
         for part in both_variants() {
             let off = if part.active_low_enable {
-                Signal::High
+                Level::High
             } else {
-                Signal::Low
+                Level::Low
             };
-            for dir in [Signal::High, Signal::Low, Signal::Unknown, Signal::Error] {
+            for dir in [Level::High, Level::Low, Level::Unknown, Level::Error] {
                 assert_eq!(
-                    eval(part, Signal::High, Signal::Low, dir, off),
-                    vec![Signal::HighZ, Signal::HighZ],
+                    eval(part, Level::High, Level::Low, dir, off),
+                    vec![Level::HighZ, Level::HighZ],
                     "a disabled transceiver drives nothing, whatever Dir says ({dir:?})"
                 );
             }
@@ -193,14 +187,14 @@ mod tests {
     fn a_faulted_control_pin_is_reported_on_both_sides() {
         for part in both_variants() {
             assert_eq!(
-                eval(part, Signal::High, Signal::Low, Signal::Error, on(part)),
-                vec![Signal::Error, Signal::Error]
+                eval(part, Level::High, Level::Low, Level::Error, on(part)),
+                vec![Level::Error, Level::Error]
             );
             // A faulted enable is faulted whichever way the pin is read:
             // inverting it would be inventing a level it doesn't have.
             assert_eq!(
-                eval(part, Signal::High, Signal::Low, Signal::High, Signal::Error),
-                vec![Signal::Error, Signal::Error]
+                eval(part, Level::High, Level::Low, Level::High, Level::Error),
+                vec![Level::Error, Level::Error]
             );
         }
     }
@@ -209,19 +203,13 @@ mod tests {
     fn an_undriven_control_is_not_the_same_as_being_switched_off() {
         for part in both_variants() {
             assert_eq!(
-                eval(part, Signal::High, Signal::Low, Signal::Unknown, on(part)),
-                vec![Signal::Unknown, Signal::Unknown],
+                eval(part, Level::High, Level::Low, Level::Unknown, on(part)),
+                vec![Level::Unknown, Level::Unknown],
                 "an undriven direction"
             );
             assert_eq!(
-                eval(
-                    part,
-                    Signal::High,
-                    Signal::Low,
-                    Signal::High,
-                    Signal::Unknown
-                ),
-                vec![Signal::Unknown, Signal::Unknown],
+                eval(part, Level::High, Level::Low, Level::High, Level::Unknown),
+                vec![Level::Unknown, Level::Unknown],
                 "an undriven enable"
             );
         }

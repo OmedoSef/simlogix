@@ -1,5 +1,5 @@
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
 /// Which MOSFET polarity a [`Transistor`] models — determines which gate
 /// level makes it conduct.
@@ -21,7 +21,7 @@ enum Polarity {
 /// the two in parallel as a transmission gate, and a simulator that let a
 /// lone NMOS pass a clean high would make a broken circuit look correct.
 ///
-/// So the weak direction comes out as [`Signal::WeakHigh`]/[`Signal::WeakLow`],
+/// So the weak direction comes out as [`Level::WeakHigh`]/[`Level::WeakLow`],
 /// which any full-strength driver on the same net overrides. A transmission
 /// gate therefore resolves to a clean level, and a lone pass transistor
 /// still works — it just loses to anything else pulling the other way,
@@ -66,19 +66,19 @@ impl Transistor {
         }
     }
 
-    fn conducts(&self, gate: Signal) -> bool {
+    fn conducts(&self, gate: Level) -> bool {
         match self.polarity {
-            Polarity::NType => gate == Signal::High,
-            Polarity::PType => gate == Signal::Low,
+            Polarity::NType => gate == Level::High,
+            Polarity::PType => gate == Level::Low,
         }
     }
 }
 
 impl Component for Transistor {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Level]) -> Vec<Level> {
         match inputs {
             [gate, source] if self.conducts(*gate) => vec![self.pass(*source)],
-            _ => vec![Signal::HighZ],
+            _ => vec![Level::HighZ],
         }
     }
 }
@@ -86,18 +86,18 @@ impl Component for Transistor {
 impl Transistor {
     /// The level as it arrives at the drain: full strength in the direction
     /// this polarity pulls well, weakened in the other.
-    fn pass(&self, source: Signal) -> Signal {
+    fn pass(&self, source: Level) -> Level {
         // A switch connected to nothing conducts nothing. `Unknown` here
         // means precisely that: it is what a net with no driver resolves to.
         // So the honest answer at the drain is `HighZ` -- "I am not driving
         // either" -- rather than passing the uncertainty on as though it
         // were a level for the net to weigh against a real one.
-        if matches!(source, Signal::Unknown | Signal::HighZ) {
-            return Signal::HighZ;
+        if matches!(source, Level::Unknown | Level::HighZ) {
+            return Level::HighZ;
         }
         let weak_direction = match self.polarity {
-            Polarity::NType => Signal::High,
-            Polarity::PType => Signal::Low,
+            Polarity::NType => Level::High,
+            Polarity::PType => Level::Low,
         };
         if source == weak_direction {
             source.weakened()
@@ -119,14 +119,14 @@ mod tests {
     fn an_n_type_pulls_down_at_full_strength_and_up_only_weakly() {
         let transistor = Transistor::n_type();
         assert_eq!(
-            transistor.eval(&[Signal::High, Signal::Low]),
-            vec![Signal::Low],
+            transistor.eval(&[Level::High, Level::Low]),
+            vec![Level::Low],
             "the direction an NMOS pulls well"
         );
         // The threshold drop, and the reason a lone NMOS is not a pass gate.
         assert_eq!(
-            transistor.eval(&[Signal::High, Signal::High]),
-            vec![Signal::WeakHigh]
+            transistor.eval(&[Level::High, Level::High]),
+            vec![Level::WeakHigh]
         );
     }
 
@@ -134,13 +134,13 @@ mod tests {
     fn a_p_type_is_the_mirror() {
         let transistor = Transistor::p_type();
         assert_eq!(
-            transistor.eval(&[Signal::Low, Signal::High]),
-            vec![Signal::High],
+            transistor.eval(&[Level::Low, Level::High]),
+            vec![Level::High],
             "the direction a PMOS pulls well"
         );
         assert_eq!(
-            transistor.eval(&[Signal::Low, Signal::Low]),
-            vec![Signal::WeakLow]
+            transistor.eval(&[Level::Low, Level::Low]),
+            vec![Level::WeakLow]
         );
     }
 
@@ -150,15 +150,15 @@ mod tests {
         // `Unknown` through instead made the transistor claim to drive its
         // drain, and that claim then fought the real driver on the net --
         // which is how a correct CMOS NAND came to report `Error`.
-        for source in [Signal::Unknown, Signal::HighZ] {
+        for source in [Level::Unknown, Level::HighZ] {
             assert_eq!(
-                Transistor::n_type().eval(&[Signal::High, source]),
-                vec![Signal::HighZ],
+                Transistor::n_type().eval(&[Level::High, source]),
+                vec![Level::HighZ],
                 "an n-type conducting from {source:?}"
             );
             assert_eq!(
-                Transistor::p_type().eval(&[Signal::Low, source]),
-                vec![Signal::HighZ],
+                Transistor::p_type().eval(&[Level::Low, source]),
+                vec![Level::HighZ],
                 "a p-type conducting from {source:?}"
             );
         }
@@ -170,8 +170,8 @@ mod tests {
         // applies to a *level*, and there is no such thing as a weak
         // "something is wrong".
         assert_eq!(
-            Transistor::n_type().eval(&[Signal::High, Signal::Error]),
-            vec![Signal::Error]
+            Transistor::n_type().eval(&[Level::High, Level::Error]),
+            vec![Level::Error]
         );
     }
 
@@ -179,8 +179,8 @@ mod tests {
     fn n_type_drives_high_z_when_gate_is_low() {
         let transistor = Transistor::n_type();
         assert_eq!(
-            transistor.eval(&[Signal::Low, Signal::High]),
-            vec![Signal::HighZ]
+            transistor.eval(&[Level::Low, Level::High]),
+            vec![Level::HighZ]
         );
     }
 
@@ -188,8 +188,8 @@ mod tests {
     fn p_type_drives_high_z_when_gate_is_high() {
         let transistor = Transistor::p_type();
         assert_eq!(
-            transistor.eval(&[Signal::High, Signal::Low]),
-            vec![Signal::HighZ]
+            transistor.eval(&[Level::High, Level::Low]),
+            vec![Level::HighZ]
         );
     }
 }

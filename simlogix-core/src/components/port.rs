@@ -13,16 +13,18 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::component::Component;
-use crate::signal::Signal;
+use crate::level::Level;
 
-/// What a driving port is currently putting on its net.
+/// Where a driving port has been *set*, which is not the same thing as
+/// what its net comes to carry — hence a name of its own rather than
+/// `PortLevel`, which read like a [`Level`] and sat next to one.
 ///
 /// Three positions rather than a `bool` because "not driving" is a real
 /// third choice, not the absence of one — and it's the case worth testing,
 /// since it's what an unconnected parent pin gives you.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum PortLevel {
+pub enum PortSetting {
     /// Driving nothing. What that *means* depends on the port — see
     /// [`CircuitPort::input`] and [`CircuitPort::bidirectional`].
     #[default]
@@ -31,7 +33,7 @@ pub enum PortLevel {
     High,
 }
 
-impl PortLevel {
+impl PortSetting {
     /// The next position of the click cycle: undriven, high, low, round
     /// again. `tri_state` off skips the undriven position entirely, so a
     /// port declared two-state can't be clicked into a third.
@@ -50,29 +52,29 @@ impl PortLevel {
 /// The two constructors differ only in what "undriven" puts on the wire, and
 /// that difference matters more than it looks — see each.
 pub struct CircuitPort {
-    /// What [`PortLevel::Undriven`] resolves to for this port.
-    undriven: Signal,
-    level: Rc<Cell<PortLevel>>,
+    /// What [`PortSetting::Undriven`] resolves to for this port.
+    undriven: Level,
+    level: Rc<Cell<PortSetting>>,
 }
 
 impl CircuitPort {
-    /// A value entering the circuit. Undriven is [`Signal::Unknown`]:
+    /// A value entering the circuit. Undriven is [`Level::Unknown`]:
     /// nothing outside is supplying it, so its value genuinely isn't known.
-    pub fn input() -> (Self, Rc<Cell<PortLevel>>) {
-        Self::new(Signal::Unknown)
+    pub fn input() -> (Self, Rc<Cell<PortSetting>>) {
+        Self::new(Level::Unknown)
     }
 
-    /// A port carrying values both ways. Undriven is [`Signal::HighZ`],
+    /// A port carrying values both ways. Undriven is [`Level::HighZ`],
     /// *not* `Unknown`: it has to actually let go so the circuit inside can
     /// drive the net. `Unknown` counts as a driver, so it would put every
     /// net a bidirectional port touches into conflict instead of stepping
     /// aside.
-    pub fn bidirectional() -> (Self, Rc<Cell<PortLevel>>) {
-        Self::new(Signal::HighZ)
+    pub fn bidirectional() -> (Self, Rc<Cell<PortSetting>>) {
+        Self::new(Level::HighZ)
     }
 
-    fn new(undriven: Signal) -> (Self, Rc<Cell<PortLevel>>) {
-        let level = Rc::new(Cell::new(PortLevel::default()));
+    fn new(undriven: Level) -> (Self, Rc<Cell<PortSetting>>) {
+        let level = Rc::new(Cell::new(PortSetting::default()));
         (
             Self {
                 undriven,
@@ -84,11 +86,11 @@ impl CircuitPort {
 }
 
 impl Component for CircuitPort {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
         vec![match self.level.get() {
-            PortLevel::Undriven => self.undriven,
-            PortLevel::Low => Signal::Low,
-            PortLevel::High => Signal::High,
+            PortSetting::Undriven => self.undriven,
+            PortSetting::Low => Level::Low,
+            PortSetting::High => Level::High,
         }]
     }
 }
@@ -103,7 +105,7 @@ impl Component for CircuitPort {
 pub struct CircuitOutput;
 
 impl Component for CircuitOutput {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
         Vec::new()
     }
 }
@@ -128,8 +130,8 @@ impl CircuitAnchor {
 }
 
 impl Component for CircuitAnchor {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
-        vec![Signal::HighZ; self.pins]
+    fn eval(&self, _inputs: &[Level]) -> Vec<Level> {
+        vec![Level::HighZ; self.pins]
     }
 }
 
@@ -145,12 +147,12 @@ mod tests {
     fn an_input_holds_the_level_it_was_set_to() {
         let (port, level) = CircuitPort::input();
         // Undriven from the outside is exactly what "not known" means here.
-        assert_eq!(port.eval(&[]), vec![Signal::Unknown]);
+        assert_eq!(port.eval(&[]), vec![Level::Unknown]);
 
-        level.set(PortLevel::High);
-        assert_eq!(port.eval(&[]), vec![Signal::High]);
+        level.set(PortSetting::High);
+        assert_eq!(port.eval(&[]), vec![Level::High]);
         // Latching, not momentary: nothing releases it.
-        assert_eq!(port.eval(&[]), vec![Signal::High]);
+        assert_eq!(port.eval(&[]), vec![Level::High]);
     }
 
     #[test]
@@ -159,23 +161,23 @@ mod tests {
         // The difference from an input, and the reason the two exist:
         // `HighZ` is ignored when a net resolves, so the circuit inside can
         // drive it. `Unknown` would count as a driver and cause a conflict.
-        assert_eq!(port.eval(&[]), vec![Signal::HighZ]);
+        assert_eq!(port.eval(&[]), vec![Level::HighZ]);
 
-        level.set(PortLevel::Low);
-        assert_eq!(port.eval(&[]), vec![Signal::Low]);
+        level.set(PortSetting::Low);
+        assert_eq!(port.eval(&[]), vec![Level::Low]);
     }
 
     #[test]
     fn the_click_cycle_skips_undriven_unless_the_port_is_three_state() {
-        let mut level = PortLevel::Undriven;
-        for expected in [PortLevel::High, PortLevel::Low, PortLevel::Undriven] {
+        let mut level = PortSetting::Undriven;
+        for expected in [PortSetting::High, PortSetting::Low, PortSetting::Undriven] {
             level = level.next(true);
             assert_eq!(level, expected);
         }
 
         // Two-state: it never reaches undriven again once it has left.
-        let mut level = PortLevel::High;
-        for expected in [PortLevel::Low, PortLevel::High, PortLevel::Low] {
+        let mut level = PortSetting::High;
+        for expected in [PortSetting::Low, PortSetting::High, PortSetting::Low] {
             level = level.next(false);
             assert_eq!(level, expected);
         }
@@ -185,7 +187,7 @@ mod tests {
     fn a_two_state_port_still_leaves_undriven_when_it_starts_there() {
         // Otherwise a port set to two-state *after* being left undriven
         // would be stuck there with no way to click out of it.
-        assert_eq!(PortLevel::Undriven.next(false), PortLevel::High);
+        assert_eq!(PortSetting::Undriven.next(false), PortSetting::High);
     }
 
     #[test]
@@ -194,13 +196,13 @@ mod tests {
         // all of them have to be `HighZ` or the instance would drive its own
         // ports.
         assert_eq!(
-            CircuitAnchor::new(3).eval(&[Signal::High, Signal::Low, Signal::Unknown]),
-            vec![Signal::HighZ; 3]
+            CircuitAnchor::new(3).eval(&[Level::High, Level::Low, Level::Unknown]),
+            vec![Level::HighZ; 3]
         );
     }
 
     #[test]
     fn an_output_drives_nothing() {
-        assert!(CircuitOutput.eval(&[Signal::High]).is_empty());
+        assert!(CircuitOutput.eval(&[Level::High]).is_empty());
     }
 }

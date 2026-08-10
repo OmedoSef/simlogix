@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
-    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortLevel, Probe,
+    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortSetting, Probe,
     Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
@@ -1974,8 +1974,8 @@ impl SimLogixApp {
             return;
         };
         level.set(match level.get() {
-            PortLevel::High => PortLevel::Low,
-            _ => PortLevel::High,
+            PortSetting::High => PortSetting::Low,
+            _ => PortSetting::High,
         });
         let id = placed.id();
         self.source_beat_at = now;
@@ -2106,8 +2106,8 @@ impl SimLogixApp {
         // of the switch, not part of a cycle.
         if let Some(level) = placed.hand_set_level() {
             level.set(match level.get() {
-                PortLevel::High => PortLevel::Low,
-                _ => PortLevel::High,
+                PortSetting::High => PortSetting::Low,
+                _ => PortSetting::High,
             });
             self.circuit.schedule_now(id);
             self.step(SETTLE_TICKS);
