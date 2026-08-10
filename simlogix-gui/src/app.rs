@@ -2940,9 +2940,11 @@ impl SimLogixApp {
                             chosen,
                             drivable,
                             free_running: self.free_running_source,
+                            running: self.running,
                         },
                     ) {
                         Some(toolbar::SimAction::Tool(tool)) => self.sim_tool = tool,
+                        Some(toolbar::SimAction::ToggleRunning) => self.toggle_running(),
                         Some(toolbar::SimAction::StepTick) => self.step(1),
                         Some(toolbar::SimAction::StepEvent) => self.step_to_next_event(),
                         Some(toolbar::SimAction::StepEdge) => self.step_clock_edge(strings),

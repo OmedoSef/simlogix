@@ -31,15 +31,16 @@ is part of the document: it is how the circuit was left, not something the
 simulation produced. That is the one thing this mode deliberately lets you
 change, since it is the whole reason to be here.
 
-Its tool row holds **Interact** and a hand for the view, then the three
-step buttons and, when there is a choice, the clock picker — see
+Its tool row holds **Interact** and a hand for the view, then run/pause,
+the three step buttons and, when there is a choice, the clock picker — see
 [Stepping](#stepping-one-tick-at-a-time) below. The tools latch and the
-steps happen once, which is why a separator sits between them.
+rest happen once, which is why a separator sits between them.
 
 ## Running and pausing
 
-**Simulation → Run/Pause**, or `Space`. Editing keeps working while paused;
-only time stops, which is what lets you go and fix a circuit that misbehaves.
+**Simulation → Run/Pause**, `Space`, or the ▶ / ❚❚ button at the head of the
+simulation view's tool row. Editing keeps working while paused; only time
+stops, which is what lets you go and fix a circuit that misbehaves.
 
 ## Stepping one tick at a time
 

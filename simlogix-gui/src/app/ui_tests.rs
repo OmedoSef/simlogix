@@ -32,6 +32,7 @@
 //! function belongs beside that function, where it is cheaper to run and
 //! easier to read; repeating it here would only mean two places to change it.
 
+use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 
 use simlogix_core::{ComponentId, Signal};
@@ -244,6 +245,38 @@ fn a_clock_step_drives_a_port_when_that_is_where_the_clock_comes_from() {
     press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
     step(&mut harness);
     assert_eq!(level(&harness), Signal::Low);
+}
+
+#[test]
+fn the_simulation_row_has_a_run_pause_button() {
+    let mut harness = harness();
+    harness
+        .state_mut()
+        .switch_view(crate::toolbar::View::Simulation);
+    step(&mut harness);
+    assert!(harness.state().running);
+
+    // Found by its tooltip, which is the menu's own label — the same two
+    // words, so there is only one translation to keep right.
+    let label = |harness: &Harness<'_, SimLogixApp>| {
+        let app = harness.state();
+        let strings = crate::i18n::Strings::for_language(app.language);
+        if app.running {
+            strings.menu_simulation_pause
+        } else {
+            strings.menu_simulation_run
+        }
+    };
+
+    let pause = label(&harness).to_string();
+    harness.get_by_label(&pause).click();
+    step(&mut harness);
+    assert!(!harness.state().running, "the button stopped it");
+
+    let run = label(&harness).to_string();
+    harness.get_by_label(&run).click();
+    step(&mut harness);
+    assert!(harness.state().running, "and started it again");
 }
 
 fn press_with(harness: &mut Harness<'_, SimLogixApp>, key: egui::Key, modifiers: egui::Modifiers) {

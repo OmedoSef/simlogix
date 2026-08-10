@@ -794,6 +794,33 @@ pub fn draw_free_run_tool(painter: &Painter, rect: Rect, color: Color32) {
     painter.line(points, stroke);
 }
 
+/// Run: the usual triangle.
+pub fn draw_play_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.3;
+    painter.line(
+        vec![
+            pos2(c.x - reach * 0.7, c.y - reach),
+            pos2(c.x + reach * 0.8, c.y),
+            pos2(c.x - reach * 0.7, c.y + reach),
+            pos2(c.x - reach * 0.7, c.y - reach),
+        ],
+        stroke,
+    );
+}
+
+/// Pause: the usual two bars.
+pub fn draw_pause_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.3;
+    for side in [-1.0, 1.0] {
+        let x = c.x + reach * 0.4 * side;
+        painter.line_segment([pos2(x, c.y - reach), pos2(x, c.y + reach)], stroke);
+    }
+}
+
 pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.6, color);
     let c = rect.center();

@@ -83,6 +83,8 @@ pub enum SimTool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimAction {
     Tool(SimTool),
+    /// Start or stop time.
+    ToggleRunning,
     /// Advance by one tick — one propagation delay — and stay stopped.
     StepTick,
     /// Advance straight to the next tick where something is scheduled.
@@ -119,6 +121,7 @@ pub struct SimRow<'a> {
     /// `Clock` already does.
     pub drivable: bool,
     pub free_running: bool,
+    pub running: bool,
 }
 
 pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, row: SimRow<'_>) -> Option<SimAction> {
@@ -129,6 +132,7 @@ pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, row: SimRow<'_>) -> Option
         chosen,
         drivable,
         free_running,
+        running,
     } = row;
     let mut clicked = None;
     for (tool, label) in [
@@ -144,6 +148,21 @@ pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, row: SimRow<'_>) -> Option
         }
     }
     ui.separator();
+    // The coarse control first, then the three sizes of step. Its icon says
+    // what pressing it does, the way every player's does — so it is never
+    // drawn held down, any more than the steps are.
+    //
+    // The label is the menu's own: the same two words, and two copies of a
+    // translation is one that eventually says different things in different
+    // places.
+    let (label, draw): (_, fn(&egui::Painter, egui::Rect, egui::Color32)) = if running {
+        (strings.menu_simulation_pause, symbol::draw_pause_tool)
+    } else {
+        (strings.menu_simulation_run, symbol::draw_play_tool)
+    };
+    if icon_button(ui, label, false, draw) {
+        clicked = Some(SimAction::ToggleRunning);
+    }
     // Never drawn as held down: it is over as soon as it is pressed.
     if icon_button(ui, strings.tool_step_tick, false, symbol::draw_step_tool) {
         clicked = Some(SimAction::StepTick);
@@ -330,5 +349,12 @@ fn icon_button(
         draw(ui.painter(), rect.shrink(5.0), visuals.fg_stroke.color);
     }
 
+    // The icon is the whole of what is drawn, so without this the button has
+    // no name at all — nothing for a screen reader to announce, and nothing
+    // for a test to reach it by. The tooltip's text is the right one: it is
+    // already what the button says it does.
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
     response.on_hover_text(label).clicked()
 }
