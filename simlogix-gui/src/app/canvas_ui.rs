@@ -1,12 +1,15 @@
 //! The canvas: the schematic, and every gesture that acts on it.
 //!
 //! Split out of `app.rs` because it was the bulk of one function — placing,
-//! selecting, moving, wiring, cutting, the rubber band and the camera, all
-//! inside a single `Scene` closure. It stays one method rather than being
-//! carved further: the pieces genuinely share the frame's pointer position,
-//! the resolved wire routes and the click-consumed flag, and handing those
-//! between a dozen small functions would move the complexity rather than
-//! reduce it.
+//! selecting, moving, wiring, cutting and the rubber band, all inside a
+//! single `Scene` closure.
+//!
+//! What has come out of it since is what does *not* share the frame's
+//! state: resolving the wire routes (`wiring`) and the camera (`camera`).
+//! What is left stays one method, and the reason still holds — the pieces
+//! genuinely share the pointer position, the resolved routes and the
+//! click-consumed flag, and handing those between a dozen small functions
+//! would move the complexity rather than reduce it.
 //!
 //! A child module rather than a sibling, so `SimLogixApp`'s fields stay
 //! private to the rest of the crate.
@@ -20,85 +23,22 @@ use crate::toolbar::{self, Tool};
 
 use super::wiring::ResolvedRoute;
 use super::{
-    JunctionTarget, SimLogixApp, WireEndpoint, WireInProgress, FIT_MARGIN, MAX_ZOOM, MIN_ZOOM,
-    REATTACH_RADIUS, SETTLE_TICKS, WHEEL_ZOOM_SENSITIVITY, WIRE_HIT_RADIUS,
+    JunctionTarget, SimLogixApp, WireEndpoint, WireInProgress, MAX_ZOOM, MIN_ZOOM, REATTACH_RADIUS,
+    SETTLE_TICKS, WIRE_HIT_RADIUS,
 };
 
 impl SimLogixApp {
     /// One frame of the canvas, panels aside.
     pub(super) fn canvas_ui(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show(ui, |ui| {
-            // Claim the wheel before `Scene` sees it, so it zooms instead of
-            // panning (the schematic-editor convention) — but only while the
-            // pointer is over the canvas.
-            //
-            // Relying on the side panels having consumed it first isn't
-            // enough: a scroll area only takes the wheel over its *list*, so
-            // an event over the circuit tree's heading, or over a list
-            // already scrolled to its end, falls through to here and zooms
-            // the schematic while the user is plainly working somewhere else.
-            let wheel = if ui.rect_contains_pointer(ui.max_rect()) {
-                ui.ctx().input_mut(|i| {
-                    let dy = i.smooth_scroll_delta.y;
-                    if dy != 0.0 {
-                        i.smooth_scroll_delta = egui::Vec2::ZERO;
-                    }
-                    dy
-                })
-            } else {
-                0.0
-            };
-
+            let wheel = self.take_wheel(ui);
             let mut zoom_pivot = None;
             // Copied out and written back so the closure can still borrow
             // the rest of `self`; `Scene` mutates it in place as the user
             // pans and zooms.
-            let mut scene_rect = self.scene_rect;
-            // The primary drag belongs to the rubber band unless the hand
-            // tool is out; the middle button always pans, so there's a way to
-            // move the view whatever the tool — and no preference to set.
-            // The framed region starts equal to the canvas, so the view opens
-            // at 1:1.
-            //
-            // It used to be a fixed 1200x800, which `Scene` then fitted into
-            // whatever space the canvas had — so the circuit opened at
-            // roughly 60% and *stayed* there until someone zoomed. That is
-            // invisible on line art and obvious the moment there is text:
-            // `Scene` applies a layer transform, which scales already-drawn
-            // glyphs as a texture rather than re-rasterising them, so any
-            // factor other than 1 blurs them. No font-size compensation can
-            // fix that — rasterised at `g` and shown at `g × zoom`, the two
-            // agree only at zoom 1 — so opening *at* 1 is the fix.
-            // Assigned to the *local* copy taken just above, not to
-            // `self.scene_rect`: that copy is what `Scene` reads and what
-            // gets written back afterwards, so touching the field here would
-            // be overwritten a few lines later and the framing would be
-            // computed every frame and thrown away every frame.
-            let unframed = scene_rect.width() <= 0.0 || scene_rect.height() <= 0.0;
-            if std::mem::take(&mut self.refit_view) || unframed {
-                let canvas = ui.available_size();
-                scene_rect = match self.content_rect() {
-                    Some(content) => {
-                        let content = content.expand(FIT_MARGIN);
-                        // Never magnify: a circuit smaller than the canvas is
-                        // centred at 1:1 rather than blown up to fill it,
-                        // which would open a two-gate circuit at 4x and blur
-                        // every label. Only a drawing too big to fit zooms
-                        // out.
-                        if content.width() <= canvas.x && content.height() <= canvas.y {
-                            egui::Rect::from_center_size(content.center(), canvas)
-                        } else {
-                            content
-                        }
-                    }
-                    None => egui::Rect::from_min_size(egui::Pos2::ZERO, canvas),
-                };
-            }
+            let mut scene_rect = self.framed_region(ui);
+            let pan_buttons = self.pan_buttons();
 
-            let mut pan_buttons = egui::containers::DragPanButtons::MIDDLE;
-            if self.pans_on_left_drag() {
-                pan_buttons |= egui::containers::DragPanButtons::PRIMARY;
-            }
             let scene_response = egui::Scene::new()
                 .zoom_range(MIN_ZOOM..=MAX_ZOOM)
                 .drag_pan_buttons(pan_buttons)
@@ -1366,18 +1306,7 @@ impl SimLogixApp {
                 );
             }
 
-            // Wheel zoom, applied to the framed region for the next frame:
-            // shrinking it zooms in. Anchored on the pointer so the point
-            // under the cursor stays put, which is what makes zooming feel
-            // like it's following you rather than the window centre.
-            if wheel != 0.0 {
-                let pivot = zoom_pivot.unwrap_or_else(|| self.scene_rect.center());
-                let factor = (-wheel * WHEEL_ZOOM_SENSITIVITY).exp();
-                self.scene_rect = egui::Rect::from_min_max(
-                    pivot + (self.scene_rect.min - pivot) * factor,
-                    pivot + (self.scene_rect.max - pivot) * factor,
-                );
-            }
+            self.zoom_by_wheel(wheel, zoom_pivot);
         });
     }
 }

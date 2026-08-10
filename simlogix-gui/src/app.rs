@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 mod appearance_view;
+mod camera;
 mod canvas_ui;
 mod circuits;
 mod menu;
@@ -1290,12 +1291,9 @@ impl SimLogixApp {
         if view == self.view {
             return;
         }
-        let was_symbol = self.view == toolbar::View::Appearance;
-        let is_symbol = view == toolbar::View::Appearance;
+        let was = self.view;
         self.view = view;
-        if was_symbol != is_symbol {
-            std::mem::swap(&mut self.scene_rect, &mut self.idle_scene_rect);
-        }
+        self.swap_camera_for(was, view);
         // Never framed before: `ui()` reads a zero rect as "frame me".
         if self.scene_rect.width() <= 0.0 {
             self.refit_view = true;

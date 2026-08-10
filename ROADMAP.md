@@ -234,9 +234,11 @@ Not user-visible, but they decide how expensive everything above is.
     frame loop is five lines of calling them. The seam had been cut when
     `app.rs` was split; this list said otherwise because it was written from
     the shape of the file rather than from reading it.
-  - [ ] **The camera**: claiming the wheel, the framed region, the refit, the
-    pan buttons, and writing `scene_rect` back. It touches no component and
-    no wire.
+  - [x] **The camera**: claiming the wheel, the framed region, the refit,
+    the pan buttons and applying a wheel turn — now `camera.rs`, five
+    methods each answering "where are we looking", where everything left in
+    the loop answers "what did the pointer just do". `switch_view`'s
+    two-camera rule went with them, so it lives in one place. 1383 → 1312.
   - [ ] **Placement**: the translucent ghost and the click that drops it.
     Wants the hovered position and the queued kind, and nothing else.
   - [ ] **Then look again.** What is left is the two loops. Whether they
