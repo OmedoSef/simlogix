@@ -18,6 +18,7 @@ use simlogix_core::{ComponentId, NetId};
 use crate::canvas::{self, BOX_SIZE};
 use crate::toolbar::{self, Tool};
 
+use super::wiring::ResolvedRoute;
 use super::{
     JunctionTarget, SimLogixApp, WireEndpoint, WireInProgress, FIT_MARGIN, MAX_ZOOM, MIN_ZOOM,
     REATTACH_RADIUS, SETTLE_TICKS, WHEEL_ZOOM_SENSITIVITY, WIRE_HIT_RADIUS,
@@ -343,18 +344,6 @@ impl SimLogixApp {
                     if input_changed {
                         self.advance_circuit(SETTLE_TICKS);
                     }
-                    // A pin's current on-canvas position this frame, resolved by
-                    // identity -- every `Wire` endpoint that's a pin looks itself up
-                    // here rather than storing a position directly, so it tracks a
-                    // moved component automatically.
-                    let pin_position =
-                        |component: ComponentId, pin_index: usize| -> Option<egui::Pos2> {
-                            pin_handles
-                                .iter()
-                                .find(|h| h.component == component && h.pin_index == pin_index)
-                                .map(|h| h.position)
-                        };
-
                     let click_pos = ui
                         .ctx()
                         .input(|i| i.pointer.primary_clicked())
@@ -381,72 +370,9 @@ impl SimLogixApp {
 
                     let hover_pos = pointer_scene;
 
-                    // Every wire's endpoints and (possibly-defaulted) waypoint
-                    // list, resolved once per frame. A junction depends on its
-                    // host being resolved first, and a wire can be re-attached
-                    // to any other one, so this repeats until a pass resolves
-                    // nothing new rather than assuming creation order. Wires
-                    // left unresolved are the genuinely unresolvable ones (a
-                    // deleted component, or a tap cycle) and simply aren't drawn.
-                    struct Resolved {
-                        from: egui::Pos2,
-                        to: egui::Pos2,
-                        waypoints: Vec<egui::Pos2>,
-                    }
-                    let mut resolved: HashMap<u64, Resolved> = HashMap::new();
-                    let mut progressed = true;
-                    while progressed {
-                        progressed = false;
-                        for wire in &self.wires {
-                            if resolved.contains_key(&wire.id) {
-                                continue;
-                            }
-                            // Both ends resolve the same way. A junction may
-                            // not be resolvable *yet* (its host can come later
-                            // in the list); a later pass picks it up.
-                            let place =
-                                |endpoint: WireEndpoint, resolved: &HashMap<u64, Resolved>| {
-                                    match endpoint {
-                                        WireEndpoint::Pin(component, pin_index) => {
-                                            pin_position(component, pin_index)
-                                        }
-                                        WireEndpoint::Junction {
-                                            wire: host,
-                                            waypoint,
-                                        } => resolved
-                                            .get(&host)
-                                            .and_then(|r| r.waypoints.get(waypoint))
-                                            .copied(),
-                                        WireEndpoint::Free(pos) => Some(pos),
-                                    }
-                                };
-                            let (Some(from_pos), Some(to_pos)) =
-                                (place(wire.from, &resolved), place(wire.to, &resolved))
-                            else {
-                                continue;
-                            };
-                            // A wire is exactly the points it was given: no
-                            // waypoints means a straight run end to end.
-                            //
-                            // There used to be an implicit mid-point bend here
-                            // for wires drawn without any, back when routing
-                            // wasn't under the user's control. It bred phantom
-                            // points that only became real once dragged — and
-                            // for a level wire it produced *two* of them at the
-                            // same spot, which is what left a stray point on top
-                            // of an end after cutting a segment.
-                            let waypoints = wire.waypoints.clone();
-                            resolved.insert(
-                                wire.id,
-                                Resolved {
-                                    from: from_pos,
-                                    to: to_pos,
-                                    waypoints,
-                                },
-                            );
-                            progressed = true;
-                        }
-                    }
+                    // Resolved once per frame, before anything is drawn --
+                    // see `resolve_routes`.
+                    let mut resolved = self.resolve_routes(&pin_handles);
 
                     // Where every wire's points ended up this frame, kept past
                     // the loop below: deleting a wire has to know where the taps
@@ -510,7 +436,7 @@ impl SimLogixApp {
                         // `None` while both ends are loose: the wire is drawing,
                         // not yet a connection. Still very much on screen.
                         let net = self.wire_net(&self.wires[i]);
-                        let Some(Resolved {
+                        let Some(ResolvedRoute {
                             from: from_pos,
                             to: to_pos,
                             waypoints,

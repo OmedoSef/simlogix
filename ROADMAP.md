@@ -213,12 +213,41 @@ own kind may be better as two palette entries outright.
 
 Not user-visible, but they decide how expensive everything above is.
 
-- [ ] **Splitting `canvas_ui.rs`**, if it starts to hurt. `app.rs` was cut
-  from 6975 lines to 2623, but this one is still 1400 in a single method. It
-  was left whole on purpose — its pieces share the frame's pointer position,
-  the resolved wire routes and the click-consumed flag, and handing those
-  between a dozen small functions would move the complexity rather than
-  reduce it.
+- [ ] 🚧 **Splitting `canvas_ui.rs`** — 1457 lines to begin with, nearly all
+  of them one method. It was left whole on purpose, and that reason still stands for the
+  *middle* of it: the component loop and the wire loop share the frame's
+  pointer position, the resolved routes and the click-consumed flag, and
+  handing those between a dozen small functions would move the complexity
+  rather than reduce it.
+
+  So the seam is not "cut it into six" — it is **what does not touch that
+  shared state**. Four pieces qualify, each roughly seventy lines and each
+  standing on its own:
+
+  - [x] **Resolving every wire's route** into `from`/`to`/waypoints, the
+    fixpoint pass that repeats until nothing new resolves. It reads the wire
+    list and the pin positions and produces data — no pointer, no `Ui`. Now
+    `wiring::resolve_routes`, beside the rest of the wire logic. 1457 → 1383.
+  - [x] **The deferred wire edits** — nothing to move, which is worth
+    recording rather than quietly dropping: `remove_waypoint`, `split_wire`
+    and `join_wires` were already in `wiring.rs`, and what is left in the
+    frame loop is five lines of calling them. The seam had been cut when
+    `app.rs` was split; this list said otherwise because it was written from
+    the shape of the file rather than from reading it.
+  - [ ] **The camera**: claiming the wheel, the framed region, the refit, the
+    pan buttons, and writing `scene_rect` back. It touches no component and
+    no wire.
+  - [ ] **Placement**: the translucent ghost and the click that drops it.
+    Wants the hovered position and the queued kind, and nothing else.
+  - [ ] **Then look again.** What is left is the two loops. Whether they
+    split at all is a question worth asking with the noise gone, and worth
+    answering honestly — "still one method" is a fine answer if the pieces
+    still share everything.
+
+  The interface tests are what makes this safe: the last split of this size
+  went through with all of them green at every step, and a refactor with
+  nothing watching the wiring between the pieces is exactly where the bugs
+  they exist for come back.
 
 - [ ] **Rendered snapshots of symbols**, if the appearance work needs them.
   The interface tests drive the real application and assert on state; what

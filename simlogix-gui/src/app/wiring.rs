@@ -13,9 +13,86 @@ use std::hash::{Hash, Hasher};
 
 use simlogix_core::ComponentId;
 
+use crate::placed_component::PinHandle;
+
 use super::{SimLogixApp, WireEndpoint};
 
+/// Where a wire's two ends and its points actually are, this frame.
+pub(super) struct ResolvedRoute {
+    pub from: egui::Pos2,
+    pub to: egui::Pos2,
+    pub waypoints: Vec<egui::Pos2>,
+}
+
 impl SimLogixApp {
+    /// Every wire's endpoints and points, worked out from where the pins
+    /// have landed this frame.
+    ///
+    /// A junction depends on its host being resolved first, and a wire can
+    /// be re-attached to *any* other one, so this repeats until a pass
+    /// resolves nothing new rather than assuming creation order. Wires left
+    /// unresolved are the genuinely unresolvable ones — a deleted component,
+    /// or a tap cycle — and are simply not drawn.
+    ///
+    /// Out here rather than in the frame loop because it touches none of
+    /// what that loop shares: no pointer, no `Ui`, no click to consume. It
+    /// reads the drawing and the pin positions and answers with data.
+    pub(super) fn resolve_routes(&self, pins: &[PinHandle]) -> HashMap<u64, ResolvedRoute> {
+        let pin_position = |component: ComponentId, pin_index: usize| -> Option<egui::Pos2> {
+            pins.iter()
+                .find(|handle| handle.component == component && handle.pin_index == pin_index)
+                .map(|handle| handle.position)
+        };
+        // Both ends resolve the same way. A junction may not be resolvable
+        // *yet*, its host coming later in the list; a later pass picks it up.
+        let place = |endpoint: WireEndpoint, resolved: &HashMap<u64, ResolvedRoute>| match endpoint
+        {
+            WireEndpoint::Pin(component, pin_index) => pin_position(component, pin_index),
+            WireEndpoint::Junction {
+                wire: host,
+                waypoint,
+            } => resolved
+                .get(&host)
+                .and_then(|route| route.waypoints.get(waypoint))
+                .copied(),
+            WireEndpoint::Free(pos) => Some(pos),
+        };
+
+        let mut resolved: HashMap<u64, ResolvedRoute> = HashMap::new();
+        let mut progressed = true;
+        while progressed {
+            progressed = false;
+            for wire in &self.wires {
+                if resolved.contains_key(&wire.id) {
+                    continue;
+                }
+                let (Some(from), Some(to)) =
+                    (place(wire.from, &resolved), place(wire.to, &resolved))
+                else {
+                    continue;
+                };
+                // A wire is exactly the points it was given: no waypoints
+                // means a straight run end to end.
+                //
+                // There used to be an implicit mid-point bend here, back when
+                // routing wasn't under the user's control. It bred phantom
+                // points that only became real once dragged — and for a level
+                // wire it produced *two* of them at the same spot, which is
+                // what left a stray point on top of an end after a cut.
+                resolved.insert(
+                    wire.id,
+                    ResolvedRoute {
+                        from,
+                        to,
+                        waypoints: wire.waypoints.clone(),
+                    },
+                );
+                progressed = true;
+            }
+        }
+        resolved
+    }
+
     /// Removes `roots`, disconnecting each one's own pin.
     ///
     /// Wires tapped onto a removed one are **kept**, with their junction
