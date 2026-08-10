@@ -695,6 +695,31 @@ pub fn draw_marquee_tool(painter: &Painter, rect: Rect, color: Color32) {
 /// The pan tool's icon: arrows out of a centre, the universal "move the
 /// view" mark. A hand would be the other convention; four arrows read at
 /// 18 px, a hand doesn't.
+/// One step forward: a triangle running into a bar, the mark every player
+/// and debugger uses for "advance and stop again".
+pub fn draw_step_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.3;
+
+    painter.line(
+        vec![
+            pos2(c.x - reach, c.y - reach),
+            pos2(c.x + reach * 0.35, c.y),
+            pos2(c.x - reach, c.y + reach),
+            pos2(c.x - reach, c.y - reach),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(c.x + reach * 0.75, c.y - reach),
+            pos2(c.x + reach * 0.75, c.y + reach),
+        ],
+        stroke,
+    );
+}
+
 pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.6, color);
     let c = rect.center();

@@ -40,6 +40,27 @@ not as a shelf of buttons that do nothing yet.
 **Simulation → Run/Pause**, or `Space`. Editing keeps working while paused;
 only time stops, which is what lets you go and fix a circuit that misbehaves.
 
+## Stepping one tick at a time
+
+**Simulation → Step one tick**, `F10`, or the ⏵| button in the simulation
+view's tool row. It stops the simulation first, so the step you take is the
+only thing that moved.
+
+A **tick** is one propagation delay — what every component takes to answer a
+change on its inputs. So one press moves the signal on by one stage, which
+is how you watch something ripple through a chain of gates rather than
+seeing only where it ended up.
+
+The **tick count** is at the right of the status bar, and it is worth
+watching: most ticks change nothing you can see, so without it a step that
+did its job looks exactly like a button that didn't.
+
+One thing to know: [unstable circuits](#unstable-circuits) are detected
+within a single run, by counting how often a net changes. Stepping a tick at
+a time never reaches that count, so it will not stop you — which is the
+point, since walking an oscillation one tick at a time is how you find out
+what it is doing.
+
 ## Signal colours
 
 Wires, and the components whose job is to show a state (Clock, Probe), are

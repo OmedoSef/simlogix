@@ -32,6 +32,10 @@ pub(super) struct Shortcuts {
     /// rather than something to consume.
     pub copy: egui::KeyboardShortcut,
     pub paste: egui::KeyboardShortcut,
+    /// A function key rather than a letter or punctuation: `F10` is printed
+    /// the same on every layout, and it is what a debugger has meant by
+    /// "step" for thirty years. `.` would have needed Shift on an AZERTY.
+    pub step: egui::KeyboardShortcut,
 }
 
 impl Shortcuts {
@@ -50,6 +54,7 @@ impl Shortcuts {
             redo_alt: command(egui::Key::Y),
             copy: command(egui::Key::C),
             paste: command(egui::Key::V),
+            step: egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F10),
         }
     }
 }
@@ -160,6 +165,16 @@ impl SimLogixApp {
                         .clicked()
                     {
                         self.toggle_running();
+                        ui.close();
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(strings.menu_simulation_step)
+                                .shortcut_text(ui.ctx().format_shortcut(&keys.step)),
+                        )
+                        .clicked()
+                    {
+                        self.step(1);
                         ui.close();
                     }
                     ui.separator();

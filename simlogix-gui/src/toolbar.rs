@@ -73,8 +73,22 @@ pub enum SimTool {
     Pan,
 }
 
-/// Draws the inspection tools. Returns the one clicked, if any.
-pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, active: SimTool) -> Option<SimTool> {
+/// What the simulation row can produce: a mode, or a one-shot.
+///
+/// The two are kept apart rather than folded into `SimTool`, because a
+/// *tool* stays chosen and an *action* happens once — a row where clicking
+/// one button leaves it pressed and clicking the next does not would have to
+/// be explained. They share the row, separated, since both answer "what can
+/// I do while watching this run".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimAction {
+    Tool(SimTool),
+    /// Advance by one tick — one propagation delay — and stay stopped.
+    StepTick,
+}
+
+/// Draws the inspection tools and one-shots. Returns what was clicked.
+pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, active: SimTool) -> Option<SimAction> {
     let mut clicked = None;
     for (tool, label) in [
         (SimTool::Interact, strings.tool_interact),
@@ -85,8 +99,13 @@ pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, active: SimTool) -> Option
             SimTool::Pan => symbol::draw_pan_tool,
         };
         if icon_button(ui, label, active == tool, draw) {
-            clicked = Some(tool);
+            clicked = Some(SimAction::Tool(tool));
         }
+    }
+    ui.separator();
+    // Never drawn as held down: it is over as soon as it is pressed.
+    if icon_button(ui, strings.tool_step_tick, false, symbol::draw_step_tool) {
+        clicked = Some(SimAction::StepTick);
     }
     clicked
 }

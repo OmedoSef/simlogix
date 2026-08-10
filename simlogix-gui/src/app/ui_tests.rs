@@ -88,6 +88,60 @@ fn place_and_select(harness: &mut Harness<'_, SimLogixApp>) -> ComponentId {
     id
 }
 
+#[test]
+fn stepping_stops_the_simulation_and_advances_exactly_one_tick() {
+    let mut harness = harness();
+    step(&mut harness);
+    assert!(harness.state().running, "it runs on its own to begin with");
+
+    // The first press is what stops it. Until then time moves with the
+    // frames, so there is no fixed number to compare against.
+    press(&mut harness, egui::Key::F10);
+    step(&mut harness);
+    assert!(!harness.state().running, "a step stops it");
+
+    // Stopped means stopped: frames go by and the clock does not.
+    let stopped_at = harness.state().circuit.now();
+    step(&mut harness);
+    step(&mut harness);
+    assert_eq!(harness.state().circuit.now(), stopped_at);
+
+    // And now a step is exactly one tick — one propagation delay.
+    press(&mut harness, egui::Key::F10);
+    step(&mut harness);
+    assert_eq!(harness.state().circuit.now(), stopped_at + 1);
+}
+
+#[test]
+fn sixty_steps_reach_a_clock() {
+    let mut harness = harness();
+    let clock = harness
+        .state_mut()
+        .place(ComponentKind::Clock, egui::pos2(200.0, 200.0));
+    step(&mut harness);
+
+    let level = |harness: &Harness<'_, SimLogixApp>| {
+        let app = harness.state();
+        app.circuit.signal_at(app.circuit.pins(clock)[0].net)
+    };
+
+    press(&mut harness, egui::Key::F10);
+    step(&mut harness);
+    let before = level(&harness);
+
+    // A clock beats once a second at sixty ticks a second, so it has to
+    // turn over within sixty of them wherever the pause happened to land.
+    for _ in 0..60 {
+        press(&mut harness, egui::Key::F10);
+        step(&mut harness);
+    }
+    assert_ne!(
+        level(&harness),
+        before,
+        "sixty ticks and the clock never moved"
+    );
+}
+
 fn press(harness: &mut Harness<'_, SimLogixApp>, key: egui::Key) {
     harness.input_mut().events.push(egui::Event::Key {
         key,

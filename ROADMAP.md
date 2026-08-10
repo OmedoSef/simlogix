@@ -41,10 +41,10 @@ better at the thing it's for.
   In this order, each usable on its own, and the first is what makes the rest
   legible:
 
-  - [ ] **A tick counter in the status bar.** Without it, pressing *step* at
+  - [x] **A tick counter in the status bar.** Without it, pressing *step* at
     an instant where nothing changes is indistinguishable from a broken
     button. Needs a read-only accessor on `Circuit` for the logical clock.
-  - [ ] **Step one tick.** `advance(1)`. A tick is one gate delay, so each
+  - [x] **Step one tick.** `advance(1)`. A tick is one gate delay, so each
     press moves the propagation on by one stage — which is exactly what a
     ripple counter has to be watched through. One tick processes *all* the
     events at that instant, not one of them, and that is the right

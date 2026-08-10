@@ -1870,6 +1870,26 @@ impl SimLogixApp {
         }
     }
 
+    /// Advances by `ticks` and stops, whatever the simulation was doing.
+    ///
+    /// Not `advance_circuit`, which refuses while paused — that refusal is
+    /// what keeps the frame loop from running a paused circuit, and stepping
+    /// is the deliberate exception. It **pauses first**: stepping while it
+    /// runs would add a step of your size on top of the frame's own, so what
+    /// you looked at afterwards would not be the step you asked for.
+    ///
+    /// Allowed even after a net has been reported unstable, and the report is
+    /// left standing. Walking an oscillation one tick at a time is exactly
+    /// what you would want to do about it — and it cannot trip the guard
+    /// again on the way, since `MAX_TOGGLES_PER_NET` counts within a single
+    /// `advance` call.
+    fn step(&mut self, ticks: u64) {
+        self.running = false;
+        if let Err(unstable) = self.circuit.advance(ticks) {
+            self.unstable_net = Some(unstable.net);
+        }
+    }
+
     /// Snapshots the document so the edit about to happen can be undone.
     /// **Call this before mutating**, not after — it records the state being
     /// left behind. For a drag, that means calling it the frame the drag
@@ -2199,6 +2219,12 @@ impl SimLogixApp {
             self.toggle_running();
         }
 
+        // Stepping is allowed from every view, not only the simulation one:
+        // it advances time, which is a thing the schematic is doing too.
+        if !ui.ctx().text_edit_focused() && ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step)) {
+            self.step(1);
+        }
+
         // Renames the circuit you are in — the one shown in bold. The tree
         // has no notion of a selected row, so there is nothing else `F2`
         // could unambiguously mean; folders and the project keep the context
@@ -2258,7 +2284,23 @@ impl SimLogixApp {
             } else {
                 None
             };
-            ui.label(hint.unwrap_or_default());
+            ui.horizontal(|ui| {
+                ui.label(hint.unwrap_or_default());
+                // The logical clock, at the far right and always shown. It is
+                // what makes stepping legible: a tick where nothing happens
+                // to look at is otherwise indistinguishable from a button
+                // that did nothing, and most ticks are that.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(
+                            strings
+                                .status_tick
+                                .replace("{}", &self.circuit.now().to_string()),
+                        )
+                        .weak(),
+                    );
+                });
+            });
         });
 
         // The root of the tree is the project itself, labelled with its
@@ -2614,8 +2656,10 @@ impl SimLogixApp {
                     }
                 }
                 toolbar::View::Simulation => {
-                    if let Some(tool) = toolbar::show_sim_tools(ui, strings, self.sim_tool) {
-                        self.sim_tool = tool;
+                    match toolbar::show_sim_tools(ui, strings, self.sim_tool) {
+                        Some(toolbar::SimAction::Tool(tool)) => self.sim_tool = tool,
+                        Some(toolbar::SimAction::StepTick) => self.step(1),
+                        None => {}
                     }
                 }
                 toolbar::View::Appearance => {
