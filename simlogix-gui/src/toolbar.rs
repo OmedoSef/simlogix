@@ -92,6 +92,9 @@ pub enum SimAction {
     /// Act on a different clock source from now on, by its position in the
     /// circuit.
     PickClock(usize),
+    /// Beat the chosen port on its own while the simulation runs, instead of
+    /// only when stepped.
+    ToggleFreeRun,
 }
 
 /// Draws the inspection tools and one-shots. Returns what was clicked.
@@ -99,14 +102,34 @@ pub enum SimAction {
 /// `has_event` greys *skip to the next event* when nothing is pending: a
 /// button that cannot do anything should say so rather than answer a click
 /// with silence.
-pub fn show_sim_tools(
-    ui: &mut Ui,
-    strings: &Strings,
-    active: SimTool,
-    has_event: bool,
-    clocks: &[(usize, String)],
-    chosen: Option<usize>,
-) -> Option<SimAction> {
+/// What the simulation row needs to know about the circuit it is drawn for.
+///
+/// A struct rather than a row of parameters: there were eight, three of them
+/// bare booleans, which is a call site where transposing two of them still
+/// compiles. The same trade the circuit tree already makes.
+pub struct SimRow<'a> {
+    pub tool: SimTool,
+    /// Anything scheduled at all — greys *skip to the next event*.
+    pub has_event: bool,
+    /// Every clock source, by position in the circuit, with its label.
+    pub clocks: &'a [(usize, String)],
+    /// The one a clock step acts on.
+    pub chosen: Option<usize>,
+    /// Whether that one is a port, and so can be beaten on its own. A
+    /// `Clock` already does.
+    pub drivable: bool,
+    pub free_running: bool,
+}
+
+pub fn show_sim_tools(ui: &mut Ui, strings: &Strings, row: SimRow<'_>) -> Option<SimAction> {
+    let SimRow {
+        tool: active,
+        has_event,
+        clocks,
+        chosen,
+        drivable,
+        free_running,
+    } = row;
     let mut clicked = None;
     for (tool, label) in [
         (SimTool::Interact, strings.tool_interact),
@@ -135,6 +158,19 @@ pub fn show_sim_tools(
             clicked = Some(SimAction::StepEdge);
         }
     });
+    // Only offered when the source is a port. A `Clock` already beats on
+    // its own, so the button would be a switch with nothing on the other
+    // side of it.
+    if drivable
+        && icon_button(
+            ui,
+            strings.tool_free_run,
+            free_running,
+            symbol::draw_free_run_tool,
+        )
+    {
+        clicked = Some(SimAction::ToggleFreeRun);
+    }
     // Only worth asking when there is a choice: with one source it settles
     // itself, and a picker with a single entry is a control that can only
     // ever say what it already says.

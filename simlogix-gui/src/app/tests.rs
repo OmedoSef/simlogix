@@ -1289,6 +1289,44 @@ fn a_switch_saved_open_is_open_when_the_project_is_opened() {
 }
 
 #[test]
+fn a_free_running_port_beats_only_in_the_simulation_view() {
+    let mut app = SimLogixApp::default();
+    let port = app.place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
+    let level = |app: &SimLogixApp| {
+        app.placed
+            .iter()
+            .find(|placed| placed.id() == port)
+            .and_then(|placed| placed.hand_set_level())
+            .expect("a driving port has a level")
+            .get()
+    };
+    let strings = Strings::for_language(app.language);
+    app.free_running_source = true;
+
+    // A whole period has gone by, but the schematic is showing: the button
+    // that arms this lives in the simulation row, and a beat you cannot see
+    // the control for is one you cannot stop.
+    app.circuit.advance(CLOCK_PERIOD_TICKS).expect("stable");
+    app.beat_free_running_source(strings);
+    assert_eq!(level(&app), PortLevel::Undriven);
+
+    app.switch_view(toolbar::View::Simulation);
+    app.beat_free_running_source(strings);
+    assert_eq!(
+        level(&app),
+        PortLevel::High,
+        "due, and now in the right view"
+    );
+
+    // And not again until the next period is up.
+    app.beat_free_running_source(strings);
+    assert_eq!(level(&app), PortLevel::High);
+    app.circuit.advance(CLOCK_PERIOD_TICKS).expect("stable");
+    app.beat_free_running_source(strings);
+    assert_eq!(level(&app), PortLevel::Low);
+}
+
+#[test]
 fn clicking_a_port_while_paused_is_reported_as_waiting() {
     let mut app = SimLogixApp::default();
     let port = app.place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));

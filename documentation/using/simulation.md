@@ -108,6 +108,29 @@ you paused would make the message meaningless.
 The notice is painted rather than laid out and has no widget of its own, so
 it can never take a click meant for the canvas underneath.
 
+### Letting a port beat on its own
+
+Stepping a port by hand is fine for watching one edge, and tiring for
+watching a counter. When the chosen source is a port, a **free-run** button
+appears beside the picker: armed, that port flips every clock period while
+the simulation runs, so a circuit whose clock arrives from outside can be
+watched rather than only stepped.
+
+Without it the alternative is dropping a `Clock` into the circuit to test
+it, which is a change to the **document** — one you then have to remember
+to take out before using the circuit inside another. Beating the port
+leaves no trace.
+
+It is off until you arm it, and deliberately so: with no source picked, the
+first one in the circuit is used, and a lone `RESET` port oscillating by
+itself in every circuit that has one — with nothing in the drawing to say
+why — is not a surprise worth risking.
+
+It also only beats **in the simulation view**, since that is where the
+button lives. A beat you cannot see the control for is a beat you cannot
+stop. The rhythm is counted in logical time, so it follows the speed
+setting and stops dead with the pause, exactly as a real `Clock` does.
+
 One thing to know: [unstable circuits](#unstable-circuits) are detected
 within a single run, by counting how often a net changes. Stepping a tick at
 a time never reaches that count, so it will not stop you — which is the

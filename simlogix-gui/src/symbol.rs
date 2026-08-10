@@ -774,6 +774,26 @@ pub fn draw_edge_tool(painter: &Painter, rect: Rect, color: Color32) {
     );
 }
 
+/// Free-running: the same square wave as the edge tool, repeated and with
+/// no bar to stop it.
+pub fn draw_free_run_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.32;
+    let high = c.y - reach * 0.55;
+    let low = c.y + reach * 0.55;
+
+    let mut points = vec![pos2(c.x - reach, low)];
+    let step = reach * 0.5;
+    for index in 0..4 {
+        let x = c.x - reach + step * index as f32;
+        let y = if index % 2 == 0 { high } else { low };
+        points.push(pos2(x, y));
+        points.push(pos2(x + step, y));
+    }
+    painter.line(points, stroke);
+}
+
 pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.6, color);
     let c = rect.center();

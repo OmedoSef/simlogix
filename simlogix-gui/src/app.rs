@@ -436,6 +436,19 @@ pub struct SimLogixApp {
     /// position in `placed`. `None` means "the only one", which is the case
     /// that never has to be answered.
     clock_source_index: Option<usize>,
+    /// Beat the chosen *port* on its own while the simulation runs, rather
+    /// than only when stepped.
+    ///
+    /// Deliberately opt-in and off by default. `clock_source` falls back to
+    /// the first source there is when nothing was picked, so driving
+    /// automatically would set a lone `RESET` port oscillating in every
+    /// circuit that has one — with nothing in the drawing to explain why.
+    ///
+    /// Not remembered between runs, like pause and speed: a way of working
+    /// at a moment.
+    free_running_source: bool,
+    /// The tick the driven port was last flipped at.
+    source_beat_at: u64,
     /// How fast logical time runs against real time, as a multiplier on the
     /// per-frame tick budget. A clock's *period* is unchanged — this moves
     /// the whole circuit through time faster or slower, which is what lets
@@ -586,6 +599,8 @@ impl Default for SimLogixApp {
             net_fingerprint: 0,
             running: true,
             clock_source_index: None,
+            free_running_source: false,
+            source_beat_at: 0,
             speed: 1.0,
             unstable_net: None,
             library: String::new(),
@@ -1925,6 +1940,49 @@ impl SimLogixApp {
             .is_some_and(|tick| tick <= self.circuit.now())
     }
 
+    /// Flips the chosen port when its beat is due, so a circuit whose clock
+    /// arrives from outside can be watched running rather than only stepped.
+    ///
+    /// Only in the simulation view, and only while armed. The button that
+    /// arms it lives in that view's tool row, and a behaviour you cannot see
+    /// the control for is one you cannot turn off — you would be left
+    /// looking at a port beating with nothing in the drawing to say why.
+    ///
+    /// The beat is counted in *logical* time, so it follows the speed
+    /// multiplier and stops dead with the pause, exactly as a real `Clock`
+    /// does.
+    fn beat_free_running_source(&mut self, strings: &Strings) {
+        if !self.free_running_source || self.view != toolbar::View::Simulation {
+            return;
+        }
+        let now = self.circuit.now();
+        // A reopen builds a new circuit with its clock back at zero, which
+        // would otherwise leave the beat permanently in the future.
+        if now < self.source_beat_at {
+            self.source_beat_at = now;
+        }
+        if now.saturating_sub(self.source_beat_at) < CLOCK_PERIOD_TICKS {
+            return;
+        }
+
+        let Some(index) = self.clock_source(strings) else {
+            return;
+        };
+        let Some(placed) = self.placed.get(index) else {
+            return;
+        };
+        let Some(level) = placed.hand_set_level() else {
+            return;
+        };
+        level.set(match level.get() {
+            PortLevel::High => PortLevel::Low,
+            _ => PortLevel::High,
+        });
+        let id = placed.id();
+        self.source_beat_at = now;
+        self.circuit.schedule_now(id);
+    }
+
     fn advance_circuit(&mut self, ticks: u64) {
         if !self.running || self.unstable_net.is_some() {
             return;
@@ -2306,6 +2364,9 @@ impl SimLogixApp {
         ui.ctx().request_repaint();
 
         let strings = Strings::for_language(self.language);
+        // After the advance, so its own event is picked up by the next one
+        // rather than a tick late.
+        self.beat_free_running_source(strings);
 
         // Keep the OS window title in step with which file is open and
         // whether it still has unsaved edits, but only push it when it
@@ -2866,13 +2927,20 @@ impl SimLogixApp {
                     let has_event = self.circuit.next_event_tick().is_some();
                     let clocks = self.clock_sources(strings);
                     let chosen = self.clock_source(strings);
+                    let drivable = chosen
+                        .and_then(|at| self.placed.get(at))
+                        .is_some_and(|placed| placed.hand_set_level().is_some());
                     match toolbar::show_sim_tools(
                         ui,
                         strings,
-                        self.sim_tool,
-                        has_event,
-                        &clocks,
-                        chosen,
+                        toolbar::SimRow {
+                            tool: self.sim_tool,
+                            has_event,
+                            clocks: &clocks,
+                            chosen,
+                            drivable,
+                            free_running: self.free_running_source,
+                        },
                     ) {
                         Some(toolbar::SimAction::Tool(tool)) => self.sim_tool = tool,
                         Some(toolbar::SimAction::StepTick) => self.step(1),
@@ -2880,6 +2948,11 @@ impl SimLogixApp {
                         Some(toolbar::SimAction::StepEdge) => self.step_clock_edge(strings),
                         Some(toolbar::SimAction::PickClock(at)) => {
                             self.clock_source_index = Some(at)
+                        }
+                        Some(toolbar::SimAction::ToggleFreeRun) => {
+                            self.free_running_source = !self.free_running_source;
+                            // From now, not from whenever it was last on.
+                            self.source_beat_at = self.circuit.now();
                         }
                         None => {}
                     }
