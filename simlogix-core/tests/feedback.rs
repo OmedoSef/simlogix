@@ -15,7 +15,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use simlogix_core::{Button, Circuit, ComponentId, Level, Nand, Nor, Not, Pin, PinDirection};
+use simlogix_core::{
+    Button, Circuit, ComponentId, Level, Nand, NetGroup, Nor, Not, Pin, PinDirection,
+};
 
 /// A cross-coupled NAND latch, with a button on each of its two active-low
 /// inputs so a test can drive them.
@@ -125,12 +127,12 @@ fn build_latch() -> Latch {
     );
 
     circuit.rewire(&[
-        vec![(set_button, 0), (q_gate, 0)],
-        vec![(reset_button, 0), (q_bar_gate, 0)],
+        NetGroup::wire(vec![(set_button, 0), (q_gate, 0)]),
+        NetGroup::wire(vec![(reset_button, 0), (q_bar_gate, 0)]),
         // Q feeds the other gate's second input, and vice versa. These two
         // groups are the feedback loop.
-        vec![(q_gate, 2), (q_bar_gate, 1)],
-        vec![(q_bar_gate, 2), (q_gate, 1)],
+        NetGroup::wire(vec![(q_gate, 2), (q_bar_gate, 1)]),
+        NetGroup::wire(vec![(q_bar_gate, 2), (q_gate, 1)]),
     ]);
 
     Latch {

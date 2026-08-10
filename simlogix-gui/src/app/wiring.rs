@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use simlogix_core::ComponentId;
+use simlogix_core::{ComponentId, NetGroup};
 
 use crate::placed_component::PinHandle;
 
@@ -598,9 +598,13 @@ impl SimLogixApp {
 
         // A lone pin is its own net anyway, which `rewire` already does for
         // anything it isn't told about.
-        let groups: Vec<Vec<(ComponentId, usize)>> = groups
+        // One bit each, for now: nothing in the drawing declares a width
+        // yet. When something does, it is read here — the same pass that
+        // says what a net *joins* is the one that says how wide it is.
+        let groups: Vec<NetGroup> = groups
             .into_values()
             .filter(|group| group.len() > 1)
+            .map(NetGroup::wire)
             .collect();
         self.circuit.rewire(&groups);
 

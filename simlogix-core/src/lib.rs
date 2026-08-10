@@ -29,6 +29,6 @@ pub use components::tri_state_buffer::TriStateBuffer;
 pub use components::xnor::Xnor;
 pub use components::xor::Xor;
 pub use level::Level;
-pub use net::NetId;
+pub use net::{NetGroup, NetId};
 pub use pin::{Pin, PinDirection};
 pub use signal::Signal;

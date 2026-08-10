@@ -3,7 +3,7 @@ use std::collections::{BinaryHeap, HashMap};
 
 use crate::component::Component;
 use crate::level::Level;
-use crate::net::NetId;
+use crate::net::{NetGroup, NetId};
 use crate::pin::{Pin, PinDirection};
 use crate::signal::Signal;
 
@@ -66,6 +66,10 @@ pub struct Circuit {
     drivers: HashMap<NetId, HashMap<(ComponentId, usize), Signal>>,
     /// Each net's last resolved signal, used to detect real changes.
     settled: HashMap<NetId, Signal>,
+    /// How many bits each net carries, as the drawing says. Absent means
+    /// one — a plain wire, which is what a net is until something declares
+    /// otherwise.
+    widths: HashMap<NetId, usize>,
     clock: u64,
     events: BinaryHeap<Reverse<ScheduledEvent>>,
     /// Components that reschedule themselves forever after every evaluation
@@ -137,7 +141,7 @@ impl Circuit {
     /// inputs genuinely changed value are scheduled; a component with no
     /// inputs at all (a `Clock`, a `Button`) is never disturbed, so editing
     /// elsewhere can't shift a clock's phase.
-    pub fn rewire(&mut self, groups: &[Vec<(ComponentId, usize)>]) {
+    pub fn rewire(&mut self, groups: &[NetGroup]) {
         // What each pin drives, and what each reading pin currently sees.
         // Both are indexed by pin so they survive the remap below.
         let contributions: HashMap<(ComponentId, usize), Signal> = self
@@ -152,9 +156,13 @@ impl Circuit {
 
         // One fresh net per group, then one each for the pins left over.
         let mut assignment: HashMap<(ComponentId, usize), NetId> = HashMap::new();
+        self.widths.clear();
         for group in groups {
             let net = self.add_net();
-            for &pin in group {
+            if group.width != 1 {
+                self.widths.insert(net, group.width);
+            }
+            for &pin in &group.pins {
                 assignment.insert(pin, net);
             }
         }
@@ -189,11 +197,15 @@ impl Circuit {
         }
         self.settled.clear();
         for &net in assignment.values() {
+            let width = self.net_width(net);
             let resolved = self
                 .drivers
                 .get(&net)
-                .map(Self::resolve)
-                .unwrap_or_default();
+                .map(|drivers| Self::resolve(width, drivers))
+                // Nothing driving it yet, but the drawing has still said how
+                // wide it is: a component reading an undriven bus sees that
+                // many unknown bits, not one.
+                .unwrap_or_else(|| Signal::splat(Level::Unknown, width));
             self.settled.insert(net, resolved);
         }
 
@@ -255,7 +267,12 @@ impl Circuit {
     /// The net's current resolved signal: `Unknown` if undriven, the shared value
     /// if every active driver agrees (ignoring `HighZ`), or `Error` if they disagree.
     pub fn signal_at(&self, net: NetId) -> Signal {
-        self.settled.get(&net).cloned().unwrap_or_default()
+        // A net nobody has settled yet still has the width the drawing gave
+        // it, so what it reads is that many unknown bits.
+        self.settled
+            .get(&net)
+            .cloned()
+            .unwrap_or_else(|| Signal::splat(Level::Unknown, self.net_width(net)))
     }
 
     /// The logical clock: how many ticks this circuit has been advanced by.
@@ -413,7 +430,7 @@ impl Circuit {
                 .entry(pin.net)
                 .or_default()
                 .insert((component, index), signal);
-            let resolved = Self::resolve(&self.drivers[&pin.net]);
+            let resolved = Self::resolve(self.net_width(pin.net), &self.drivers[&pin.net]);
             let previous = self.settled.get(&pin.net).cloned().unwrap_or_default();
 
             if resolved == previous {
@@ -446,11 +463,12 @@ impl Circuit {
     /// (merge/disconnect) rather than a component re-evaluating. No oscillation
     /// accounting here: a single structural edit can't loop by itself.
     fn resettle(&mut self, net: NetId) {
+        let width = self.net_width(net);
         let resolved = self
             .drivers
             .get(&net)
-            .map(Self::resolve)
-            .unwrap_or_default();
+            .map(|drivers| Self::resolve(width, drivers))
+            .unwrap_or_else(|| Signal::splat(Level::Unknown, width));
         let previous = self.settled.get(&net).cloned().unwrap_or_default();
         if resolved == previous {
             return;
@@ -485,22 +503,23 @@ impl Circuit {
         active.peek().is_some() && active.all(|signal| signal.is_weak())
     }
 
+    /// How many bits a net carries. One unless the drawing said wider.
+    pub fn net_width(&self, net: NetId) -> usize {
+        self.widths.get(&net).copied().unwrap_or(1)
+    }
+
     /// What a net carries, from everything driving it.
     ///
     /// Bit by bit: a bus is resolved one position at a time by exactly the
     /// rule a plain wire has always used, so nothing about the meaning
     /// changes with the width.
     ///
-    /// The width is the widest contribution. Contributions of *different*
-    /// widths are a fault in the drawing rather than in the levels — the
-    /// bits nobody supplies come out `Error`, which is what makes a
-    /// mismatched net visible on the wire.
-    fn resolve(drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
-        let width = drivers
-            .values()
-            .map(|signal| signal.width())
-            .max()
-            .unwrap_or(1);
+    /// The width is the net's, which the drawing declared. A contribution
+    /// of any other width is a fault in the drawing rather than in the
+    /// levels — every bit comes out `Error`, which is what makes a
+    /// mismatched net visible on the wire rather than quietly padded or
+    /// truncated.
+    fn resolve(width: usize, drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
         let ragged = drivers.values().any(|signal| signal.width() != width);
         Signal::from_levels(
             (0..width)
@@ -590,6 +609,51 @@ mod tests {
         fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
             scalar_eval(_inputs, |_inputs| vec![Level::High])
         }
+    }
+
+    #[test]
+    fn a_net_the_drawing_declared_wide_reads_that_many_bits() {
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let sink = circuit.add_component(
+            Box::new(AlwaysHigh),
+            vec![Pin {
+                direction: PinDirection::Input,
+                net,
+            }],
+        );
+
+        circuit.rewire(&[NetGroup::bus(vec![(sink, 0)], 4)]);
+
+        // Nothing is driving it, but the drawing has still said how wide it
+        // is — so what reads it sees four unknown bits rather than one.
+        let signal = circuit.signal_at(circuit.pins(sink)[0].net);
+        assert_eq!(signal.width(), 4);
+        assert!(signal.levels().iter().all(|&level| level == Level::Unknown));
+    }
+
+    #[test]
+    fn a_contribution_of_the_wrong_width_faults_every_bit() {
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let source = circuit.add_component(
+            Box::new(AlwaysHigh),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+
+        // One bit driven onto a net the drawing says is four. Padding it or
+        // truncating it would be inventing three bits nobody asked for, so
+        // the whole net faults instead — visibly, on the wire.
+        circuit.rewire(&[NetGroup::bus(vec![(source, 0)], 4)]);
+        circuit.schedule_now(source);
+        circuit.run().expect("settles");
+
+        let signal = circuit.signal_at(circuit.pins(source)[0].net);
+        assert_eq!(signal.width(), 4);
+        assert!(signal.levels().iter().all(|&level| level == Level::Error));
     }
 
     #[test]
@@ -778,7 +842,7 @@ mod tests {
         );
 
         // Both wires say the same thing, so one group names both pins.
-        let connected = vec![vec![(button, 0), (led, 0)]];
+        let connected = vec![NetGroup::wire(vec![(button, 0), (led, 0)])];
         circuit.rewire(&connected);
         pressed.set(true);
         circuit.schedule_now(button);
@@ -819,7 +883,7 @@ mod tests {
             }],
         );
 
-        circuit.rewire(&[vec![(button, 0), (led, 0)]]);
+        circuit.rewire(&[NetGroup::wire(vec![(button, 0), (led, 0)])]);
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().expect("settles");
@@ -886,7 +950,7 @@ mod tests {
 
         circuit.remove_component(button);
 
-        circuit.rewire(&[vec![(button, 0)]]);
+        circuit.rewire(&[NetGroup::wire(vec![(button, 0)])]);
         assert_eq!(circuit.try_pins(button), None);
     }
 
@@ -921,7 +985,7 @@ mod tests {
         );
 
         // One group holds all three: button, led_a and led_b.
-        circuit.rewire(&[vec![(button, 0), (led_a, 0), (led_b, 0)]]);
+        circuit.rewire(&[NetGroup::wire(vec![(button, 0), (led_a, 0), (led_b, 0)])]);
         pressed.set(true);
         circuit.schedule_now(button);
         circuit.run().expect("settles");
@@ -932,7 +996,7 @@ mod tests {
 
         // led_a's wire to the group is deleted, so it no longer appears in
         // it: the button and led_b must stay connected to each other.
-        circuit.rewire(&[vec![(button, 0), (led_b, 0)]]);
+        circuit.rewire(&[NetGroup::wire(vec![(button, 0), (led_b, 0)])]);
         circuit.run().expect("settles");
         let shared = circuit.pins(button)[0].net;
         assert_eq!(circuit.pins(led_b)[0].net, shared);

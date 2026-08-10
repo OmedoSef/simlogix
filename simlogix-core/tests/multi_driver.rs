@@ -10,7 +10,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use simlogix_core::{Button, Circuit, ComponentId, Level, Pin, PinDirection, TriStateBuffer};
+use simlogix_core::{
+    Button, Circuit, ComponentId, Level, NetGroup, Pin, PinDirection, TriStateBuffer,
+};
 
 /// Two tri-state buffers with their outputs tied together, each with a
 /// button on its data input and another on its enable.
@@ -84,12 +86,12 @@ fn build_bus() -> Bus {
     let b = buffer(&mut circuit, nets[7], nets[8], nets[9]);
 
     circuit.rewire(&[
-        vec![(buttons[0], 0), (a, 0)],
-        vec![(buttons[1], 0), (a, 1)],
-        vec![(buttons[2], 0), (b, 0)],
-        vec![(buttons[3], 0), (b, 1)],
+        NetGroup::wire(vec![(buttons[0], 0), (a, 0)]),
+        NetGroup::wire(vec![(buttons[1], 0), (a, 1)]),
+        NetGroup::wire(vec![(buttons[2], 0), (b, 0)]),
+        NetGroup::wire(vec![(buttons[3], 0), (b, 1)]),
         // The bus itself: both outputs on one net.
-        vec![(a, 2), (b, 2)],
+        NetGroup::wire(vec![(a, 2), (b, 2)]),
     ]);
 
     Bus {
@@ -243,15 +245,15 @@ fn build_transceiver() -> Transceiver {
     );
 
     circuit.rewire(&[
-        vec![(buttons[0], 0), (a_source, 0)],
-        vec![(buttons[1], 0), (a_source, 1)],
-        vec![(buttons[2], 0), (b_source, 0)],
-        vec![(buttons[3], 0), (b_source, 1)],
-        vec![(buttons[4], 0), (transceiver, 2)],
-        vec![(buttons[5], 0), (transceiver, 3)],
+        NetGroup::wire(vec![(buttons[0], 0), (a_source, 0)]),
+        NetGroup::wire(vec![(buttons[1], 0), (a_source, 1)]),
+        NetGroup::wire(vec![(buttons[2], 0), (b_source, 0)]),
+        NetGroup::wire(vec![(buttons[3], 0), (b_source, 1)]),
+        NetGroup::wire(vec![(buttons[4], 0), (transceiver, 2)]),
+        NetGroup::wire(vec![(buttons[5], 0), (transceiver, 3)]),
         // The two buses themselves.
-        vec![(a_source, 2), (transceiver, 0)],
-        vec![(b_source, 2), (transceiver, 1)],
+        NetGroup::wire(vec![(a_source, 2), (transceiver, 0)]),
+        NetGroup::wire(vec![(b_source, 2), (transceiver, 1)]),
     ]);
 
     Transceiver {
@@ -394,11 +396,11 @@ fn a_transmission_gate_passes_a_high_at_full_strength() {
     );
 
     circuit.rewire(&[
-        vec![(gate_pin, 0), (n, 0), (inverter, 0)],
-        vec![(inverter, 1), (p, 0)],
-        vec![(source_pin, 0), (n, 1), (p, 1)],
+        NetGroup::wire(vec![(gate_pin, 0), (n, 0), (inverter, 0)]),
+        NetGroup::wire(vec![(inverter, 1), (p, 0)]),
+        NetGroup::wire(vec![(source_pin, 0), (n, 1), (p, 1)]),
         // Both drains on one net: that net is the gate's output.
-        vec![(n, 2), (p, 2)],
+        NetGroup::wire(vec![(n, 2), (p, 2)]),
     ]);
 
     source.set(true);
@@ -456,7 +458,10 @@ fn a_lone_n_type_delivers_a_high_that_is_real_but_weak() {
             },
         ],
     );
-    circuit.rewire(&[vec![(gate_pin, 0), (n, 0)], vec![(power, 0), (n, 1)]]);
+    circuit.rewire(&[
+        NetGroup::wire(vec![(gate_pin, 0), (n, 0)]),
+        NetGroup::wire(vec![(power, 0), (n, 1)]),
+    ]);
 
     gate.set(true);
     for component in [gate_pin, power] {
@@ -521,10 +526,10 @@ fn a_lone_pass_transistor_loses_to_anything_pulling_the_other_way() {
     );
 
     circuit.rewire(&[
-        vec![(gate_pin, 0), (n, 0)],
-        vec![(power, 0), (n, 1)],
+        NetGroup::wire(vec![(gate_pin, 0), (n, 0)]),
+        NetGroup::wire(vec![(power, 0), (n, 1)]),
         // The NMOS's weak high meets a hard ground on its drain.
-        vec![(ground, 0), (n, 2)],
+        NetGroup::wire(vec![(ground, 0), (n, 2)]),
     ]);
 
     gate.set(true);
