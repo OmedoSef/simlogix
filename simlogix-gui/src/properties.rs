@@ -13,7 +13,7 @@
 use egui::{RichText, Ui};
 use serde::{Deserialize, Serialize};
 
-use simlogix_core::PortSetting;
+use simlogix_core::{all_ones, PortDrive, PortSetting};
 
 use crate::appearance::{Appearance, Facing, PinSlot, Shape, TextAlign};
 use crate::canvas;
@@ -154,6 +154,88 @@ pub struct PanelResult {
     pub edit_started: bool,
     /// Turn this component into its sibling kind.
     pub change_kind: Option<ComponentKind>,
+}
+
+/// The **value** panel: what a port is driving right now.
+///
+/// A section of its own, below the properties and separated from them,
+/// because there are two things here and confusing them would be easy. The
+/// value is **runtime state** — no undo step, never saved — while *resting
+/// value* above it is a property and *is* saved. The same digits, two
+/// natures; one field for both would have to lie about one of them.
+///
+/// Returns the new drive when it changed. Reading is not editing, so
+/// nothing here reports an edit for undo to snapshot.
+pub fn show_value(
+    ui: &mut Ui,
+    strings: &Strings,
+    drive: PortDrive,
+    width: usize,
+) -> Option<PortDrive> {
+    let mut edited = None;
+
+    ui.add_space(12.0);
+    ui.separator();
+    ui.label(RichText::new(strings.value_heading).strong());
+    ui.label(RichText::new(strings.value_runtime).weak());
+    ui.add_space(4.0);
+
+    let mut driving = drive != PortDrive::Undriven;
+    if ui.checkbox(&mut driving, strings.value_driving).changed() {
+        edited = Some(if driving {
+            PortDrive::Driving(0)
+        } else {
+            PortDrive::Undriven
+        });
+    }
+
+    if let PortDrive::Driving(bits) = drive {
+        // Shown in hex past four bits and in decimal below, because that is
+        // how each is read; typed in any of the three, since a value copied
+        // from somewhere else arrives in whatever base that somewhere used.
+        let shown = if width > 4 {
+            format!("{bits:#X}")
+        } else {
+            bits.to_string()
+        };
+        let id = ui.id().with("port_value");
+        let mut text = ui
+            .data(|data| data.get_temp::<String>(id))
+            .unwrap_or_else(|| shown.clone());
+        let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
+        if response.has_focus() {
+            // Its own text while being typed, so a half-written number is
+            // not rewritten under the caret.
+            ui.data_mut(|data| data.insert_temp(id, text.clone()));
+        } else {
+            ui.data_mut(|data| data.remove_temp::<String>(id));
+        }
+        if response.changed() {
+            if let Some(parsed) = parse_value(&text) {
+                edited = Some(PortDrive::Driving(parsed & all_ones(width)));
+            }
+        }
+        ui.label(RichText::new(strings.value_bases).weak());
+    }
+
+    edited
+}
+
+/// Reads a value written in hex, binary or decimal.
+///
+/// All three because a value copied from a datasheet, from code, or from a
+/// probe arrives in whichever the source used, and retyping it in another
+/// base is exactly the sort of arithmetic a tool should do for you.
+fn parse_value(text: &str) -> Option<u64> {
+    let text = text.trim().replace('_', "");
+    let lower = text.to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("0x") {
+        return u64::from_str_radix(rest, 16).ok();
+    }
+    if let Some(rest) = lower.strip_prefix("0b") {
+        return u64::from_str_radix(rest, 2).ok();
+    }
+    text.parse().ok()
 }
 
 /// The swatches offered wherever a colour is chosen.
@@ -806,6 +888,22 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(properties.label(), None);
+    }
+
+    #[test]
+    fn a_value_is_read_in_whichever_base_it_was_written() {
+        // All three, because a value copied from a datasheet, from code or
+        // from a probe arrives in whichever base that source used.
+        assert_eq!(parse_value("42"), Some(42));
+        assert_eq!(parse_value("0x2A"), Some(42));
+        assert_eq!(parse_value("0b101010"), Some(42));
+        assert_eq!(parse_value(" 0x2a "), Some(42));
+        // Underscores group digits in every language that has them.
+        assert_eq!(parse_value("0b1010_1010"), Some(0b1010_1010));
+        // And nonsense is nothing rather than zero: a half-typed value must
+        // not read as 0 while the caret is still in the field.
+        assert_eq!(parse_value("0x"), None);
+        assert_eq!(parse_value("twelve"), None);
     }
 
     #[test]

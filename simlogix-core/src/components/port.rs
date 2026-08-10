@@ -35,6 +35,20 @@ pub enum PortSetting {
 }
 
 impl PortSetting {
+    /// What this resting setting means for a port `width` bits wide.
+    ///
+    /// Coarse on purpose: a *resting* value is one of three things — not
+    /// driving, all low, all high — because it is what the port sits at
+    /// before anyone has touched it. Typing an arbitrary value is done to
+    /// the live [`PortDrive`], which is runtime state and is never saved.
+    pub fn to_drive(self, width: usize) -> PortDrive {
+        match self {
+            Self::Undriven => PortDrive::Undriven,
+            Self::Low => PortDrive::Driving(0),
+            Self::High => PortDrive::Driving(all_ones(width)),
+        }
+    }
+
     /// The next position of the click cycle: undriven, high, low, round
     /// again. `tri_state` off skips the undriven position entirely, so a
     /// port declared two-state can't be clicked into a third.
@@ -48,6 +62,62 @@ impl PortSetting {
     }
 }
 
+/// All bits of a `width`-bit value set, saturating at the 64 a `u64` holds.
+pub fn all_ones(width: usize) -> u64 {
+    if width >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    }
+}
+
+/// What a port is driving **right now**: nothing at all, or these bits,
+/// least significant first.
+///
+/// Runtime state, never saved — the same nature as a button being held. It
+/// carries a whole value rather than one level because a port stands for
+/// *what a parent will drive*, and a parent drives whatever it likes; the
+/// earlier model gave every bit the same level, so a two-bit port could
+/// only ever be 0 or 3.
+///
+/// Kept apart from [`PortSetting`], which is the *resting* value and is a
+/// saved property. The same digits, two different natures: one field for
+/// both would have to lie about one of them.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PortDrive {
+    #[default]
+    Undriven,
+    Driving(u64),
+}
+
+impl PortDrive {
+    /// The level of bit `index`, given what "not driving" means for this
+    /// port — `Unknown` on an input, `HighZ` on a bidirectional one.
+    pub fn level(self, index: usize, undriven: Level) -> Level {
+        match self {
+            Self::Undriven => undriven,
+            Self::Driving(bits) if index < 64 && bits & (1 << index) != 0 => Level::High,
+            Self::Driving(_) => Level::Low,
+        }
+    }
+
+    /// The next position of the click cycle: undriven, all high, all low,
+    /// round again. `tri_state` off skips the undriven position entirely.
+    ///
+    /// A click is one gesture and cannot say a whole value; that is what
+    /// the value field is for. What it can do is the three positions a
+    /// switch has always had.
+    pub fn next(self, tri_state: bool, width: usize) -> Self {
+        let high = Self::Driving(all_ones(width));
+        match (self, tri_state) {
+            (Self::Undriven, _) => high,
+            (Self::Driving(bits), _) if bits != 0 => Self::Driving(0),
+            (Self::Driving(_), true) => Self::Undriven,
+            (Self::Driving(_), false) => high,
+        }
+    }
+}
+
 /// A port that drives its net, and can be told to stop.
 ///
 /// The two constructors differ only in what "undriven" puts on the wire, and
@@ -55,7 +125,7 @@ impl PortSetting {
 pub struct CircuitPort {
     /// What [`PortSetting::Undriven`] resolves to for this port.
     undriven: Level,
-    level: Rc<Cell<PortSetting>>,
+    drive: Rc<Cell<PortDrive>>,
     /// How many bits it drives — the same number the drawing gave the net.
     ///
     /// Shared rather than copied in, for the same reason the level is: the
@@ -67,7 +137,7 @@ pub struct CircuitPort {
 /// The two handles the GUI keeps on a port: what it is set to, and how wide
 /// it is. Both are properties it owns and can change without rebuilding.
 pub struct PortHandles {
-    pub level: Rc<Cell<PortSetting>>,
+    pub drive: Rc<Cell<PortDrive>>,
     pub width: Rc<Cell<usize>>,
 }
 
@@ -88,15 +158,15 @@ impl CircuitPort {
     }
 
     fn new(undriven: Level) -> (Self, PortHandles) {
-        let level = Rc::new(Cell::new(PortSetting::default()));
+        let drive = Rc::new(Cell::new(PortDrive::default()));
         let width = Rc::new(Cell::new(1));
         (
             Self {
                 undriven,
-                level: Rc::clone(&level),
+                drive: Rc::clone(&drive),
                 width: Rc::clone(&width),
             },
-            PortHandles { level, width },
+            PortHandles { drive, width },
         )
     }
 }
@@ -110,16 +180,17 @@ impl Component for CircuitPort {
     /// correctly, since a component that says it is eight bits wide and
     /// supplies one is lying about its own contract.
     ///
-    /// All bits the same because a port is set by hand, and one switch
-    /// cannot say eight different things. Typing a *value* is the
-    /// constant's job.
+    /// Bit by bit from whatever value it was set to, so a two-bit port can
+    /// be any of the four things a parent might drive into it — not only
+    /// all-low and all-high, which is all a single level could say.
     fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
-        let level = match self.level.get() {
-            PortSetting::Undriven => self.undriven,
-            PortSetting::Low => Level::Low,
-            PortSetting::High => Level::High,
-        };
-        vec![Signal::splat(level, self.width.get().max(1))]
+        let drive = self.drive.get();
+        let width = self.width.get().max(1);
+        vec![Signal::from_levels(
+            (0..width)
+                .map(|bit| drive.level(bit, self.undriven))
+                .collect(),
+        )]
     }
 }
 
@@ -178,7 +249,7 @@ mod tests {
         // Undriven from the outside is exactly what "not known" means here.
         assert_eq!(eval_levels(&port, &[]), vec![Level::Unknown]);
 
-        handles.level.set(PortSetting::High);
+        handles.drive.set(PortSetting::High.to_drive(1));
         assert_eq!(eval_levels(&port, &[]), vec![Level::High]);
         // Latching, not momentary: nothing releases it.
         assert_eq!(eval_levels(&port, &[]), vec![Level::High]);
@@ -192,21 +263,55 @@ mod tests {
         // drive it. `Unknown` would count as a driver and cause a conflict.
         assert_eq!(eval_levels(&port, &[]), vec![Level::HighZ]);
 
-        handles.level.set(PortSetting::Low);
+        handles.drive.set(PortSetting::Low.to_drive(1));
         assert_eq!(eval_levels(&port, &[]), vec![Level::Low]);
     }
 
     #[test]
-    fn a_port_drives_every_bit_of_the_width_it_was_given() {
+    fn a_port_drives_the_value_it_was_set_to_bit_by_bit() {
         let (port, handles) = CircuitPort::input();
-        handles.level.set(PortSetting::High);
         handles.width.set(4);
 
-        // All four alike: a port is set by hand, and one switch cannot say
-        // four different things. Typing a value is the constant's job.
-        let driven = port.eval(&[]);
-        assert_eq!(driven.len(), 1);
-        assert_eq!(driven[0].levels(), [Level::High; 4]);
+        // The point of a value rather than a level: a two-bit port used to
+        // manage only 0 and 3, because every bit got the same level. A port
+        // stands for what a *parent* will drive, and a parent drives
+        // whatever it likes.
+        handles.drive.set(PortDrive::Driving(0b0101));
+        assert_eq!(
+            port.eval(&[])[0].levels(),
+            [Level::High, Level::Low, Level::High, Level::Low],
+            "bit 0 is the least significant"
+        );
+
+        // All high is still one setting away, and it means all four.
+        handles.drive.set(PortSetting::High.to_drive(4));
+        assert_eq!(port.eval(&[])[0].levels(), [Level::High; 4]);
+
+        // Undriven is a whole-port state, not a value.
+        handles.drive.set(PortDrive::Undriven);
+        assert_eq!(port.eval(&[])[0].levels(), [Level::Unknown; 4]);
+    }
+
+    #[test]
+    fn a_click_cycles_the_three_positions_a_switch_has() {
+        // A click is one gesture and cannot say a value; what it can do is
+        // undriven, all high, all low — which is what it always did.
+        let mut drive = PortDrive::Undriven;
+        for expected in [
+            PortDrive::Driving(0b11),
+            PortDrive::Driving(0),
+            PortDrive::Undriven,
+        ] {
+            drive = drive.next(true, 2);
+            assert_eq!(drive, expected);
+        }
+
+        // Two-state: it never reaches undriven again once it has left.
+        let mut drive = PortDrive::Driving(0b11);
+        for expected in [PortDrive::Driving(0), PortDrive::Driving(0b11)] {
+            drive = drive.next(false, 2);
+            assert_eq!(drive, expected);
+        }
     }
 
     #[test]

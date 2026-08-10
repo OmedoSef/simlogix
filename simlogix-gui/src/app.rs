@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
-    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortSetting, Probe,
+    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortDrive, Probe,
     Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
@@ -1977,9 +1977,12 @@ impl SimLogixApp {
         let Some(level) = placed.hand_set_level() else {
             return;
         };
+        // A beat is all-high then all-low: driving a *value* is what the
+        // value field is for, and a clock has nothing to say about one.
+        let all = simlogix_core::all_ones(placed.width());
         level.set(match level.get() {
-            PortSetting::High => PortSetting::Low,
-            _ => PortSetting::High,
+            PortDrive::Driving(bits) if bits != 0 => PortDrive::Driving(0),
+            _ => PortDrive::Driving(all),
         });
         let id = placed.id();
         self.source_beat_at = now;
@@ -2109,9 +2112,10 @@ impl SimLogixApp {
         // step is a flip. High and low only — undriven is a third position
         // of the switch, not part of a cycle.
         if let Some(level) = placed.hand_set_level() {
+            let all = simlogix_core::all_ones(placed.width());
             level.set(match level.get() {
-                PortSetting::High => PortSetting::Low,
-                _ => PortSetting::High,
+                PortDrive::Driving(bits) if bits != 0 => PortDrive::Driving(0),
+                _ => PortDrive::Driving(all),
             });
             self.circuit.schedule_now(id);
             self.step(SETTLE_TICKS);
@@ -2728,6 +2732,9 @@ impl SimLogixApp {
         // below, snapshot first.
         let mut pending_properties: Option<(ComponentId, Properties, bool)> = None;
         let mut pending_wire_color: Option<(u64, Option<[u8; 3]>)> = None;
+        // A port whose live value was just changed, so it can be told to
+        // re-evaluate. Runtime state, so nothing else about it is recorded.
+        let mut pending_drive: Option<ComponentId> = None;
         // The panel edits a copy, as it does for a component: `record_edit`
         // can't run while `self` is borrowed by it, and editing in place
         // would snapshot the state *after* the change for the first frame of
@@ -2845,6 +2852,22 @@ impl SimLogixApp {
                                         pending_properties =
                                             Some((placed.id(), edited, outcome.edit_started));
                                     }
+                                    // Below the properties and separated
+                                    // from them: this is runtime state, and
+                                    // applied straight to the cell the
+                                    // engine reads rather than through the
+                                    // document — no snapshot, no dirty flag.
+                                    if let Some(drive) = placed.hand_set_level() {
+                                        if let Some(next) = properties::show_value(
+                                            ui,
+                                            strings,
+                                            drive.get(),
+                                            placed.width(),
+                                        ) {
+                                            drive.set(next);
+                                            pending_drive = Some(placed.id());
+                                        }
+                                    }
                                 }
                                 None => {
                                     ui.label(strings.properties_none_selected);
@@ -2893,6 +2916,15 @@ impl SimLogixApp {
         if let Some((wire_id, color)) = pending_wire_color {
             self.record_edit();
             self.color_net(wire_id, color);
+        }
+
+        // Runtime state: the cell is already set, and what remains is to
+        // let the change reach the wires. No snapshot and no dirty flag —
+        // driving a port is no more a document change than pressing a
+        // button is.
+        if let Some(id) = pending_drive {
+            self.circuit.schedule_now(id);
+            self.advance_circuit(SETTLE_TICKS);
         }
 
         if let Some((id, edited, started)) = pending_properties {

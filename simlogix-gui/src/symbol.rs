@@ -14,7 +14,7 @@ use egui::{pos2, Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke};
 
 use crate::canvas::Rotation;
 use crate::palette::ComponentKind;
-use simlogix_core::PortSetting;
+use simlogix_core::PortDrive;
 
 const PIN_RADIUS: f32 = 3.0;
 
@@ -137,7 +137,7 @@ pub struct SymbolState<'a> {
     /// `TriStateSource`: which way its lever is thrown. The readout says
     /// what the *net* settled on, which is a different question — the whole
     /// point of the component is to let go and watch something else answer.
-    pub level: Option<PortSetting>,
+    pub level: Option<PortDrive>,
 }
 
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
@@ -460,10 +460,12 @@ fn draw_tri_state_source(
 
     // Centred, the lever stops short of both contacts: the gap is the whole
     // of what "not driving" looks like, so it is drawn wide enough to read.
+    // The lever is a one-bit affair, which a tri-state source is: any bit
+    // set reads as thrown high.
     let tip = match state.level.unwrap_or_default() {
-        PortSetting::High => pos2(contact_x, c.y - throw),
-        PortSetting::Low => pos2(contact_x, c.y + throw),
-        PortSetting::Undriven => pos2(contact_x - 3.0, c.y),
+        PortDrive::Driving(bits) if bits != 0 => pos2(contact_x, c.y - throw),
+        PortDrive::Driving(_) => pos2(contact_x, c.y + throw),
+        PortDrive::Undriven => pos2(contact_x - 3.0, c.y),
     };
     painter.line_segment([r(pivot), r(tip)], stroke);
 

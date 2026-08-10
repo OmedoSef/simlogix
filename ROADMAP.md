@@ -97,9 +97,20 @@ better at the thing it's for.
   Half of that works: the net takes the widest declared, so a narrower pin
   that *drives* contributes the wrong width and the engine faults every bit
   — visible, if not yet named. A pin that only **reads** contributes
-  nothing, so wiring a one-bit output to an eight-bit bus is still silent.
+  nothing, so a two-bit output on a four-bit bus is still silent: the port
+  shows what the net carries, which is honest, and nothing says the two
+  disagree. Truncating to the reader's width instead would be the worst of
+  the three outcomes — not right, not refused, but *plausible*.
+
   Saying so needs the declared widths compared where they are known, which
-  is `rebuild_nets`, and a channel to report it on.
+  is `rebuild_nets`, and a channel to report it on. Two things go with it:
+
+  - **the inspector needs the reading pins too**, with their declared
+    widths. It lists contributions, and a reader makes none — so the window
+    that exists to answer *why* is silent on exactly this case;
+  - the fault belongs on the **pin**, not the net. The net is fine; one
+    thing attached to it is wrong about how wide it is, and saying which is
+    the whole value of the message.
 
   ### What has to exist
 

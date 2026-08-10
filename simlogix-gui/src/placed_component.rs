@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
-use simlogix_core::{Circuit, ComponentId, Level, NetId, PortHandles, PortSetting, Signal};
+use simlogix_core::{Circuit, ComponentId, Level, NetId, PortDrive, PortHandles, Signal};
 
 use crate::appearance::Appearance;
 use crate::canvas::{self, Rotation, BOX_SIZE};
@@ -319,11 +319,16 @@ impl PlacedComponent {
     /// reads. A `Switch` is deliberately not one of these: its position is
     /// part of the saved document, so anything driving it from outside
     /// would be making an edit.
-    pub fn hand_set_level(&self) -> Option<&Rc<Cell<PortSetting>>> {
+    pub fn hand_set_level(&self) -> Option<&Rc<Cell<PortDrive>>> {
         match &self.shape {
-            Shape::HandSet { handles, .. } => handles.as_ref().map(|handles| &handles.level),
+            Shape::HandSet { handles, .. } => handles.as_ref().map(|handles| &handles.drive),
             _ => None,
         }
+    }
+
+    /// The width its pins carry, as its properties say.
+    pub fn width(&self) -> usize {
+        self.properties.width()
     }
 
     pub fn properties(&self) -> &Properties {
@@ -341,7 +346,9 @@ impl PlacedComponent {
         } = &self.shape
         {
             if properties.initial_level() != self.properties.initial_level() {
-                handles.level.set(properties.initial_level());
+                handles
+                    .drive
+                    .set(properties.initial_level().to_drive(properties.width()));
             }
             // Unconditional: the component has to drive the width the net
             // was given, and a port claiming a width it does not supply
@@ -750,7 +757,7 @@ impl PlacedComponent {
                     SymbolState {
                         label: &readout,
                         label_color: Some(readout_color),
-                        level: handles.as_ref().map(|handles| handles.level.get()),
+                        level: handles.as_ref().map(|handles| handles.drive.get()),
                         ..Default::default()
                     },
                     &text_layer,
@@ -763,9 +770,13 @@ impl PlacedComponent {
                 // Latching: a click advances it and it stays there. Only on
                 // a click, never on a drag, so moving a port across the
                 // canvas can't also change what it carries.
-                if let Some(level) = handles.as_ref().map(|handles| &handles.level) {
+                if let Some(drive) = handles.as_ref().map(|handles| &handles.drive) {
                     if response.clicked() {
-                        level.set(level.get().next(properties.cycles_undriven(&kind)));
+                        drive.set(
+                            drive
+                                .get()
+                                .next(properties.cycles_undriven(&kind), properties.width()),
+                        );
                         circuit.schedule_now(id);
                         input_changed = true;
                     }

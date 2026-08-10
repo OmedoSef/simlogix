@@ -5,7 +5,7 @@
 //! so the private fields they assert on stay private to everyone else.
 
 use super::*;
-use simlogix_core::Level;
+use simlogix_core::{Level, PortDrive};
 
 #[test]
 fn creating_a_circuit_opens_it_without_disturbing_the_others() {
@@ -1327,22 +1327,22 @@ fn a_free_running_port_beats_only_in_the_simulation_view() {
     // the control for is one you cannot stop.
     app.circuit.advance(CLOCK_PERIOD_TICKS).expect("stable");
     app.beat_free_running_source(strings);
-    assert_eq!(level(&app), PortSetting::Undriven);
+    assert_eq!(level(&app), PortDrive::Undriven);
 
     app.switch_view(toolbar::View::Simulation);
     app.beat_free_running_source(strings);
     assert_eq!(
         level(&app),
-        PortSetting::High,
+        PortDrive::Driving(1),
         "due, and now in the right view"
     );
 
     // And not again until the next period is up.
     app.beat_free_running_source(strings);
-    assert_eq!(level(&app), PortSetting::High);
+    assert_eq!(level(&app), PortDrive::Driving(1));
     app.circuit.advance(CLOCK_PERIOD_TICKS).expect("stable");
     app.beat_free_running_source(strings);
-    assert_eq!(level(&app), PortSetting::Low);
+    assert_eq!(level(&app), PortDrive::Driving(0));
 }
 
 #[test]
@@ -1362,7 +1362,7 @@ fn clicking_a_port_while_paused_is_reported_as_waiting() {
         .find(|placed| placed.id() == port)
         .and_then(|placed| placed.hand_set_level())
         .expect("a driving port has a level");
-    level.set(PortSetting::High);
+    level.set(PortDrive::Driving(1));
     app.circuit.schedule_now(port);
     assert!(app.change_pending(), "the click is waiting for a step");
 
@@ -1464,6 +1464,48 @@ fn two_driven_widths_on_one_net_fault_it_rather_than_being_guessed_at() {
         signal.levels().iter().all(|&level| level == Level::Error),
         "expected every bit faulted, got {signal:?}"
     );
+}
+
+#[test]
+fn a_two_bit_port_can_be_driven_to_any_of_its_four_values() {
+    let mut app = SimLogixApp::default();
+    let port = app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    let placed = app
+        .placed
+        .iter_mut()
+        .find(|placed| placed.id() == port)
+        .expect("just placed");
+    let mut properties = placed.properties().clone();
+    properties.width = Some(2);
+    placed.set_properties(properties);
+    app.rebuild_nets();
+
+    let drive = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == port)
+        .and_then(|placed| placed.hand_set_level())
+        .expect("a driving port has one")
+        .clone();
+
+    // The whole point: two bits used to manage only 0 and 3, because every
+    // bit got the same level.
+    for (bits, expected) in [
+        (0b01, [Level::High, Level::Low]),
+        (0b10, [Level::Low, Level::High]),
+        (0b11, [Level::High; 2]),
+        (0b00, [Level::Low; 2]),
+    ] {
+        drive.set(PortDrive::Driving(bits));
+        app.circuit.schedule_now(port);
+        app.step(SETTLE_TICKS);
+        let net = app.circuit.pins(port)[0].net;
+        assert_eq!(
+            app.circuit.signal_at(net).levels(),
+            expected,
+            "for {bits:b}"
+        );
+    }
 }
 
 #[test]
