@@ -2001,9 +2001,28 @@ impl SimLogixApp {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| strings.title_untitled.to_string());
         let marker = if self.dirty { "*" } else { "" };
-        format!("SimLogix — {name}{marker}")
+        format!("SimLogix{BUILD_MARKER} — {name}{marker}")
     }
 }
+
+/// Says so when this was not built with `--release`.
+///
+/// In the title because that is what tells two windows apart at a glance,
+/// and a debug build is *slow* — a circuit of any size runs visibly worse,
+/// which reads as the simulator being at fault rather than the build.
+///
+/// `debug_assertions` rather than a feature of our own: it is the flag that
+/// actually decides what this binary does, so it cannot come to disagree
+/// with the thing it describes. A release build with assertions turned back
+/// on will say debug, and that is right — it is one.
+///
+/// Not translated. It is a marker rather than a sentence, and the word is
+/// the same one the profile is called.
+pub(crate) const BUILD_MARKER: &str = if cfg!(debug_assertions) {
+    " (debug)"
+} else {
+    ""
+};
 
 impl SimLogixApp {
     /// Builds the app, applying whatever preferences were stored last time.
@@ -2655,11 +2674,10 @@ impl SimLogixApp {
                     ui.vertical(|ui| {
                         ui.heading("SimLogix");
                         ui.label(
-                            egui::RichText::new(
-                                strings
-                                    .about_version
-                                    .replace("{}", env!("CARGO_PKG_VERSION")),
-                            )
+                            egui::RichText::new(strings.about_version.replace(
+                                "{}",
+                                &format!("{}{BUILD_MARKER}", env!("CARGO_PKG_VERSION")),
+                            ))
                             .weak(),
                         );
                         ui.add_space(8.0);

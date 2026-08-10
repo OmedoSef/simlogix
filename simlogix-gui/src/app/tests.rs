@@ -22,6 +22,28 @@ fn creating_a_circuit_opens_it_without_disturbing_the_others() {
 }
 
 #[test]
+fn a_debug_build_says_so_in_the_title() {
+    let app = SimLogixApp::default();
+    let strings = Strings::for_language(app.language);
+    let title = app.title(strings);
+
+    // The wiring: the title carries whatever the marker is. Holds whichever
+    // profile this was built with.
+    assert!(
+        title.starts_with(&format!("SimLogix{}", super::BUILD_MARKER)),
+        "the title dropped the marker: {title}"
+    );
+    // And what it comes to here. `cargo test` is a debug build, so this is
+    // the real answer rather than a restatement of the constant; built with
+    // `--release` there is no marker and nothing to check.
+    #[cfg(debug_assertions)]
+    assert!(
+        title.starts_with("SimLogix (debug) — "),
+        "a debug build said nothing: {title}"
+    );
+}
+
+#[test]
 fn a_component_on_its_side_occupies_the_other_way_round() {
     let mut app = SimLogixApp::default();
     let id = app.place(ComponentKind::And, egui::pos2(40.0, 40.0));
