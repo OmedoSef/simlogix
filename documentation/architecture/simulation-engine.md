@@ -26,6 +26,36 @@ Not every component settles — a `Clock` is meant to oscillate forever. `Circui
 
 The actual way to drive a `Clock`: `Circuit::advance(ticks)` processes events up to a given point and *stops*, leaving anything further out (including the clock's next self-reschedule) queued for later. The GUI calls this once per frame with a tick count derived from real elapsed time, so a `Clock` ticks at a genuine, wall-clock-tied rate rather than free-running as fast as the CPU allows.
 
+### One evaluation per component per tick
+
+`Circuit` refuses to queue the same component twice at the same tick. Asking
+twice means "make sure this is evaluated then", which it is — not "evaluate
+it a second time in no time at all".
+
+The rule is not an optimisation. For anything combinational a repeat is
+merely wasted work, since the same inputs give the same outputs; for a
+component carrying state it is wrong. A `Clock` toggles on *every*
+evaluation, so a duplicate made it toggle twice per period and appear never
+to move at all — and it stayed doubled, because each evaluation reschedules
+itself.
+
+### Reading the clock, and stepping
+
+`Circuit::now()` is the logical clock: how many ticks the circuit has been
+advanced by. `Circuit::next_event_tick()` says when the next thing is due,
+or `None` when nothing is — skipping events that name a component since
+removed, because `advance` drops those without evaluating anything.
+
+Both exist for single-stepping in the GUI. A caller advancing one tick at a
+time has no other way to say where it got to, and a step that changes
+nothing visible is otherwise indistinguishable from a step that never
+happened.
+
+One consequence worth knowing: oscillation detection counts *within* a
+single `advance` call, so stepping a tick at a time never reaches the
+threshold. That is what you want when you are deliberately walking an
+oscillation — but it means stepping cannot warn the way running does.
+
 ## Data model
 
 - **`Signal`** — `High`, `Low`, `Unknown`, `Error`, or `HighZ`. Unknown/error states are modeled from the start, since mishandling X/Z-like states is a common source of subtle simulation bugs. `HighZ` is distinct from `Unknown`: `Unknown` means "not driven / not simulated yet", `HighZ` means "this driver is deliberately not driving right now" (tri-state), needed for bidirectional buffers.

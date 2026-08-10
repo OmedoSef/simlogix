@@ -13,11 +13,15 @@ loops the engine mishandles, and a dated interface.
   delays, so a combinational feedback loop (an SR latch built from NAND
   gates, a ring oscillator) settles or oscillates instead of hanging. An
   oscillation that never settles is reported rather than freezing the UI.
+- **Stepping** — one tick, straight to the next event, or one clock edge at
+  a time, plus a speed control. A circuit whose clock arrives on a port can
+  be stepped too: you are its clock.
 - **Signals that admit what they don't know** — `High`, `Low`, `Unknown`,
   `Error`, `HighZ`, plus the weak levels a single transistor really passes.
 - **A full v1 component set** — the eight logic gates, transistors, rails,
-  buttons, switches, clocks, LEDs, probes, an SR latch, a tri-state buffer
-  and a bidirectional bus transceiver in both enable polarities.
+  buttons, switches, clocks, a three-position source, LEDs, probes, an SR
+  latch, a tri-state buffer and a bidirectional bus transceiver in both
+  enable polarities.
 - **Hierarchy** — a project holds many circuits, filed in folders, and any
   of them can be placed inside another. Give a circuit a symbol of your own
   or let one be generated.

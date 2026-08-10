@@ -443,9 +443,18 @@ static ENGLISH: Strings = Strings {
             ],
         },
         HelpSection {
+            title: "Circuits",
+            rows: &[
+            ("Click a circuit", "Arm it for placing, like a palette entry"),
+            ("Double-click", "Open it"),
+            ("F2", "Rename the circuit you are in"),
+            ("Right-click", "Rename, delete, move to a folder, place"),
+            ("Drag onto a folder", "File it there"),
+            ],
+        },
+        HelpSection {
             title: "Simulation",
             rows: &[
-            ("F2", "Rename the circuit you are in"),
             ("Space", "Run or pause the simulation"),
             ("F10", "Step one tick"),
             ("Shift+F10", "Skip to the next event"),
@@ -717,9 +726,18 @@ static FRENCH: Strings = Strings {
             ],
         },
         HelpSection {
+            title: "Circuits",
+            rows: &[
+            ("Clic sur un circuit", "L'armer pour le poser, comme une entrée de palette"),
+            ("Double-clic", "L'ouvrir"),
+            ("F2", "Renommer le circuit ouvert"),
+            ("Clic droit", "Renommer, supprimer, déplacer vers un dossier, poser"),
+            ("Glisser sur un dossier", "L'y ranger"),
+            ],
+        },
+        HelpSection {
             title: "Simulation",
             rows: &[
-            ("F2", "Renommer le circuit ouvert"),
             ("Espace", "Lancer ou mettre en pause la simulation"),
             ("F10", "Avancer d'un tick"),
             ("Maj+F10", "Aller au prochain événement"),
@@ -991,9 +1009,18 @@ static ITALIAN: Strings = Strings {
             ],
         },
         HelpSection {
+            title: "Circuiti",
+            rows: &[
+            ("Clic su un circuito", "Lo arma per posizionarlo, come una voce della palette"),
+            ("Doppio clic", "Lo apre"),
+            ("F2", "Rinomina il circuito aperto"),
+            ("Clic destro", "Rinomina, elimina, sposta in una cartella, posiziona"),
+            ("Trascina su una cartella", "Lo archivia lì"),
+            ],
+        },
+        HelpSection {
             title: "Simulazione",
             rows: &[
-            ("F2", "Rinomina il circuito aperto"),
             ("Spazio", "Avvia o metti in pausa la simulazione"),
             ("F10", "Avanza di un tick"),
             ("Maiusc+F10", "Vai al prossimo evento"),

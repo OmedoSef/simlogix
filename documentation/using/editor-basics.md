@@ -40,11 +40,15 @@ the last one to drop back to Select.
 
 Clicking the highlighted palette entry again cancels it, as does Escape.
 
-The palette is grouped into **Sources** (Button, Switch, Tri-state source,
-Clock, GND, PWR),
-**Outputs** (LED, Probe), **Transistors** (NMOS, PMOS) and **Gates**
-(AND, OR, NAND, NOR, XOR, XNOR, NOT, Buffer). Each category folds away, and
-the panel edge can be dragged to resize it.
+The palette is grouped into **Interface** (Input, Output, Bidirectional),
+**Sources** (Button, Switch, Tri-state source, Clock, GND, PWR),
+**Outputs** (LED, Probe), **Transistors** (NMOS, PMOS), **Gates** (AND, OR,
+NAND, NOR, XOR, XNOR, NOT, Buffer, Tri-state buffer), **Memory** (SR latch)
+and **Buses** (the two transceivers). Each category folds away, and the
+panel edge can be dragged to resize it.
+
+The circuit tree above it is a palette too — of your own circuits. See
+[Circuits](files-and-history.md#circuits).
 
 ## Selecting, moving, rotating, deleting
 
@@ -126,7 +130,11 @@ and gestures**.
 | `Escape` | Cancel the wire being drawn, otherwise clear the selection |
 | `Enter` | Finish the wire being drawn, leaving its end loose |
 | `Space` | Run / pause the simulation |
+| `F10` | Step one tick |
+| `Shift+F10` | Skip to the next event |
+| `Ctrl+F10` | Step one clock edge |
 | `C` | Show / hide the signal state on wires |
+| `F2` | Rename the circuit you are in |
 | `Shift` (held) | Keep placing the same component |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` / `Ctrl+Y` | Redo |

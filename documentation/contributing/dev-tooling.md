@@ -41,6 +41,18 @@ Use `Harness::run_steps`, not `Harness::run`: this application asks for a
 repaint every frame — which is what keeps a clock ticking — so it never
 settles, and `run` gives up after a few tries.
 
+## Telling a debug build apart
+
+A build made without `--release` says so in the window title
+(`SimLogix (debug) — file.slgx`) and beside the version in **About**. It
+comes from `cfg!(debug_assertions)` — the flag that actually decides what
+the binary does, so it cannot come to disagree with what it describes.
+
+Worth having because a debug build is *slow*: a circuit of any size runs
+visibly worse, which reads as the simulator being at fault rather than the
+build. And when one built from source and an installed release are open
+together, the title is what tells the two windows apart.
+
 ## `scripts/set-format-version.py`
 
 ```bash

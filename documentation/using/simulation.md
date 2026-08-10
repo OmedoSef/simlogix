@@ -31,9 +31,10 @@ is part of the document: it is how the circuit was left, not something the
 simulation produced. That is the one thing this mode deliberately lets you
 change, since it is the whole reason to be here.
 
-Its tool row holds **Interact** and a hand for the view. It is deliberately
-short — the row exists as the place inspection tools will go as they arrive,
-not as a shelf of buttons that do nothing yet.
+Its tool row holds **Interact** and a hand for the view, then the three
+step buttons and, when there is a choice, the clock picker — see
+[Stepping](#stepping-one-tick-at-a-time) below. The tools latch and the
+steps happen once, which is why a separator sits between them.
 
 ## Running and pausing
 
