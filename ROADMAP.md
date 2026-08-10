@@ -88,14 +88,15 @@ better at the thing it's for.
 
 Not user-visible, but they decide how expensive everything above is.
 
-- [ ] **Splitting `app.rs`**
+- [x] **Splitting `app.rs`** — done: 6975 lines became 2623, with the
+  canvas, the menu bar, the appearance editor, wires, circuits and both test
+  suites in `src/app/`. `draw` went from 2300 lines to 609.
 
-  It is around seven thousand lines, and the canvas is a single closure
-  inside it. Locating an interaction point costs several searches, every time
-  — which is a tax on every item on this list.
-
-  The seams are visible enough: the canvas interaction, the menu bar, the
-  panels, and the appearance editor are four things sharing one file.
+  What would go further, if it starts to hurt again: `canvas_ui.rs` is still
+  1400 lines in one method. It was left whole on purpose — the pieces share
+  the frame's pointer position, the resolved wire routes and the
+  click-consumed flag, and handing those between a dozen small functions
+  would move the complexity rather than reduce it.
 
 - [x] **Tests at the interface level** — done; see `simlogix-gui/src/ui_tests.rs`
   and the note in [CLAUDE.md](CLAUDE.md). Fourteen tests drive the real
