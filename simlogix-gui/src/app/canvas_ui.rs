@@ -312,6 +312,29 @@ impl SimLogixApp {
 
                     // Resolved once per frame, before anything is drawn --
                     // see `resolve_routes`.
+                    // Ringed in the error colour, on the pin rather than on
+                    // the net: the net is fine and one thing attached to it
+                    // is wrong about how wide it is. Drawn from the handles
+                    // the component loop just collected, so nothing about
+                    // drawing a component had to learn about widths.
+                    for &(component, index) in &self.width_faults {
+                        if let Some(handle) = pin_handles.iter().find(|handle| {
+                            handle.component == component && handle.pin_index == index
+                        }) {
+                            painter.circle_stroke(
+                                handle.position,
+                                6.0,
+                                egui::Stroke::new(
+                                    2.0,
+                                    canvas::signal_color(
+                                        simlogix_core::Level::Error,
+                                        ui.visuals().dark_mode,
+                                    ),
+                                ),
+                            );
+                        }
+                    }
+
                     let mut resolved = self.resolve_routes(&pin_handles);
 
                     // Where every wire's points ended up this frame, kept past

@@ -1509,6 +1509,49 @@ fn a_two_bit_port_can_be_driven_to_any_of_its_four_values() {
 }
 
 #[test]
+fn a_pin_that_disagrees_about_the_width_is_named_as_the_faulty_one() {
+    let mut app = SimLogixApp::default();
+    let wide = app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    let narrow = app.place(ComponentKind::OutputPort, egui::pos2(200.0, 0.0));
+    app.add_wire(
+        WireEndpoint::Pin(wide, 0),
+        WireEndpoint::Pin(narrow, 0),
+        Vec::new(),
+    );
+    app.rebuild_nets();
+    assert!(app.width_faults.is_empty(), "one bit each, nothing to say");
+
+    for (id, bits) in [(wide, 4), (narrow, 2)] {
+        let placed = app
+            .placed
+            .iter_mut()
+            .find(|placed| placed.id() == id)
+            .expect("just placed");
+        let mut properties = placed.properties().clone();
+        properties.width = Some(bits);
+        placed.set_properties(properties);
+    }
+    app.rebuild_nets();
+
+    // The net takes the widest, so it is the *narrow* pin that is wrong —
+    // and naming which one is the whole value of the complaint. Blaming the
+    // net would leave you looking at a wire that is doing nothing wrong.
+    assert_eq!(app.width_faults, vec![(narrow, 0)]);
+
+    // And it goes away when the drawing agrees again.
+    let placed = app
+        .placed
+        .iter_mut()
+        .find(|placed| placed.id() == narrow)
+        .expect("still placed");
+    let mut properties = placed.properties().clone();
+    properties.width = Some(4);
+    placed.set_properties(properties);
+    app.rebuild_nets();
+    assert!(app.width_faults.is_empty());
+}
+
+#[test]
 fn a_clock_still_ticks_after_the_project_is_reopened() {
     let mut app = SimLogixApp::default();
     app.place(ComponentKind::Clock, egui::pos2(200.0, 200.0));

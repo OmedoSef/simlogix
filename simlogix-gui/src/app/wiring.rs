@@ -629,6 +629,25 @@ impl SimLogixApp {
                 NetGroup::bus(group, width)
             })
             .collect();
+
+        // Which pins disagree with the net they are on. Worked out here
+        // because here is where both facts are known at once, and recorded
+        // per *pin* rather than per net: the net is fine — one thing
+        // attached to it is wrong about how wide it is, and saying which is
+        // the whole value of the complaint.
+        self.width_faults = groups
+            .iter()
+            .flat_map(|group| {
+                group
+                    .pins
+                    .iter()
+                    .filter(|(component, _)| {
+                        declared.get(component).copied().unwrap_or(1) != group.width
+                    })
+                    .copied()
+            })
+            .collect();
+
         self.circuit.rewire(&groups);
 
         let mut wire_groups: HashMap<Node, Vec<u64>> = HashMap::new();

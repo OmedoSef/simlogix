@@ -158,7 +158,7 @@ project file.
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
 | **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
-| **Bits** | the three ports | How many bits its pin carries. |
+| **Bits** | the three ports | How many bits its pin carries. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
 
 Two of those look alike and are not. A **button's** setting is its *resting*
 state: a press springs back, so what is saved is where it returns to. A

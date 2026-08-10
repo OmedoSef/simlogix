@@ -154,6 +154,24 @@ you left on and forgot would otherwise make the circuit look wrong.
 Like pause, it is not remembered between runs: it is a way of working at a
 moment, not something you set once.
 
+## When two widths meet
+
+A net takes the **widest** width declared by anything on it. Anything
+narrower is then wrong about the wire it is attached to, and that pin is
+**ringed in red** on the schematic, with the status bar saying how many
+there are.
+
+The fault is put on the **pin**, not on the net: the net is fine, and one
+thing attached to it is mistaken about how wide it is. Saying which is the
+whole point — blaming the wire would leave you staring at something that is
+doing nothing wrong.
+
+A narrower pin that *drives* also faults the net itself, every bit of it,
+since it is contributing a width the net does not have. Padding it out or
+cutting it short would be inventing bits nobody asked for.
+
+It clears the moment the drawing agrees again.
+
 ## Looking at the engine
 
 `F12`, or **Simulation → Engine state**, opens a window showing the circuit

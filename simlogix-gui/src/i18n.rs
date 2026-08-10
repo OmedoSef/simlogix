@@ -307,6 +307,7 @@ pub struct Strings {
     pub confirm_discard_discard: &'static str,
     pub confirm_discard_cancel: &'static str,
 
+    pub status_width_fault: &'static str,
     pub status_paused: &'static str,
     pub status_paused_pending: &'static str,
     pub status_pending_short: &'static str,
@@ -669,6 +670,7 @@ static ENGLISH: Strings = Strings {
     confirm_discard_discard: "Discard",
     confirm_discard_cancel: "Cancel",
 
+    status_width_fault: "{} pin(s) declare a different width from the net they are on — ringed in red",
     status_paused: "Simulation paused",
     status_paused_pending: "Simulation paused — a change is waiting for the next step",
     status_pending_short: "A change is waiting for the next step",
@@ -978,6 +980,7 @@ static FRENCH: Strings = Strings {
     confirm_discard_discard: "Abandonner",
     confirm_discard_cancel: "Annuler",
 
+    status_width_fault: "{} broche(s) déclarent une largeur différente de leur net — cerclées de rouge",
     status_paused: "Simulation en pause",
     status_paused_pending: "Simulation en pause — un changement attend le prochain pas",
     status_pending_short: "Un changement attend le prochain pas",
@@ -1288,6 +1291,7 @@ static ITALIAN: Strings = Strings {
     confirm_discard_discard: "Ignora",
     confirm_discard_cancel: "Annulla",
 
+    status_width_fault: "{} pin dichiarano una larghezza diversa dalla loro rete — cerchiati in rosso",
     status_paused: "Simulazione in pausa",
     status_paused_pending: "Simulazione in pausa — una modifica attende il prossimo passo",
     status_pending_short: "Una modifica attende il prossimo passo",

@@ -462,6 +462,14 @@ pub struct SimLogixApp {
     /// Not remembered between runs, for the same reason pause isn't: it is a
     /// way of working at a moment, not something you set once like a theme.
     speed: f32,
+    /// The pins whose declared width disagrees with the net they sit on,
+    /// recomputed with the nets.
+    ///
+    /// Per pin rather than per net: the net is fine, and what is wrong is
+    /// one thing attached to it. It is a *standing* fault — it stays until
+    /// the drawing is changed — so it is reported in the status bar and on
+    /// the pin itself, never in the transient notice over the canvas.
+    width_faults: Vec<(ComponentId, usize)>,
     /// The net that refused to settle, if the engine reported one. Set only
     /// alongside `running = false`: a fault pauses rather than crashing or
     /// silently looping, and stays on screen until the user resumes.
@@ -603,6 +611,7 @@ impl Default for SimLogixApp {
             language: Language::detect_from_os(),
             pending_attach: None,
             net_fingerprint: 0,
+            width_faults: Vec::new(),
             running: true,
             clock_source_index: None,
             free_running_source: false,
@@ -2523,7 +2532,16 @@ impl SimLogixApp {
         self.menu_bar(ui, strings, &keys);
 
         egui::Panel::bottom("status_bar").show(ui, |ui| {
-            let hint = if let Some(net) = self.unstable_net {
+            let hint = if !self.width_faults.is_empty() {
+                // Above the instability report: a width that disagrees is a
+                // fault in the *drawing*, and a drawing that cannot be read
+                // consistently is worth fixing before anything it does.
+                Some(
+                    strings
+                        .status_width_fault
+                        .replace("{}", &self.width_faults.len().to_string()),
+                )
+            } else if let Some(net) = self.unstable_net {
                 Some(strings.status_unstable.replace("{}", &net.0.to_string()))
             } else if !self.show_signal_state {
                 Some(strings.status_signals_hidden.to_string())
