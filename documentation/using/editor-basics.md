@@ -204,6 +204,9 @@ The palette's **Memory** category holds the `SR latch`: `S` sets `Q` high,
 `R` clears it, and with neither asserted it holds what it was last told —
 the simplest thing in the editor that remembers.
 
+Both outputs are lettered `Q`; the one carrying an inversion **bubble** is
+the complement.
+
 Two behaviours worth knowing, because both are deliberate:
 
 - Asserting `S` and `R` together has no defined answer, so both outputs go

@@ -578,6 +578,10 @@ fn draw_port(
 /// changes. A latch's are not: `S` and `R` do opposite things, and so do
 /// `Q` and `Q̄`. Four unlabelled pins at four corners would be a guess, and
 /// the box-with-labels *is* this component's recognisable form.
+///
+/// Both outputs are lettered `Q`, and the **bubble** on the lower one is
+/// what says which is the complement — a mark rather than a glyph, so
+/// nothing has to be in a font for it to appear.
 fn draw_sr_latch(
     painter: &Painter,
     rect: Rect,
@@ -605,7 +609,15 @@ fn draw_sr_latch(
     painter.line_segment([r(set), r(pos2(body.left(), body.top()))], stroke);
     painter.line_segment([r(reset), r(pos2(body.left(), body.bottom()))], stroke);
     painter.line_segment([r(q), r(pos2(body.right(), body.top()))], stroke);
-    painter.line_segment([r(q_bar), r(pos2(body.right(), body.bottom()))], stroke);
+    // The complement carries an inversion bubble, and that is what tells the
+    // two outputs apart. It used to be said by an overline on the letter — a
+    // combining macron, which egui's font does not draw, so both outputs
+    // read `Q` and the symbol answered no question at all. The bubble is a
+    // mark rather than a glyph, so nothing has to be in a font for it to
+    // appear, and it is the mark every other inverted output here already
+    // uses.
+    let inverted = bubble_end(painter, pos2(body.right(), body.bottom()), r, stroke);
+    painter.line_segment([r(q_bar), r(inverted)], stroke);
 
     let corners = [
         pos2(body.left(), body.top()),
@@ -637,10 +649,12 @@ fn draw_sr_latch(
         Align2::RIGHT_CENTER,
         "Q",
     );
+    // Plain `Q` on both, since the bubble is what says which is which — the
+    // usual schematic reading, and one letter fewer to get wrong.
     label(
         pos2(body.right() - pad, body.bottom() - pad - 3.0),
         Align2::RIGHT_CENTER,
-        "Q\u{0305}",
+        "Q",
     );
 
     for pin in [set, reset, q, q_bar] {
