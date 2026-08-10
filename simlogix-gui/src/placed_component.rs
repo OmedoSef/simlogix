@@ -311,6 +311,20 @@ impl PlacedComponent {
         self.rotation
     }
 
+    /// The level cell of a component whose value is set by hand — the
+    /// driving ports and the tri-state source.
+    ///
+    /// `None` for everything else, including an output port, which only
+    /// reads. A `Switch` is deliberately not one of these: its position is
+    /// part of the saved document, so anything driving it from outside
+    /// would be making an edit.
+    pub fn hand_set_level(&self) -> Option<&Rc<Cell<PortLevel>>> {
+        match &self.shape {
+            Shape::HandSet { level, .. } => level.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn properties(&self) -> &Properties {
         &self.properties
     }

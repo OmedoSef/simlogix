@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
-    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, Probe, Rail,
-    SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortLevel, Probe,
+    Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::appearance::Appearance;
@@ -49,6 +49,12 @@ pub(crate) const SETTLE_TICKS: u64 = 32;
 /// control makes you choose a number for a question that has no numeric
 /// answer.
 pub(crate) const SPEEDS: [f32; 3] = [0.25, 1.0, 4.0];
+
+/// How many scheduled events a clock step will cross looking for an edge
+/// before giving up. Generous — a busy circuit has plenty between two beats
+/// — but finite, since a clock whose net is held by something stronger
+/// never changes and would otherwise be searched for forever.
+const MAX_EDGE_EVENTS: usize = 10_000;
 
 /// How a speed is written, in the menu and in the status bar.
 pub(crate) fn speed_label(speed: f32) -> &'static str {
@@ -426,6 +432,10 @@ pub struct SimLogixApp {
     /// Whether the simulation is advancing. Editing still works while
     /// paused — only time stops.
     running: bool,
+    /// Which of [`SimLogixApp::clock_sources`] a clock step acts on, by
+    /// position in `placed`. `None` means "the only one", which is the case
+    /// that never has to be answered.
+    clock_source_index: Option<usize>,
     /// How fast logical time runs against real time, as a multiplier on the
     /// per-frame tick budget. A clock's *period* is unchanged — this moves
     /// the whole circuit through time faster or slower, which is what lets
@@ -575,6 +585,7 @@ impl Default for SimLogixApp {
             pending_attach: None,
             net_fingerprint: 0,
             running: true,
+            clock_source_index: None,
             speed: 1.0,
             unstable_net: None,
             library: String::new(),
@@ -1935,6 +1946,105 @@ impl SimLogixApp {
         self.step(tick.saturating_sub(self.circuit.now()).max(1));
     }
 
+    /// What "one clock edge" could mean in this circuit, by position in
+    /// `placed`, each with a label for the picker.
+    ///
+    /// Both the `Clock` components *and* the ports you set by hand: a
+    /// circuit drawn to be used inside another has its clock arriving on a
+    /// port, so a flip-flop tested on its own has no `Clock` in it at all.
+    /// Refusing to step there would refuse the very circuit you drew the
+    /// port for.
+    ///
+    /// A `Switch` is not offered even though it drives a level too — its
+    /// position is part of the saved document, so stepping one would be
+    /// making an edit on your behalf, undo step and all. A port's level is
+    /// runtime state, like a button press, which is what makes this free.
+    fn clock_sources(&self, strings: &Strings) -> Vec<(usize, String)> {
+        let mut seen = 0;
+        self.placed
+            .iter()
+            .enumerate()
+            .filter(|(_, placed)| {
+                placed.kind() == ComponentKind::Clock || placed.hand_set_level().is_some()
+            })
+            .map(|(index, placed)| {
+                seen += 1;
+                let label = match placed.properties().name.as_deref() {
+                    Some(name) if !name.is_empty() => name.to_string(),
+                    // Numbered in the order they were placed, so two
+                    // unnamed clocks are still two different entries.
+                    _ => format!("{} {seen}", strings.component_kind_label(&placed.kind())),
+                };
+                (index, label)
+            })
+            .collect()
+    }
+
+    /// The source a clock step acts on: whichever was picked, or the only
+    /// one there is. `None` when the circuit offers none.
+    ///
+    /// Held by position rather than by `ComponentId`, since those are handed
+    /// out afresh every time the circuit is rebuilt — which is nearly every
+    /// edit. A stale position picks a different component; a stale id picks
+    /// nothing at all, silently.
+    fn clock_source(&self, strings: &Strings) -> Option<usize> {
+        let sources = self.clock_sources(strings);
+        match self.clock_source_index {
+            Some(index) if sources.iter().any(|(at, _)| *at == index) => Some(index),
+            _ => sources.first().map(|(at, _)| *at),
+        }
+    }
+
+    /// Advances to the next edge of the chosen clock source, or drives one
+    /// by hand if that source is a port.
+    ///
+    /// For a `Clock`, "the next edge" is read off the net rather than
+    /// computed from the period: whatever ends up on the wire is what the
+    /// rest of the circuit sees, and a clock feeding something else through
+    /// a gate would make the period a lie. Jumping event to event rather
+    /// than tick by tick, because the ticks in between hold nothing.
+    ///
+    /// Bounded, and gives up rather than hanging: a source that never
+    /// changes — a clock whose net is held by something stronger — would
+    /// otherwise search forever.
+    fn step_clock_edge(&mut self, strings: &Strings) {
+        let Some(index) = self.clock_source(strings) else {
+            return;
+        };
+        let Some(placed) = self.placed.get(index) else {
+            return;
+        };
+        let id = placed.id();
+
+        // A port is not on a schedule of its own: *you* are its clock, so a
+        // step is a flip. High and low only — undriven is a third position
+        // of the switch, not part of a cycle.
+        if let Some(level) = placed.hand_set_level() {
+            level.set(match level.get() {
+                PortLevel::High => PortLevel::Low,
+                _ => PortLevel::High,
+            });
+            self.circuit.schedule_now(id);
+            self.step(SETTLE_TICKS);
+            return;
+        }
+
+        let Some(net) = self.circuit.try_pins(id).and_then(|pins| pins.first()) else {
+            return;
+        };
+        let net = net.net;
+        let before = self.circuit.signal_at(net);
+        for _ in 0..MAX_EDGE_EVENTS {
+            let Some(tick) = self.circuit.next_event_tick() else {
+                return;
+            };
+            self.step(tick.saturating_sub(self.circuit.now()).max(1));
+            if self.circuit.signal_at(net) != before {
+                return;
+            }
+        }
+    }
+
     /// Snapshots the document so the edit about to happen can be undone.
     /// **Call this before mutating**, not after — it records the state being
     /// left behind. For a drag, that means calling it the frame the drag
@@ -2272,6 +2382,8 @@ impl SimLogixApp {
             // says which one is meant to win if that ever stops being true.
             if ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step_event)) {
                 self.step_to_next_event();
+            } else if ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step_edge)) {
+                self.step_clock_edge(strings);
             } else if ui.ctx().input_mut(|i| i.consume_shortcut(&keys.step)) {
                 self.step(1);
             }
@@ -2715,10 +2827,23 @@ impl SimLogixApp {
                 }
                 toolbar::View::Simulation => {
                     let has_event = self.circuit.next_event_tick().is_some();
-                    match toolbar::show_sim_tools(ui, strings, self.sim_tool, has_event) {
+                    let clocks = self.clock_sources(strings);
+                    let chosen = self.clock_source(strings);
+                    match toolbar::show_sim_tools(
+                        ui,
+                        strings,
+                        self.sim_tool,
+                        has_event,
+                        &clocks,
+                        chosen,
+                    ) {
                         Some(toolbar::SimAction::Tool(tool)) => self.sim_tool = tool,
                         Some(toolbar::SimAction::StepTick) => self.step(1),
                         Some(toolbar::SimAction::StepEvent) => self.step_to_next_event(),
+                        Some(toolbar::SimAction::StepEdge) => self.step_clock_edge(strings),
+                        Some(toolbar::SimAction::PickClock(at)) => {
+                            self.clock_source_index = Some(at)
+                        }
                         None => {}
                     }
                 }

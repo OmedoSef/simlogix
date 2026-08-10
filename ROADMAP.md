@@ -29,7 +29,7 @@ better at the thing it's for.
 
 ## Next
 
-- [ ] 🚧 **Single-stepping and simulation speed**
+- [x] **Single-stepping and simulation speed**
 
   Time advances continuously at sixty ticks a second, and a clock beats once
   a second. There is no way to advance one tick and look at the result.
@@ -52,7 +52,7 @@ better at the thing it's for.
   - [x] **Run to the next event.** Between two clock edges there are 59 ticks
     where nothing happens, and crossing them one at a time is tedious. The
     event queue already knows when the next one falls; it needs an accessor.
-  - [ ] **Step one clock edge**, with an explicit **source selector** — see
+  - [x] **Step one clock edge**, with an explicit **source selector** — see
     below.
   - [x] **A speed multiplier** on the tick budget (¼×, 1×, 4×). The natural
     companion: slowing down before freezing.

@@ -87,6 +87,11 @@ pub enum SimAction {
     StepTick,
     /// Advance straight to the next tick where something is scheduled.
     StepEvent,
+    /// Advance to the next edge of the chosen clock source.
+    StepEdge,
+    /// Act on a different clock source from now on, by its position in the
+    /// circuit.
+    PickClock(usize),
 }
 
 /// Draws the inspection tools and one-shots. Returns what was clicked.
@@ -99,6 +104,8 @@ pub fn show_sim_tools(
     strings: &Strings,
     active: SimTool,
     has_event: bool,
+    clocks: &[(usize, String)],
+    chosen: Option<usize>,
 ) -> Option<SimAction> {
     let mut clicked = None;
     for (tool, label) in [
@@ -123,6 +130,33 @@ pub fn show_sim_tools(
             clicked = Some(SimAction::StepEvent);
         }
     });
+    ui.add_enabled_ui(!clocks.is_empty(), |ui| {
+        if icon_button(ui, strings.tool_step_edge, false, symbol::draw_edge_tool) {
+            clicked = Some(SimAction::StepEdge);
+        }
+    });
+    // Only worth asking when there is a choice: with one source it settles
+    // itself, and a picker with a single entry is a control that can only
+    // ever say what it already says.
+    if clocks.len() > 1 {
+        let current = chosen.unwrap_or(clocks[0].0);
+        let label = clocks
+            .iter()
+            .find(|(at, _)| *at == current)
+            .map(|(_, name)| name.as_str())
+            .unwrap_or_default();
+        egui::ComboBox::from_id_salt("clock_source")
+            .selected_text(label)
+            .show_ui(ui, |ui| {
+                for (at, name) in clocks {
+                    if ui.selectable_label(*at == current, name).clicked() {
+                        clicked = Some(SimAction::PickClock(*at));
+                    }
+                }
+            })
+            .response
+            .on_hover_text(strings.tool_clock_source);
+    }
     clicked
 }
 

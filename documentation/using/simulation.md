@@ -62,6 +62,31 @@ crossing those one at a time tells you nothing. It is greyed out when
 nothing is pending — a settled circuit with no clock in it will never move
 again on its own.
 
+## Stepping one clock edge
+
+**Simulation → Step one clock edge**, `Ctrl+F10`, or the ⎍| button, moves
+time on until the clock changes level — high to low, or low to high. That
+is usually what "the next state" means for anything sequential, and it
+saves counting ticks.
+
+The edge is read **off the wire** rather than worked out from the clock's
+period: what ends up on the net is what the rest of the circuit sees, and a
+clock feeding something through a gate would make the period a lie.
+
+**Which clock** it acts on is yours to say. The picker beside the button
+lists every `Clock` in the circuit **and every input or bidirectional
+port** — because a circuit drawn to be used inside another has its clock
+arriving on a port, and a flip-flop tested on its own has no `Clock` in it
+at all. With only one source the picker doesn't appear, since there is
+nothing to ask.
+
+On a port there is nothing to advance *to* — you are its clock — so a step
+flips it, high to low and back. Undriven is a third position of that
+switch, not part of a cycle. This costs nothing and leaves no undo step: a
+port's current level is runtime state, like a button press, and only its
+*resting* level is saved. A switch is deliberately not offered as a source
+for the opposite reason — its position **is** part of the document.
+
 One thing to know: [unstable circuits](#unstable-circuits) are detected
 within a single run, by counting how often a net changes. Stepping a tick at
 a time never reaches that count, so it will not stop you — which is the

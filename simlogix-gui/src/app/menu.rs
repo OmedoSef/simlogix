@@ -39,6 +39,9 @@ pub(super) struct Shortcuts {
     /// Shift alongside it, the way *step over* and *step into* sit together
     /// in a debugger: the same gesture, one going further.
     pub step_event: egui::KeyboardShortcut,
+    /// The longest of the three, on the same key: one tick, one event, one
+    /// clock edge.
+    pub step_edge: egui::KeyboardShortcut,
 }
 
 impl Shortcuts {
@@ -59,6 +62,7 @@ impl Shortcuts {
             paste: command(egui::Key::V),
             step: egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F10),
             step_event: egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::F10),
+            step_edge: command(egui::Key::F10),
         }
     }
 }
@@ -191,6 +195,19 @@ impl SimLogixApp {
                         .clicked()
                     {
                         self.step_to_next_event();
+                        ui.close();
+                    }
+                    let strings = Strings::for_language(self.language);
+                    let clocks = self.clock_sources(strings);
+                    if ui
+                        .add_enabled(
+                            !clocks.is_empty(),
+                            egui::Button::new(strings.menu_simulation_step_edge)
+                                .shortcut_text(ui.ctx().format_shortcut(&keys.step_edge)),
+                        )
+                        .clicked()
+                    {
+                        self.step_clock_edge(strings);
                         ui.close();
                     }
                     ui.separator();

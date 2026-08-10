@@ -191,6 +191,61 @@ fn the_speed_multiplier_moves_logical_time_against_the_frames() {
     );
 }
 
+#[test]
+fn a_clock_step_lands_on_an_edge_of_the_clock() {
+    let mut harness = harness();
+    let clock = harness
+        .state_mut()
+        .place(ComponentKind::Clock, egui::pos2(200.0, 200.0));
+    step(&mut harness);
+
+    let level = |harness: &Harness<'_, SimLogixApp>| {
+        let app = harness.state();
+        app.circuit.signal_at(app.circuit.pins(clock)[0].net)
+    };
+
+    press(&mut harness, egui::Key::F10);
+    step(&mut harness);
+    let before = level(&harness);
+
+    // One press, however many ticks that turns out to be — which is the
+    // point, since the answer depends on where the pause landed.
+    press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
+    step(&mut harness);
+    assert_ne!(level(&harness), before, "a clock step must reach an edge");
+}
+
+#[test]
+fn a_clock_step_drives_a_port_when_that_is_where_the_clock_comes_from() {
+    // A circuit drawn to sit inside another has its clock arriving on a
+    // port, so there is no `Clock` to advance to — you are its clock.
+    let mut harness = harness();
+    let port = harness
+        .state_mut()
+        .place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
+    step(&mut harness);
+
+    let level = |harness: &Harness<'_, SimLogixApp>| {
+        let app = harness.state();
+        app.circuit.signal_at(app.circuit.pins(port)[0].net)
+    };
+
+    press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
+    step(&mut harness);
+    let first = level(&harness);
+    assert_eq!(
+        first,
+        Signal::High,
+        "an undriven port starts the cycle high"
+    );
+
+    // And back, because a cycle is two levels: undriven is a third position
+    // of the switch, not part of one.
+    press_with(&mut harness, egui::Key::F10, egui::Modifiers::COMMAND);
+    step(&mut harness);
+    assert_eq!(level(&harness), Signal::Low);
+}
+
 fn press_with(harness: &mut Harness<'_, SimLogixApp>, key: egui::Key, modifiers: egui::Modifiers) {
     harness.input_mut().events.push(egui::Event::Key {
         key,

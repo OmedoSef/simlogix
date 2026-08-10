@@ -747,6 +747,33 @@ pub fn draw_skip_tool(painter: &Painter, rect: Rect, color: Color32) {
     );
 }
 
+/// One clock edge: a square wave with the step ahead of it marked.
+pub fn draw_edge_tool(painter: &Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let c = rect.center();
+    let reach = rect.width() * 0.3;
+
+    // Low, up, high, down, low — one whole beat, so the edge is the shape.
+    painter.line(
+        vec![
+            pos2(c.x - reach, c.y + reach * 0.6),
+            pos2(c.x - reach * 0.45, c.y + reach * 0.6),
+            pos2(c.x - reach * 0.45, c.y - reach * 0.6),
+            pos2(c.x + reach * 0.2, c.y - reach * 0.6),
+            pos2(c.x + reach * 0.2, c.y + reach * 0.6),
+            pos2(c.x + reach * 0.6, c.y + reach * 0.6),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(c.x + reach * 0.9, c.y - reach),
+            pos2(c.x + reach * 0.9, c.y + reach),
+        ],
+        stroke,
+    );
+}
+
 pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.6, color);
     let c = rect.center();
