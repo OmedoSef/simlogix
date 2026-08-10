@@ -84,6 +84,21 @@ better at the thing it's for.
   would change the file format and the undo model, and nothing yet calls for
   it.
 
+## Components to add
+
+A running list, kept here so nothing gets lost between sessions.
+
+**All of these are primitives** — settled, so it isn't reopened per entry.
+Romain draws these circuits himself from gates, so the drawn form already
+exists and doesn't need shipping; what a built-in adds over it is evaluating
+in one step instead of rippling through a carry chain. Reusing a drawn one
+across projects is a different need with a different answer:
+[importing a circuit from another project](#next), which is worked on when
+that is what's wanted.
+
+- [ ] Half adder
+- [ ] Adder
+
 ## Internal
 
 Not user-visible, but they decide how expensive everything above is.
