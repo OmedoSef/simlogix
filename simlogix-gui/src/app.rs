@@ -2149,6 +2149,40 @@ impl SimLogixApp {
         }
     }
 
+    /// A small readout beside the pointer while a bus is hovered: how many
+    /// bits, and what it carries.
+    ///
+    /// An `Area` at the pointer rather than a tooltip, because a wire is
+    /// *painted* and has no widget for egui to hang one on — and in screen
+    /// space rather than in the scene, so it neither scales nor blurs with
+    /// the zoom.
+    ///
+    /// The value is left out while the signal state is hidden: that mode
+    /// exists to stop levels changing under you, and a readout that went on
+    /// reporting them would be arguing with it.
+    fn show_bus_hint(&self, ui: &egui::Ui, strings: &Strings, width: usize, net: Option<NetId>) {
+        let Some(at) = ui.ctx().pointer_latest_pos() else {
+            return;
+        };
+        let mut text = strings.inspector_bits.replace("{}", &width.to_string());
+        if self.show_signal_state {
+            if let Some(net) = net {
+                text.push_str(" · ");
+                text.push_str(&crate::placed_component::signal_text(
+                    &self.circuit.signal_at(net),
+                ));
+            }
+        }
+        egui::Area::new(egui::Id::new("bus_hover"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(at + egui::vec2(16.0, 16.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.label(text);
+                });
+            });
+    }
+
     /// Snapshots the document so the edit about to happen can be undone.
     /// **Call this before mutating**, not after — it records the state being
     /// left behind. For a drag, that means calling it the frame the drag

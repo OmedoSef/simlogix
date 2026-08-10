@@ -32,7 +32,7 @@
 //! function belongs beside that function, where it is cheaper to run and
 //! easier to read; repeating it here would only mean two places to change it.
 
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{self, Queryable};
 use egui_kittest::Harness;
 
 use simlogix_core::{ComponentId, Level};
@@ -315,6 +315,58 @@ fn the_inspector_opens_and_names_what_is_driving_a_net() {
     press(&mut harness, egui::Key::F12);
     step(&mut harness);
     assert!(!harness.state().show_inspector, "and closes it again");
+}
+
+#[test]
+fn hovering_a_bus_says_how_wide_it_is_and_a_plain_wire_says_nothing() {
+    let mut harness = harness();
+    let (from, to) = (egui::pos2(0.0, 0.0), egui::pos2(200.0, 0.0));
+    let source = harness.state_mut().place(ComponentKind::InputPort, from);
+    let sink = harness.state_mut().place(ComponentKind::OutputPort, to);
+    harness.state_mut().add_wire(
+        WireEndpoint::Pin(source, 0),
+        WireEndpoint::Pin(sink, 0),
+        Vec::new(),
+    );
+    harness.state_mut().rebuild_nets();
+    step(&mut harness);
+
+    let strings = crate::i18n::Strings::for_language(harness.state().language);
+    let one_bit = strings.inspector_bits.replace("{}", "1");
+    let four_bits = strings.inspector_bits.replace("{}", "4");
+
+    // Over the middle of the wire, which is one bit wide.
+    move_to(&mut harness, from, egui::pos2(100.0, 0.0));
+    step(&mut harness);
+    assert!(
+        harness
+            .query_all(kittest::By::new().label_contains(&one_bit))
+            .next()
+            .is_none(),
+        "a plain wire's width is the default; saying it over every wire is noise"
+    );
+
+    for id in [source, sink] {
+        let app = harness.state_mut();
+        let placed = app
+            .placed
+            .iter_mut()
+            .find(|placed| placed.id() == id)
+            .expect("just placed");
+        let mut properties = placed.properties().clone();
+        properties.width = Some(4);
+        placed.set_properties(properties);
+    }
+    harness.state_mut().rebuild_nets();
+    move_to(&mut harness, from, egui::pos2(100.0, 0.0));
+    step(&mut harness);
+    assert!(
+        harness
+            .query_all(kittest::By::new().label_contains(&four_bits))
+            .next()
+            .is_some(),
+        "a bus should say how wide it is without being selected"
+    );
 }
 
 #[test]

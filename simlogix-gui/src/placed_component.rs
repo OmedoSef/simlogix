@@ -1164,7 +1164,7 @@ impl PlacedComponent {
 /// is `Z`. Only once every bit is a definite level is there a *value* to
 /// show, and then it is shown in hex, least significant bit first being
 /// what `Signal` already promises.
-fn signal_text(signal: &Signal) -> String {
+pub fn signal_text(signal: &Signal) -> String {
     if signal.width() == 1 {
         return signal_letter(signal.only_level()).to_string();
     }

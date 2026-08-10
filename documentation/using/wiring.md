@@ -80,6 +80,29 @@ between the same two components and cut one: they stay connected, because
 the other one plainly still joins them. There's nothing to remember or
 undo — the drawing is re-read, and it still says the same thing.
 
+## Buses
+
+A wire carrying more than one bit is **drawn thicker**. The thickness isn't
+proportional to the width — what matters at a glance is one bit against
+several, and a 32-bit wire as thick as a component would be a schematic
+nobody can read.
+
+To know *how many*, **hover it**: a bus says its width beside the pointer,
+and, while signal state is showing, its value with it. Hovering already
+lights the whole net, so the answer is the net's width, not the segment's.
+A one-bit wire says nothing — that's the default of every wire in the
+drawing, and repeating it everywhere would be noise rather than
+information.
+
+Selecting a wire says the same thing in the properties panel, which is
+where you go when you also want to give it a colour.
+
+A wire has no width of its own: it takes it from what it joins. Set the
+width on the components — see [**Bits**](editor-basics.md#component-properties) in the
+properties panel — and the wires between them follow. When two pins
+disagree, the wider one wins and the other is flagged: see
+[when two widths meet](simulation.md#when-two-widths-meet).
+
 ## Telling wires apart
 
 Two problems make a crossing hard to read: every wire at the same logic

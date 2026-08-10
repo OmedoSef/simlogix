@@ -335,6 +335,7 @@ impl SimLogixApp {
                         }
                     }
 
+                    let mut bus_hint_shown = false;
                     let mut resolved = self.resolve_routes(&pin_handles);
 
                     // Where every wire's points ended up this frame, kept past
@@ -460,6 +461,23 @@ impl SimLogixApp {
                             };
                         if is_hovered {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            // How wide it is, without having to select it.
+                            // Only for a bus: a plain wire's width is the
+                            // default, and saying "1 bit" over every wire on
+                            // the schematic is noise rather than an answer.
+                            //
+                            // Once per frame, since hovering lights the whole
+                            // net and several wires may be part of it.
+                            let width = net.map_or(1, |net| self.circuit.net_width(net));
+                            if width > 1 && !bus_hint_shown {
+                                bus_hint_shown = true;
+                                self.show_bus_hint(
+                                    ui,
+                                    crate::i18n::Strings::for_language(self.language),
+                                    width,
+                                    net,
+                                );
+                            }
                         }
 
                         let is_selected_wire = self.selection.wires.contains(&wire_id);

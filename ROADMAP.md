@@ -141,11 +141,13 @@ better at the thing it's for.
     decimal — because eight letters in a row is not a reading. Its *width*
     stays derived from its net: that is a fact it can already look up, and a
     probe told the wrong number would quietly show something false.
-  - [ ] 🚧 **Seeing a bus.** **Drawn thicker**, and a selected wire says how
+  - [x] **Seeing a bus.** **Drawn thicker**, and a selected wire says how
     many bits it carries. Not proportional to the width — what matters is
     one bit against several, and a 32-bit wire as thick as a component is a
-    schematic nobody can read. Still missing: the width readable *without*
-    selecting, which probably means on hover.
+    schematic nobody can read. And **readable on hover**, without selecting:
+    hovering already lights the whole net, so the hint says the net's width
+    once rather than the segment's. A one-bit wire says nothing — the
+    default over every wire in the drawing would be noise, not information.
 
   **Bit 0 is the least significant**, fixed once and written down, because
   the splitter has to say which bits go where and that convention is
