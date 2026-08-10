@@ -8,7 +8,7 @@ use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
 use simlogix_core::{Circuit, ComponentId, Level, NetId, PortDrive, PortHandles, Signal};
 
 use crate::appearance::Appearance;
-use crate::canvas::{self, Rotation, BOX_SIZE};
+use crate::canvas::{self, Rotation, BOX_SIZE, GRID_SPACING};
 use crate::palette::ComponentKind;
 use crate::properties::{Properties, DEFAULT_LED_COLOR};
 use crate::symbol::{self, SymbolState};
@@ -52,6 +52,23 @@ pub struct InstancePort {
     /// list of pins to link to, because a net joining two ports and nothing
     /// else has no pins to offer — and that is exactly a pass-through.
     pub group: Option<usize>,
+}
+
+/// A splitter's box: one grid row per branch, never shorter than an ordinary
+/// component.
+///
+/// A free function because both the hit area and the drawing need it, and
+/// the draw arm has `self` destructured. One definition rather than two —
+/// which is the whole lesson of the rotated component that could not be
+/// clicked: the box and the drawing agreed until they didn't.
+fn splitter_rect(center: Pos2, rotation: Rotation, properties: &Properties) -> Rect {
+    let rows = properties.branch_widths().len().max(1) as f32;
+    let height = (GRID_SPACING * (rows + 1.0)).max(BOX_SIZE.y);
+    symbol::rotate_rect(
+        Rect::from_center_size(center, egui::vec2(BOX_SIZE.x, height)),
+        center,
+        rotation,
+    )
 }
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
@@ -188,6 +205,11 @@ enum Shape {
     Constant {
         handles: PortHandles,
     },
+    /// A bus at pin 0 and one branch per pin after it. How many there are
+    /// comes from the properties, so the box grows with them — which is
+    /// also why changing that has to go through the document: a built
+    /// component's pins are fixed.
+    Splitter,
     /// Two `InOut` bus sides at pin indices 0/1 (`A`, `B`) and two control
     /// inputs at 2/3 (`Dir`, `Enable`) — the only component whose pins both
     /// read and drive.
@@ -335,6 +357,18 @@ impl PlacedComponent {
             // reports exactly what it always did.
             return appearance.rect(self.center, self.rotation);
         }
+        if matches!(self.shape, Shape::Splitter) {
+            // One grid row per branch, and never shorter than a box: the
+            // pins are laid out on that step, so the extent has to follow
+            // however many there are.
+            let rows = self.properties.branch_widths().len().max(1) as f32;
+            let height = (GRID_SPACING * (rows + 1.0)).max(BOX_SIZE.y);
+            return symbol::rotate_rect(
+                Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, height)),
+                self.center,
+                self.rotation,
+            );
+        }
         // Turned too, and for the same reason: the box is not square, so a
         // component on its side occupies the other way round. This one still
         // covered its own centre, so it was a mis-shaped hit area rather than
@@ -345,6 +379,10 @@ impl PlacedComponent {
             self.center,
             self.rotation,
         )
+    }
+
+    pub fn splitter(id: ComponentId, center: Pos2) -> Self {
+        Self::new(id, center, Shape::Splitter)
     }
 
     pub fn bus_transceiver(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
@@ -413,6 +451,17 @@ impl PlacedComponent {
                     1
                 }
             }
+            // Pin 0 is the bus, as wide as it says; each branch after it
+            // carries its own share.
+            Shape::Splitter => match index.checked_sub(1) {
+                None => declared,
+                Some(branch) => self
+                    .properties
+                    .branch_widths()
+                    .get(branch)
+                    .copied()
+                    .unwrap_or(1),
+            },
             _ if Properties::has_width(&self.kind()) => declared,
             _ => 1,
         }
@@ -472,6 +521,7 @@ impl PlacedComponent {
             Shape::Led => ComponentKind::Led,
             Shape::HandSet { kind, .. } => kind.clone(),
             Shape::Constant { .. } => ComponentKind::Constant,
+            Shape::Splitter => ComponentKind::Splitter,
             Shape::Instance { path, .. } => ComponentKind::Circuit(path.clone()),
             Shape::Transistor(kind)
             | Shape::BusTransceiver(kind)
@@ -1081,6 +1131,46 @@ impl PlacedComponent {
                     toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
+                }
+            }
+            Shape::Splitter => {
+                let rect = splitter_rect(*center, *rotation, properties);
+                let branches = properties.branch_widths();
+                let pin_positions = symbol::draw(
+                    painter,
+                    &kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState {
+                        branches: &branches,
+                        ..Default::default()
+                    },
+                    &text_layer,
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
+                let nets: Vec<NetId> = circuit.pins(id).iter().map(|pin| pin.net).collect();
+                let mut pins = Vec::with_capacity(nets.len());
+                let positions = pin_positions
+                    .inputs
+                    .iter()
+                    .chain(pin_positions.outputs.iter());
+                for (index, (position, net)) in positions.zip(nets).enumerate() {
+                    pins.push(pin_handle(ui, painter, id, index, *position, net, movable));
+                }
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins,
                 }
             }
             Shape::Probe => {

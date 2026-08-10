@@ -66,6 +66,13 @@ pub struct Properties {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<usize>,
 
+    /// A `Splitter`'s branch widths, from bit 0 upward.
+    ///
+    /// Unset means one branch per bit, which is the plain meaning of
+    /// splitting a bus and what a fresh one should do without being told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branches: Option<Vec<usize>>,
+
     /// What a `Constant` puts on its wire. Unset means zero.
     ///
     /// A *setting*, unlike the value a port is driving right now: it is
@@ -104,6 +111,20 @@ impl Properties {
         self.value.unwrap_or(0) & all_ones(self.width())
     }
 
+    /// A splitter's branch widths, from bit 0 upward — one branch per bit
+    /// unless it says otherwise.
+    ///
+    /// Never empty: a splitter with no branches is a component with one pin,
+    /// which is a wire that took a tick.
+    pub fn branch_widths(&self) -> Vec<usize> {
+        match &self.branches {
+            Some(branches) if !branches.is_empty() => {
+                branches.iter().map(|width| (*width).max(1)).collect()
+            }
+            _ => vec![1; self.width()],
+        }
+    }
+
     /// Whether this kind can be told how wide its pins are.
     ///
     /// The ports, because a boundary has to declare what it carries, and the
@@ -139,6 +160,9 @@ impl Properties {
                 | ComponentKind::TriStateBuffer
                 | ComponentKind::BusTransceiver
                 | ComponentKind::BusTransceiverOe
+                // Its bus pin. Its branches carry their own widths, which
+                // are the other half of the same setting.
+                | ComponentKind::Splitter
         )
     }
 
@@ -826,6 +850,57 @@ pub fn show(
                 }
             }
         }
+        ComponentKind::Splitter => {
+            ui.add_space(8.0);
+            ui.label(strings.property_branches);
+            ui.label(RichText::new(strings.property_branches_hint).weak());
+
+            let mut widths = properties.branch_widths();
+            let mut count = widths.len();
+            let response = ui.add(egui::DragValue::new(&mut count).range(1..=MAX_WIDTH));
+            if response.drag_started() || response.gained_focus() {
+                edit_started = true;
+            }
+            if response.changed() {
+                // A branch that appears carries one bit; one that goes takes
+                // its own with it. Neither renumbers the others, so adding a
+                // branch at the end never moves the bits already assigned.
+                widths.resize(count.max(1), 1);
+                properties.branches = Some(widths.clone());
+            }
+
+            let mut bit = 0;
+            let mut edited = false;
+            for width in &mut widths {
+                ui.horizontal(|ui| {
+                    ui.label(crate::symbol::bit_range(bit, *width));
+                    let response = ui.add(egui::DragValue::new(width).range(1..=MAX_WIDTH));
+                    if response.drag_started() || response.gained_focus() {
+                        edit_started = true;
+                    }
+                    edited |= response.changed();
+                });
+                bit += *width;
+            }
+            if edited {
+                properties.branches = Some(widths);
+            }
+
+            // What the branches add up to, against what the bus carries.
+            // Said rather than enforced: a drawing may legitimately leave
+            // the top bits unbranched, and one that overshoots is a mistake
+            // worth seeing rather than one to be silently corrected.
+            let total = strings
+                .property_branches_total
+                .replace("{}", &bit.to_string())
+                .replace("{bus}", &properties.width().to_string());
+            let color = if bit == properties.width() {
+                ui.visuals().weak_text_color()
+            } else {
+                ui.visuals().warn_fg_color
+            };
+            ui.label(RichText::new(total).color(color));
+        }
         ComponentKind::Constant => {
             ui.add_space(8.0);
             ui.label(strings.property_value);
@@ -1007,6 +1082,7 @@ mod tests {
             tri_state: Some(true),
             initial: Some(PortSetting::High),
             width: Some(8),
+            branches: Some(vec![4, 4]),
             value: Some(0xAB),
         };
 
@@ -1020,7 +1096,7 @@ mod tests {
         // asserting: `PortLevel` became `PortSetting` on the strength of it.
         assert_eq!(
             json,
-            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"value":171}"#
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"branches":[4,4],"value":171}"#
         );
     }
 

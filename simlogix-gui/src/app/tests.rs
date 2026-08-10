@@ -1791,3 +1791,81 @@ fn an_instances_pins_are_as_wide_as_the_ports_they_stand_for() {
         app.width_faults
     );
 }
+
+/// A 4-bit splitter with two 2-bit branches, and the widths that follow.
+fn wide_splitter() -> (SimLogixApp, ComponentId) {
+    let mut app = SimLogixApp::default();
+    let splitter = app.place(ComponentKind::Splitter, egui::pos2(200.0, 200.0));
+    let properties = Properties {
+        width: Some(4),
+        branches: Some(vec![2, 2]),
+        ..Default::default()
+    };
+    app.set_component_properties(splitter, properties);
+    (app, splitter)
+}
+
+#[test]
+fn a_splitter_grows_a_pin_per_branch_and_each_carries_its_own_width() {
+    let (mut app, _) = wide_splitter();
+    app.rebuild_nets();
+
+    // The id was handed out afresh by the rebuild the property change
+    // forced, so it is found by kind rather than kept.
+    let splitter = app.placed[0].id();
+    let pins = app.circuit.pins(splitter).to_vec();
+    assert_eq!(pins.len(), 3, "a bus and two branches");
+    assert_eq!(app.circuit.net_width(pins[0].net), 4, "the bus");
+    assert_eq!(app.circuit.net_width(pins[1].net), 2, "the low branch");
+    assert_eq!(app.circuit.net_width(pins[2].net), 2, "the high branch");
+    assert!(
+        app.width_faults.is_empty(),
+        "a splitter's own pins never disagree with their nets: {:?}",
+        app.width_faults
+    );
+}
+
+#[test]
+fn a_value_driven_onto_a_splitters_bus_comes_out_on_its_branches() {
+    let (mut app, _) = wide_splitter();
+    let source = app.place(ComponentKind::Constant, egui::pos2(40.0, 200.0));
+    app.set_component_properties(
+        source,
+        Properties {
+            width: Some(4),
+            value: Some(0b1001),
+            ..Default::default()
+        },
+    );
+    let splitter = app
+        .placed
+        .iter()
+        .find(|placed| placed.kind() == ComponentKind::Splitter)
+        .expect("still there")
+        .id();
+    let source = app
+        .placed
+        .iter()
+        .find(|placed| placed.kind() == ComponentKind::Constant)
+        .expect("still there")
+        .id();
+    app.add_wire(
+        WireEndpoint::Pin(source, 0),
+        WireEndpoint::Pin(splitter, 0),
+        Vec::new(),
+    );
+    app.rebuild_nets();
+    app.advance_circuit(SETTLE_TICKS);
+
+    let pins = app.circuit.pins(splitter).to_vec();
+    assert_eq!(
+        app.circuit.signal_at(pins[1].net).levels(),
+        [Level::High, Level::Low],
+        "bits 0-1 of 0b1001"
+    );
+    assert_eq!(
+        app.circuit.signal_at(pins[2].net).levels(),
+        [Level::Low, Level::High],
+        "bits 2-3"
+    );
+}

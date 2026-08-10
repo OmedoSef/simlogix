@@ -12,7 +12,7 @@
 
 use egui::{pos2, Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke};
 
-use crate::canvas::Rotation;
+use crate::canvas::{Rotation, GRID_SPACING};
 use crate::palette::ComponentKind;
 use simlogix_core::PortDrive;
 
@@ -138,6 +138,10 @@ pub struct SymbolState<'a> {
     /// what the *net* settled on, which is a different question — the whole
     /// point of the component is to let go and watch something else answer.
     pub level: Option<PortDrive>,
+    /// `Splitter`: the width of each branch, from bit 0 upward. Empty in the
+    /// palette and under the pointer, where there is no component yet — the
+    /// symbol then draws a representative two-branch shape.
+    pub branches: &'a [usize],
 }
 
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
@@ -202,6 +206,9 @@ pub fn draw(
         }
         ComponentKind::Constant => {
             draw_constant(painter, rect, rotation, stroke, color, state, text_layer)
+        }
+        ComponentKind::Splitter => {
+            draw_splitter(painter, rect, rotation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke, text_layer),
         // A circuit instance draws its own generated box, not a fixed symbol.
@@ -478,6 +485,92 @@ fn draw_constant(
     PinPositions {
         inputs: vec![],
         outputs: vec![r(pin)],
+    }
+}
+
+/// A splitter: the bus on the left, a spine, and one lead per branch on the
+/// right, each labelled with the bits it carries.
+///
+/// **Labelled, by the rule the SR latch and the transceiver already follow**:
+/// text belongs on a symbol exactly when its pins are not interchangeable
+/// and its shape does not say which is which. Nothing about a branch's
+/// position says it carries bits 4 to 7 — and getting that wrong is a bug
+/// you would go looking for in the logic.
+///
+/// The spine is drawn thick, because what it stands for is the bus itself.
+fn draw_splitter(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    color: Color32,
+    state: SymbolState<'_>,
+    text_layer: &TextLayer,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+    // With no component behind it — the palette, the placement ghost — a
+    // representative two-branch shape, the same idea as `preview_label`.
+    let widths: Vec<usize> = if state.branches.is_empty() {
+        vec![1, 1]
+    } else {
+        state.branches.to_vec()
+    };
+
+    let bus = pos2(rect.left(), c.y);
+    let spine_x = c.x - rect.width() * 0.12;
+    let branch_x = rect.right();
+
+    // One branch per grid row, centred on the box: the rect was sized for
+    // exactly this many, so they land on grid dots.
+    let step = GRID_SPACING;
+    let top = c.y - step * (widths.len() as f32 - 1.0) / 2.0;
+    let branch_y = |index: usize| top + step * index as f32;
+
+    let spine = Stroke::new(stroke.width * 2.0, stroke.color);
+    painter.line_segment([r(bus), r(pos2(spine_x, c.y))], spine);
+    painter.line_segment(
+        [
+            r(pos2(spine_x, branch_y(0).min(c.y))),
+            r(pos2(spine_x, branch_y(widths.len() - 1).max(c.y))),
+        ],
+        spine,
+    );
+
+    let mut outputs = Vec::with_capacity(widths.len());
+    let mut bit = 0;
+    for (index, width) in widths.iter().enumerate() {
+        let y = branch_y(index);
+        let pin = pos2(branch_x, y);
+        painter.line_segment([r(pos2(spine_x, y)), r(pin)], stroke);
+        text_layer.text(
+            r(pos2(spine_x + 6.0, y - 7.0)),
+            Align2::LEFT_CENTER,
+            &bit_range(bit, *width),
+            10.0,
+            color,
+        );
+        bit += width;
+        draw_pin(painter, r(pin), color);
+        outputs.push(r(pin));
+    }
+
+    draw_pin(painter, r(bus), color);
+    PinPositions {
+        inputs: vec![r(bus)],
+        outputs,
+    }
+}
+
+/// How a branch says which bits it carries: `3` for one, `4-7` for several.
+///
+/// Shared with the properties panel, which names the same branches — two
+/// spellings of the same range is one that eventually disagrees.
+pub fn bit_range(from: usize, width: usize) -> String {
+    if width <= 1 {
+        from.to_string()
+    } else {
+        format!("{}-{}", from, from + width - 1)
     }
 }
 

@@ -510,10 +510,19 @@ impl Circuit {
     ) -> Result<(), UnstableCircuit> {
         let pins = self.components[&component].pins.clone();
 
+        let hears_itself = self.components[&component]
+            .component
+            .reads_own_contribution();
         let inputs: Vec<Signal> = pins
             .iter()
             .filter(|pin| pin.direction != PinDirection::Output)
-            .map(|pin| self.signal_at(pin.net))
+            .map(|pin| {
+                if hears_itself {
+                    self.signal_at(pin.net)
+                } else {
+                    self.signal_excluding(component, pin.net)
+                }
+            })
             .collect();
 
         let outputs = self.components[&component].component.eval(&inputs);
@@ -618,7 +627,14 @@ impl Circuit {
     /// mismatched net visible on the wire rather than quietly padded or
     /// truncated.
     fn resolve(width: usize, drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
-        let ragged = drivers.values().any(|signal| signal.width() != width);
+        Self::resolve_from(width, drivers.values())
+    }
+
+    /// [`Circuit::resolve`] over any set of contributions, so a caller can
+    /// leave some out — which is what a relay needs (see
+    /// [`Component::reads_own_contribution`]).
+    fn resolve_from<'a>(width: usize, drivers: impl Iterator<Item = &'a Signal> + Clone) -> Signal {
+        let ragged = drivers.clone().any(|signal| signal.width() != width);
         Signal::from_levels(
             (0..width)
                 .map(|bit| {
@@ -627,12 +643,32 @@ impl Circuit {
                     }
                     Self::resolve_bit(
                         drivers
-                            .values()
+                            .clone()
                             .filter_map(|signal| signal.levels().get(bit).copied()),
                     )
                 })
                 .collect(),
         )
+    }
+
+    /// What `net` carries as far as `component` is concerned: everything on
+    /// it *except* what that component is putting there itself.
+    ///
+    /// Only for a component that says it does not hear itself. The net's own
+    /// value is untouched — every other reader still sees the full picture,
+    /// including this component's contribution.
+    fn signal_excluding(&self, component: ComponentId, net: NetId) -> Signal {
+        let width = self.net_width(net);
+        match self.drivers.get(&net) {
+            Some(drivers) => Self::resolve_from(
+                width,
+                drivers
+                    .iter()
+                    .filter(move |((driver, _), _)| *driver != component)
+                    .map(|(_, signal)| signal),
+            ),
+            None => Signal::splat(Level::Unknown, width),
+        }
     }
 
     /// One bit of [`Circuit::resolve`], which is the rule that has been here

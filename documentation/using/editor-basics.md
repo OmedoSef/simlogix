@@ -44,7 +44,7 @@ The palette is grouped into **Interface** (Input, Output, Bidirectional),
 **Sources** (Button, Switch, Tri-state source, Constant, Clock, GND, PWR),
 **Outputs** (LED, Probe), **Transistors** (NMOS, PMOS), **Gates** (AND, OR,
 NAND, NOR, XOR, XNOR, NOT, Buffer, Tri-state buffer), **Memory** (SR latch)
-and **Buses** (the two transceivers). Each category folds away, and the
+and **Buses** (Splitter, the two transceivers). Each category folds away, and the
 panel edge can be dragged to resize it.
 
 The circuit tree above it is a palette too — of your own circuits. See
@@ -160,6 +160,7 @@ project file.
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
 | **Bits** | the three ports, the plain gates, Constant, Tri-state buffer, the transceivers | How many bits its *data* pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
 | **Value** | Constant | What it puts on its wire. Typed in decimal, or `0x…` / `0b…`. |
+| **Branches** | Splitter | How many bits each branch takes, from bit 0 upward. |
 
 A **constant** is the one component that is nothing but its value: it puts
 a fixed number on its wire and the symbol draws that number, shown in hex

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
     Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortDrive, Probe,
-    Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    Rail, Splitter, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::appearance::Appearance;
@@ -661,6 +661,21 @@ impl SimLogixApp {
     /// `placed` at `center`. Returns its id — used both for interactive
     /// placement and to rebuild a saved project (see `project.rs`).
     fn place(&mut self, kind: ComponentKind, center: egui::Pos2) -> ComponentId {
+        self.place_with(kind, center, &Properties::default())
+    }
+
+    /// The same, told the properties the component will carry.
+    ///
+    /// Only a splitter needs them, and it needs them badly: how many pins it
+    /// has *is* one of its properties, and a built component's pins are
+    /// fixed. Everything else is built the same whatever they say, and takes
+    /// them afterwards through `set_properties`.
+    fn place_with(
+        &mut self,
+        kind: ComponentKind,
+        center: egui::Pos2,
+        properties: &Properties,
+    ) -> ComponentId {
         let placed = match kind {
             ComponentKind::Button => {
                 let net = self.circuit.add_net();
@@ -892,6 +907,26 @@ impl SimLogixApp {
                 self.circuit.schedule_now(id);
                 PlacedComponent::constant(id, center, handles)
             }
+            // Its pin count comes from its properties, so a freshly placed
+            // one is what an untouched splitter is: a one-bit bus with a
+            // single branch. Widening it adds pins, which a built component
+            // cannot do — that edit goes through the document instead, the
+            // same way changing a component's type does.
+            ComponentKind::Splitter => {
+                let branches = properties.branch_widths().len();
+                let pins = (0..=branches)
+                    .map(|_| Pin {
+                        // Nothing here says which way a value travels: it
+                        // falls out of what is connected, which is what
+                        // makes one component do the merger's job too.
+                        direction: PinDirection::InOut,
+                        net: self.circuit.add_net(),
+                    })
+                    .collect();
+                let id = self.circuit.add_component(Box::new(Splitter), pins);
+                self.circuit.schedule_now(id);
+                PlacedComponent::splitter(id, center)
+            }
             ComponentKind::InputPort
             | ComponentKind::OutputPort
             | ComponentKind::InOutPort
@@ -1025,7 +1060,11 @@ impl SimLogixApp {
     /// has an input for `rebuild_nets` to notice a change on. Three callers
     /// wrote out the same three steps and all three forgot the fourth.
     fn place_saved(&mut self, saved: &SavedComponent, offset: egui::Vec2) -> ComponentId {
-        let id = self.place(saved.kind.clone(), egui::pos2(saved.x, saved.y) + offset);
+        let id = self.place_with(
+            saved.kind.clone(),
+            egui::pos2(saved.x, saved.y) + offset,
+            &saved.properties,
+        );
         if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
             placed.set_rotation(saved.rotation);
             placed.set_properties(saved.properties.clone());
@@ -1827,6 +1866,67 @@ impl SimLogixApp {
     /// Only valid between kinds with the same pins; `properties::VARIANTS`
     /// is the list of pairs that qualify.
     fn change_kind(&mut self, id: ComponentId, kind: ComponentKind) {
+        self.edit_saved_component(id, |component| component.kind = kind);
+    }
+
+    /// Applies edited properties to one component, and makes the engine
+    /// notice.
+    ///
+    /// Its own method rather than a block inside `draw`, so what the panel
+    /// does and what a test does are the same thing — the rebuild below is
+    /// exactly the sort of wiring that stays green in a unit test while
+    /// being wrong in the application.
+    fn set_component_properties(&mut self, id: ComponentId, edited: Properties) {
+        // A splitter's pin count comes from its properties, and a built
+        // component's pins are fixed — so widening one is an edit that has
+        // to go through the document, exactly as changing a component's
+        // type does. Every id is handed out afresh by that rebuild, which
+        // is why nothing below may assume `id` still names anything.
+        let rebuild = self
+            .placed
+            .iter()
+            .find(|placed| placed.id() == id)
+            .is_some_and(|placed| {
+                placed.kind() == ComponentKind::Splitter
+                    && placed.properties().branch_widths().len() != edited.branch_widths().len()
+            });
+        if rebuild {
+            let properties = edited.clone();
+            self.edit_saved_component(id, move |component| component.properties = properties);
+            return;
+        }
+
+        let mut changed = false;
+        if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
+            if *placed.properties() != edited {
+                placed.set_properties(edited);
+                self.dirty = true;
+                changed = true;
+            }
+        }
+        // Some properties are *inputs* — a switch's position, a port's
+        // resting level, a button's rest state — so editing one changes
+        // what the component drives. `set_properties` puts the value in
+        // the cell the engine reads, but only an evaluation makes the
+        // net notice. Scheduling unconditionally is right: a component
+        // whose properties don't reach the engine re-evaluates to the
+        // same thing and nothing propagates.
+        if changed {
+            self.circuit.schedule_now(id);
+            self.advance_circuit(SETTLE_TICKS);
+        }
+    }
+
+    /// Rewrites one component in the saved document and reopens the circuit.
+    ///
+    /// For the edits a *built* component cannot take: its type, and anything
+    /// that changes how many pins it has — a splitter's branches. A
+    /// component's identity in the engine is its `ComponentId`, which every
+    /// wire endpoint refers to, so swapping it in place would mean remapping
+    /// all of them; rewriting the saved form and reopening keeps routes,
+    /// waypoints and colours exactly as they are, because wires are stored
+    /// by index.
+    fn edit_saved_component(&mut self, id: ComponentId, edit: impl FnOnce(&mut SavedComponent)) {
         let Some(index) = self.placed.iter().position(|placed| placed.id() == id) else {
             return;
         };
@@ -1839,13 +1939,13 @@ impl SimLogixApp {
         else {
             return;
         };
-        component.kind = kind;
+        edit(component);
 
         let open = self.active;
         self.reopen(&project, open);
         // Ids are handed out afresh by the rebuild, so the selection is
-        // recovered by position — otherwise changing the type would
-        // deselect the thing you're editing.
+        // recovered by position — otherwise the edit would deselect the
+        // thing you're editing.
         self.selection.clear();
         if let Some(placed) = self.placed.get(index) {
             self.selection.components.insert(placed.id());
@@ -3018,25 +3118,7 @@ impl SimLogixApp {
             if started {
                 self.record_edit();
             }
-            let mut changed = false;
-            if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
-                if *placed.properties() != edited {
-                    placed.set_properties(edited);
-                    self.dirty = true;
-                    changed = true;
-                }
-            }
-            // Some properties are *inputs* — a switch's position, a port's
-            // resting level, a button's rest state — so editing one changes
-            // what the component drives. `set_properties` puts the value in
-            // the cell the engine reads, but only an evaluation makes the
-            // net notice. Scheduling unconditionally is right: a component
-            // whose properties don't reach the engine re-evaluates to the
-            // same thing and nothing propagates.
-            if changed {
-                self.circuit.schedule_now(id);
-                self.advance_circuit(SETTLE_TICKS);
-            }
+            self.set_component_properties(id, edited);
         }
 
         // Declared after the palette and the properties panel so it spans

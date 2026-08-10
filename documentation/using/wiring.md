@@ -97,6 +97,20 @@ information.
 Selecting a wire says the same thing in the properties panel, which is
 where you go when you also want to give it a colour.
 
+To take a bus apart, use a **Splitter**: its bus pin on one side, one branch
+per group of bits on the other, each labelled with the bits it carries. Set
+**Bits** to the bus's width and **Branches** to how the bits are grouped —
+one branch per bit unless you say otherwise. It works in both directions:
+drive the bus and the branches follow, drive the branches and the bus does,
+so there is no separate merger to look for. Which happens simply falls out
+of what you connected.
+
+Two things worth knowing about it. Its branches take bits **from 0 upward**,
+in order, so the first branch carries the low bits. And a splitter is a
+component, so a value crossing one takes a tick — bits that go through a
+splitter arrive just after bits that do not, which is visible when you step
+a circuit one tick at a time.
+
 A wire has no width of its own: it takes it from what it joins. Set the
 width on the components — see [**Bits**](editor-basics.md#component-properties) in the
 properties panel — and the wires between them follow. When two pins

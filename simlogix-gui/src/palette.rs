@@ -76,6 +76,10 @@ pub enum ComponentKind {
     ///
     /// It works on a one-bit wire too, where it is simply 0 or 1.
     Constant,
+    /// A bus taken apart into narrower branches, and put back together.
+    /// Bidirectional: which way a value travels falls out of what is
+    /// connected, so there is no separate merger.
+    Splitter,
     /// An instance of another circuit in this project, by its path —
     /// `adder`, or `alu/adder` when it's filed in a folder. Deliberately
     /// *not* qualified by library: a local reference must survive the
@@ -90,7 +94,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 26] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 27] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -117,6 +121,7 @@ impl ComponentKind {
         (ComponentKind::Switch, "Switch"),
         (ComponentKind::TriStateSource, "TriStateSource"),
         (ComponentKind::Constant, "Constant"),
+        (ComponentKind::Splitter, "Splitter"),
     ];
 
     fn saved_name(&self) -> Option<&'static str> {
@@ -249,6 +254,7 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
         (
             strings.category_buses,
             &[
+                ComponentKind::Splitter,
                 ComponentKind::BusTransceiver,
                 ComponentKind::BusTransceiverOe,
             ],
