@@ -566,3 +566,34 @@ fn the_wire_tool_still_starts_a_wire_on_empty_canvas() {
 
     assert!(harness.state().wiring_from.is_some());
 }
+
+#[test]
+fn renaming_starts_with_the_name_selected() {
+    // Renaming almost always means replacing — either the name you want to
+    // change, or a generated one the tree just made up — so the first
+    // keystroke should take the place of what is there rather than being
+    // appended to it.
+    let mut harness = harness();
+    let before = harness.state().circuits[0].name.clone();
+    harness.state_mut().renaming = Some((
+        crate::circuit_tree::RenameTarget::Circuit(0),
+        before.clone(),
+    ));
+    // Two passes: the field appears, then it takes focus and the selection.
+    step(&mut harness);
+    step(&mut harness);
+
+    harness
+        .input_mut()
+        .events
+        .push(egui::Event::Text("X".to_string()));
+    step(&mut harness);
+
+    let typed = harness
+        .state()
+        .renaming
+        .as_ref()
+        .map(|(_, buffer)| buffer.clone())
+        .expect("still renaming");
+    assert_eq!(typed, "X", "typed over {before:?} rather than into it");
+}

@@ -80,6 +80,9 @@ struct View<'a> {
     folders: &'a [String],
     active: usize,
     reveal_active: bool,
+    /// The folder that has to be on screen this frame, if any — see
+    /// [`revealed_folder`].
+    reveal_folder: Option<String>,
 }
 
 /// Draws the tree. `project_name` labels the root (the project's library
@@ -91,16 +94,74 @@ struct View<'a> {
 /// changes, so adding a circuit to a list longer than the panel doesn't
 /// silently leave the new one below the fold.
 #[allow(clippy::too_many_arguments)]
-pub fn show(
-    ui: &mut Ui,
-    strings: &Strings,
-    project_name: &str,
-    folders: &[String],
+/// The folder holding whatever has to be visible right now: a name being
+/// edited, or the circuit that has just been opened. `None` when nothing is
+/// asking to be seen.
+///
+/// A collapsed folder hides its contents entirely, so the row is never drawn
+/// — which also means the scroll-into-view in [`rename_row`] has nothing to
+/// scroll to. Creating a circuit inside a collapsed folder therefore looked
+/// like the button had done nothing at all, and left you typing a name off
+/// screen. So the folders above it are opened rather than the row being
+/// asked to reveal itself from inside something shut.
+fn revealed_folder(
     circuits: &[SavedCircuit],
     active: usize,
     reveal_active: bool,
+    renaming: &Option<(RenameTarget, String)>,
+) -> Option<String> {
+    let folder_of = |index: usize| circuits.get(index).map(|circuit| circuit.folder.clone());
+    match renaming {
+        Some((RenameTarget::Circuit(index), _)) => folder_of(*index),
+        // The field replaces the folder's own header and is drawn by its
+        // *parent*, so that is what has to be open.
+        Some((RenameTarget::Folder(path), _)) => Some(match path.rsplit_once('/') {
+            Some((parent, _)) => parent.to_string(),
+            None => String::new(),
+        }),
+        Some((RenameTarget::Project, _)) => Some(String::new()),
+        None => reveal_active.then(|| folder_of(active)).flatten(),
+    }
+}
+
+/// Whether `folder` is `target` itself or an ancestor of it — i.e. whether
+/// opening it brings `target` any closer to being on screen. The empty path
+/// is the root, which holds everything.
+///
+/// Written as a whole-segment comparison rather than a bare `starts_with`:
+/// `alu` is not an ancestor of `alu2`.
+fn holds(folder: &str, target: &str) -> bool {
+    folder.is_empty() || folder == target || target.starts_with(&format!("{folder}/"))
+}
+
+/// What the tree draws: the document, and what the caller wants seen of it.
+///
+/// A struct rather than a row of parameters because there were eight of
+/// them, all of the same few types — a call site where transposing two
+/// `&[String]`s or two flags would still compile.
+pub struct Tree<'a> {
+    pub strings: &'a Strings,
+    pub project_name: &'a str,
+    pub folders: &'a [String],
+    pub circuits: &'a [SavedCircuit],
+    pub active: usize,
+    /// Bring the open circuit on screen this frame.
+    pub reveal_active: bool,
+}
+
+pub fn show(
+    ui: &mut Ui,
+    tree: Tree<'_>,
     renaming: &mut Option<(RenameTarget, String)>,
 ) -> Option<TreeAction> {
+    let Tree {
+        strings,
+        project_name,
+        folders,
+        circuits,
+        active,
+        reveal_active,
+    } = tree;
     let mut action = None;
 
     // The heading and its buttons sit *outside* the scroll area: they stay
@@ -130,6 +191,7 @@ pub fn show(
         folders,
         active,
         reveal_active,
+        reveal_folder: revealed_folder(circuits, active, reveal_active, renaming),
     };
     let root = build_tree(folders, circuits);
 
@@ -161,6 +223,7 @@ pub fn show(
                     egui::CollapsingHeader::new(egui::RichText::new(project_name).strong())
                         .id_salt("project_root")
                         .default_open(true)
+                        .open(view.reveal_folder.as_deref().and_then(open_for("")))
                         .show(ui, |ui| node_contents(ui, &view, &root, renaming));
                 if let Some(Some(inner)) = header.body_returned {
                     action = Some(inner);
@@ -174,8 +237,6 @@ pub fn show(
                         circuit: dragged.0,
                         folder: String::new(),
                     });
-                } else if response.double_clicked() {
-                    action = Some(TreeAction::BeginRename(RenameTarget::Project));
                 }
 
                 let response = response.on_hover_text(strings.project_library_hint);
@@ -295,6 +356,19 @@ fn node_contents(
 }
 
 /// One folder: a collapsing header that accepts a dropped circuit.
+/// `Some(true)` while this folder stands between the tree's root and what
+/// has to be seen, and `None` otherwise — never `Some(false)`, which would
+/// force it *shut* and take collapsing one away from the user.
+///
+/// `open` writes the state through, so a folder opened this way stays open
+/// afterwards and can be closed again. It is held open for as long as the
+/// name is being edited, which does mean it can't be collapsed while you
+/// type — collapsing the folder you are naming something inside of is not a
+/// gesture worth protecting.
+fn open_for(folder: &str) -> impl Fn(&str) -> Option<bool> + '_ {
+    move |target| holds(folder, target).then_some(true)
+}
+
 fn folder_row(
     ui: &mut Ui,
     view: &View<'_>,
@@ -322,6 +396,7 @@ fn folder_row(
     let header = egui::CollapsingHeader::new(format!("🗀 {}", node.label))
         .id_salt(("folder", node.path.as_str()))
         .default_open(true)
+        .open(view.reveal_folder.as_deref().and_then(open_for(&node.path)))
         .show(ui, |ui| node_contents(ui, view, node, renaming));
     if let Some(Some(inner)) = header.body_returned {
         action = Some(inner);
@@ -334,10 +409,6 @@ fn folder_row(
             circuit: dragged.0,
             folder: node.path.clone(),
         });
-    } else if response.double_clicked() {
-        action = Some(TreeAction::BeginRename(RenameTarget::Folder(
-            node.path.clone(),
-        )));
     }
     response.context_menu(|ui| {
         if let Some(menu_action) = folder_menu(ui, view.strings, &node.path, true) {
@@ -434,13 +505,23 @@ fn circuit_row(ui: &mut Ui, view: &View<'_>, name: &str, index: usize) -> Option
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    if response.clicked() {
-        action = Some(TreeAction::Open(index));
+    // A click arms the circuit for placing, the way a palette entry does —
+    // because that is what this list is: a palette of your own circuits, and
+    // dropping one into another is what you do with it most.
+    //
+    // Not the circuit you are already in. It cannot contain itself, so a
+    // click there would load the pointer with something that can only fail
+    // on the next one; the context menu greys the entry out for the same
+    // reason, and a click has no way to look greyed.
+    if response.clicked() && !is_active {
+        action = Some(TreeAction::Place(index));
     }
-    // Double-clicking a name to edit it is the usual gesture in a tree, and
-    // saves going through the context menu for the common case.
+    // Double-click opens it, as a double-click opens things elsewhere. It
+    // used to begin a rename — that moved to `F2` and the context menu, so
+    // that this gesture means the same thing on every row rather than
+    // "open" on one and "rename" on the one above.
     if response.double_clicked() {
-        action = Some(TreeAction::BeginRename(RenameTarget::Circuit(index)));
+        action = Some(TreeAction::Open(index));
     }
 
     response.context_menu(|ui| {
@@ -508,8 +589,33 @@ fn rename_row(ui: &mut Ui, buffer: &mut String) -> Option<TreeAction> {
         return Some(TreeAction::CommitRename);
     }
     if !response.has_focus() {
-        // The field only appeared this frame — put the caret in it.
+        // The field only appeared this frame — put the caret in it, and
+        // select what is already there.
+        //
+        // Renaming almost always means replacing: the field is opened on a
+        // name that is either the one you want to change or a generated
+        // "Circuit 2", and both are things to type over. Leaving the caret
+        // at one end means clearing it by hand first, every time.
         response.request_focus();
+        // And bring it on screen. The row that would normally do this is
+        // `circuit_row`, which isn't drawn while a name is being edited —
+        // the field takes its place — so a circuit added below the fold left
+        // you typing into something you could not see, with nothing on
+        // screen saying the button had worked at all.
+        //
+        // Only on the frame it takes focus, so it never fights you scrolling
+        // away afterwards.
+        response.scroll_to_me(Some(egui::Align::Center));
+        if let Some(mut state) = TextEdit::load_state(ui.ctx(), response.id) {
+            let end = egui::text::CCursor::new(buffer.chars().count());
+            state
+                .cursor
+                .set_char_range(Some(egui::text_selection::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    end,
+                )));
+            TextEdit::store_state(ui.ctx(), response.id, state);
+        }
     }
     None
 }
@@ -530,6 +636,61 @@ mod tests {
             wires: Vec::new(),
             appearance: None,
         }
+    }
+
+    #[test]
+    fn a_folder_holds_itself_and_its_descendants() {
+        assert!(holds("alu", "alu"));
+        assert!(holds("alu", "alu/decode"));
+        // The root holds everything, including itself.
+        assert!(holds("", "alu/decode"));
+        assert!(holds("", ""));
+        // The same trap as `a_shared_prefix_is_not_a_parent`, one folder
+        // opened too many rather than one too few.
+        assert!(!holds("alu", "alu2"));
+        // And nothing below is opened on the way: a folder deeper than the
+        // target is not between it and the root.
+        assert!(!holds("alu/decode", "alu"));
+    }
+
+    #[test]
+    fn an_open_folder_is_never_forced_shut() {
+        // `Some(false)` would take collapsing away from the user, so a
+        // folder that has nothing to reveal must answer `None`.
+        assert_eq!(open_for("alu")("alu/adder"), Some(true));
+        assert_eq!(open_for("fpu")("alu/adder"), None);
+    }
+
+    #[test]
+    fn a_name_being_edited_is_what_gets_revealed() {
+        let circuits = [circuit("adder", "alu"), circuit("main", "")];
+
+        // A circuit being renamed — which is also every circuit just
+        // created, since creating one opens its name for editing.
+        let renaming = Some((RenameTarget::Circuit(0), "adder".to_string()));
+        assert_eq!(
+            revealed_folder(&circuits, 1, false, &renaming),
+            Some("alu".to_string())
+        );
+
+        // A folder being renamed is drawn by its parent, so that is what
+        // has to be open — not the folder itself.
+        let renaming = Some((
+            RenameTarget::Folder("alu/decode".to_string()),
+            String::new(),
+        ));
+        assert_eq!(
+            revealed_folder(&circuits, 1, false, &renaming),
+            Some("alu".to_string())
+        );
+
+        // Falling back to the open circuit, and to nothing at all when
+        // neither is asking to be seen.
+        assert_eq!(
+            revealed_folder(&circuits, 0, true, &None),
+            Some("alu".to_string())
+        );
+        assert_eq!(revealed_folder(&circuits, 0, false, &None), None);
     }
 
     #[test]

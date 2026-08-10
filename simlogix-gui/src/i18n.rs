@@ -431,6 +431,7 @@ static ENGLISH: Strings = Strings {
         HelpSection {
             title: "Simulation",
             rows: &[
+            ("F2", "Rename the circuit you are in"),
             ("Space", "Run or pause the simulation"),
             ("C", "Show or hide the signal state on wires"),
             ],
@@ -438,7 +439,7 @@ static ENGLISH: Strings = Strings {
     ],
 
     circuits_heading: "Circuits",
-    project_library_hint: "The name other projects use to refer to this one's circuits. Double-click to change it.",
+    project_library_hint: "The name other projects use to refer to this one's circuits. Right-click to change it.",
     circuit_new: "New circuit",
     circuit_new_here: "New circuit here",
     circuit_move_to: "Move to",
@@ -688,6 +689,7 @@ static FRENCH: Strings = Strings {
         HelpSection {
             title: "Simulation",
             rows: &[
+            ("F2", "Renommer le circuit ouvert"),
             ("Espace", "Lancer ou mettre en pause la simulation"),
             ("C", "Afficher ou masquer l'état des signaux sur les fils"),
             ],
@@ -695,7 +697,7 @@ static FRENCH: Strings = Strings {
     ],
 
     circuits_heading: "Circuits",
-    project_library_hint: "Le nom que les autres projets utilisent pour désigner les circuits de celui-ci. Double-cliquez pour le changer.",
+    project_library_hint: "Le nom que les autres projets utilisent pour désigner les circuits de celui-ci. Clic droit pour le changer.",
     circuit_new: "Nouveau circuit",
     circuit_new_here: "Nouveau circuit ici",
     circuit_move_to: "Déplacer vers",
@@ -945,6 +947,7 @@ static ITALIAN: Strings = Strings {
         HelpSection {
             title: "Simulazione",
             rows: &[
+            ("F2", "Rinomina il circuito aperto"),
             ("Spazio", "Avvia o metti in pausa la simulazione"),
             ("C", "Mostra o nascondi lo stato dei segnali sui fili"),
             ],
@@ -952,7 +955,7 @@ static ITALIAN: Strings = Strings {
     ],
 
     circuits_heading: "Circuiti",
-    project_library_hint: "Il nome che gli altri progetti usano per riferirsi ai circuiti di questo. Fai doppio clic per cambiarlo.",
+    project_library_hint: "Il nome che gli altri progetti usano per riferirsi ai circuiti di questo. Clic destro per cambiarlo.",
     circuit_new: "Nuovo circuito",
     circuit_new_here: "Nuovo circuito qui",
     circuit_move_to: "Sposta in",

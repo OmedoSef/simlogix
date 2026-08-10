@@ -102,18 +102,25 @@ on the canvas.
 
 | Action | How |
 |---|---|
-| Open a circuit | Click its name. |
-| Add one | The **+** button beside the *Circuits* heading. |
-| Rename one | Double-click its name, or right-click → *Rename*. |
+| Place one in the circuit you're editing | Click its name. |
+| Open a circuit | Double-click its name. |
+| Add one | The **+** button beside the *Circuits* heading. It opens the name for editing straight away. |
+| Rename one | `F2`, or right-click → *Rename*. |
 | Delete one | Right-click → *Delete*. |
+
+The tree is a palette of your own circuits: a single click arms one for
+placing, exactly as a click in the component palette does. The circuit you
+are *in* is the one exception — it can't contain itself, so clicking it does
+nothing.
 
 Circuits can be filed in folders, nested as deeply as you like:
 
 | Action | How |
 |---|---|
-| Add a folder | The **🗀** button beside the heading, or right-click a folder → *New folder here*. |
+| Add a folder | The **🗀** button beside the heading, or right-click a folder → *New folder here*. It opens the name for editing straight away. |
+| Fold one away | Click its ▸. It reopens on its own if something inside it needs to be seen. |
 | File a circuit | Drag it onto a folder, or right-click it → *Move to*. |
-| Rename a folder | Double-click it, or right-click → *Rename*. Only its own name changes; everything inside comes along. |
+| Rename a folder | Right-click → *Rename*. Only its own name changes; everything inside comes along. |
 | Delete a folder | Right-click → *Delete folder*. **What's inside moves up** to the folder above rather than being deleted with it. |
 
 A folder is **part of a circuit's address**, not just where it's filed: a
@@ -146,9 +153,9 @@ undoes them like anything else.
 
 Two things worth knowing:
 
-- **A circuit can be placed inside another.** Right-click it in the tree and
-  choose *Place in this circuit*, then click the canvas as you would for any
-  component. What you get is a box with one pin per port of that circuit —
+- **A circuit can be placed inside another.** Click it in the tree — or
+  right-click → *Place in this circuit* — then click the canvas as you would
+  for any component. What you get is a box with one pin per port of that circuit —
   so give your ports names, because those are the labels on the box.
 - **Only the open circuit runs.** Switching away rebuilds the circuit you
   arrive at from scratch, so it starts cold — a clock in a circuit you left
@@ -160,8 +167,7 @@ Two things worth knowing:
 
 The root of the circuit tree shows the project's **library name** — what
 other projects will use to refer to its circuits once a circuit can be
-imported into another project. Double-click it, or right-click → *Rename*,
-to change it.
+imported into another project. Right-click → *Rename* to change it.
 
 It starts out as the file name, the first time the project is saved or
 opened, and stops following it from then on. That's deliberate: rename

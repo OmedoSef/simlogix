@@ -2106,6 +2106,20 @@ impl SimLogixApp {
             self.toggle_running();
         }
 
+        // Renames the circuit you are in — the one shown in bold. The tree
+        // has no notion of a selected row, so there is nothing else `F2`
+        // could unambiguously mean; folders and the project keep the context
+        // menu, which is where they were reachable from anyway.
+        //
+        // It exists because the double-click that used to rename now opens.
+        if !ui.ctx().text_edit_focused()
+            && self.renaming.is_none()
+            && ui.ctx().input(|i| i.key_pressed(egui::Key::F2))
+        {
+            let name = self.circuits[self.active].name.clone();
+            self.renaming = Some((RenameTarget::Circuit(self.active), name));
+        }
+
         // Redo is tested first: Ctrl+Shift+Z would otherwise also match the
         // plain Ctrl+Z pattern and undo instead.
         if ui
@@ -2188,12 +2202,14 @@ impl SimLogixApp {
                         // with the layout rather than here.
                         tree_action = circuit_tree::show(
                             ui,
-                            strings,
-                            &project_name,
-                            &self.folders,
-                            &self.circuits,
-                            self.active,
-                            std::mem::take(&mut self.reveal_active),
+                            circuit_tree::Tree {
+                                strings,
+                                project_name: &project_name,
+                                folders: &self.folders,
+                                circuits: &self.circuits,
+                                active: self.active,
+                                reveal_active: std::mem::take(&mut self.reveal_active),
+                            },
                             &mut self.renaming,
                         );
                     });
@@ -2235,8 +2251,23 @@ impl SimLogixApp {
         // app from under a borrow of it.
         match tree_action {
             Some(TreeAction::Open(index)) => self.switch_to(index),
-            Some(TreeAction::Create { folder }) => self.create_circuit(folder),
-            Some(TreeAction::CreateFolder { parent }) => self.create_folder(&parent),
+            // Both open the name for editing straight away, with the
+            // generated one filled in: naming a thing is part of making it.
+            // Escape leaves the generated name, which is what it was before.
+            //
+            // After the create, never before — `create_circuit` opens the new
+            // circuit, and opening one rebuilds the application, which would
+            // throw a rename in progress away.
+            Some(TreeAction::Create { folder }) => {
+                self.create_circuit(folder);
+                let name = self.circuits[self.active].name.clone();
+                self.renaming = Some((RenameTarget::Circuit(self.active), name));
+            }
+            Some(TreeAction::CreateFolder { parent }) => {
+                let path = self.create_folder(&parent);
+                let leaf = path.rsplit('/').next().unwrap_or_default().to_string();
+                self.renaming = Some((RenameTarget::Folder(path), leaf));
+            }
             Some(TreeAction::BeginRename(target)) => {
                 let name = match &target {
                     RenameTarget::Project => self.library.clone(),

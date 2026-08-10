@@ -59,11 +59,15 @@ impl SimLogixApp {
     }
 
     /// Adds an empty folder inside `parent`.
-    pub(super) fn create_folder(&mut self, parent: &str) {
+    /// Returns the path it created, so the caller can put the name straight
+    /// into edit — naming a thing is part of making it, and a folder called
+    /// "Folder 3" that you have to go and rename is a step nobody wanted.
+    pub(super) fn create_folder(&mut self, parent: &str) -> String {
         self.record_edit();
         let base = Strings::for_language(self.language).folder_default_name;
         let path = self.unique_folder_path(parent, base);
-        self.folders.push(path);
+        self.folders.push(path.clone());
+        path
     }
 
     /// Renames a folder's own segment, carrying everything filed under it
