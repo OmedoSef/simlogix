@@ -1259,3 +1259,37 @@ fn a_switch_saved_open_is_open_when_the_project_is_opened() {
     let net = app.circuit.pins(app.placed[0].id())[0].net;
     assert_eq!(app.circuit.signal_at(net), simlogix_core::Signal::Low);
 }
+
+#[test]
+fn a_clock_still_ticks_after_the_project_is_reopened() {
+    let mut app = SimLogixApp::default();
+    app.place(ComponentKind::Clock, egui::pos2(200.0, 200.0));
+    let project = app.to_project();
+
+    // Reopening is where this went wrong, and only there: `place` already
+    // schedules a clock, and `place_saved` asked a second time at the same
+    // tick to get a switch's saved position into the engine. Two
+    // evaluations per period is two toggles, so the clock never appeared to
+    // move — and it stayed doubled, since each evaluation reschedules
+    // itself.
+    let mut app = SimLogixApp::from_project(&project, 0);
+    let clock = app
+        .placed
+        .iter()
+        .find(|placed| placed.kind() == ComponentKind::Clock)
+        .expect("the clock came back")
+        .id();
+    let net = app.circuit.pins(clock)[0].net;
+    let before = app.circuit.signal_at(net);
+
+    // A clock beats every sixty ticks, so it has to turn over within sixty
+    // of them wherever the load left it.
+    for _ in 0..60 {
+        app.step(1);
+    }
+    assert_ne!(
+        app.circuit.signal_at(net),
+        before,
+        "sixty ticks after a reopen and the clock never moved"
+    );
+}

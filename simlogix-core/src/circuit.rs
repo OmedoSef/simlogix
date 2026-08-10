@@ -260,6 +260,18 @@ impl Circuit {
         self.settled.get(&net).copied().unwrap_or(Signal::Unknown)
     }
 
+    /// The logical clock: how many ticks this circuit has been advanced by.
+    ///
+    /// Read-only, and deliberately not a wall-clock time — a tick is one
+    /// propagation delay, so this is the unit everything else here is
+    /// expressed in. What it is *for* is single-stepping: a caller that
+    /// advances one tick at a time has no other way to say where it got to,
+    /// and a step that changes nothing visible is otherwise indistinguishable
+    /// from a step that did not happen.
+    pub fn now(&self) -> u64 {
+        self.clock
+    }
+
     /// Components with an `Input` or `InOut` pin connected to `net` — i.e. whose
     /// output may need recomputing when `net`'s signal changes.
     pub fn components_reading(&self, net: NetId) -> Vec<ComponentId> {
@@ -282,9 +294,26 @@ impl Circuit {
         self.schedule_at(component, self.clock);
     }
 
+    /// Queues one evaluation of `component` at `tick` — **never a second one
+    /// at the same tick**.
+    ///
+    /// Evaluating a component twice at one instant is two state transitions
+    /// in no time at all. For anything combinational it is merely wasted
+    /// work, since the same inputs give the same outputs; for a component
+    /// that carries state it is wrong. A `Clock` toggles on every
+    /// evaluation, so a duplicate made it toggle twice per period and appear
+    /// never to move — and it stayed doubled, because each evaluation
+    /// reschedules itself.
+    ///
+    /// So the rule belongs here rather than in the callers. A caller asking
+    /// twice means "make sure this is evaluated at that tick", and it is;
+    /// asking is not the same as demanding it happen a second time.
     fn schedule_at(&mut self, component: ComponentId, tick: u64) {
-        self.events
-            .push(Reverse(ScheduledEvent { tick, component }));
+        let event = ScheduledEvent { tick, component };
+        if self.events.iter().any(|Reverse(queued)| *queued == event) {
+            return;
+        }
+        self.events.push(Reverse(event));
     }
 
     /// Marks `component` as periodic and schedules its first evaluation now.
@@ -946,6 +975,56 @@ mod tests {
         // Advancing by far less than the period must not fast-forward it.
         circuit.advance(1).unwrap();
         assert_eq!(circuit.signal_at(net), Signal::High);
+    }
+
+    #[test]
+    fn asking_twice_for_the_same_tick_evaluates_once() {
+        // A `Clock` toggles on every evaluation, so how many times it was
+        // evaluated can be read straight off its net.
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+
+        circuit.schedule_now(clock);
+        circuit.schedule_now(clock);
+        circuit.advance(1).expect("stable");
+
+        // Twice would have brought it back where it started, which is
+        // indistinguishable from a clock that never ran at all.
+        assert_eq!(circuit.signal_at(net), Signal::High);
+    }
+
+    #[test]
+    fn the_logical_clock_counts_every_tick_advanced_through() {
+        let mut circuit = Circuit::new();
+        assert_eq!(circuit.now(), 0);
+
+        // Idle ticks count as much as busy ones: an empty circuit still has
+        // a time, and single-stepping through one has to say so.
+        circuit.advance(1).expect("stable");
+        assert_eq!(circuit.now(), 1);
+        circuit.advance(7).expect("stable");
+        assert_eq!(circuit.now(), 8);
+
+        // And a tick where something actually happens leaves it in the same
+        // place as one where nothing does.
+        let net = circuit.add_net();
+        let clock = circuit.add_component(
+            Box::new(Clock::new()),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+        circuit.schedule_periodic(clock, 2);
+        circuit.advance(1).expect("stable");
+        assert_eq!(circuit.now(), 9);
     }
 
     #[test]
