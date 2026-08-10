@@ -875,6 +875,23 @@ impl SimLogixApp {
                 // needs no variant of its own.
                 PlacedComponent::two_input_gate(id, center, kind)
             }
+            // A plain input port, in the engine: driving a value on N bits
+            // is exactly what one does. What differs is that the value is a
+            // setting rather than something you click through, and that
+            // lives in the document and the symbol — not in the net.
+            ComponentKind::Constant => {
+                let net = self.circuit.add_net();
+                let (port, handles) = CircuitPort::input();
+                let id = self.circuit.add_component(
+                    Box::new(port),
+                    vec![Pin {
+                        direction: PinDirection::Output,
+                        net,
+                    }],
+                );
+                self.circuit.schedule_now(id);
+                PlacedComponent::constant(id, center, handles)
+            }
             ComponentKind::InputPort
             | ComponentKind::OutputPort
             | ComponentKind::InOutPort

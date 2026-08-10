@@ -142,6 +142,21 @@ pub struct SymbolState<'a> {
 
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
 /// returns where its pins ended up.
+/// What a symbol shows when there is no component behind it yet — in the
+/// palette, and under the pointer while placing one.
+///
+/// Two symbols are nothing but a readout, so drawn empty they say nothing
+/// at all: the probe's circle and the constant's tag. A constant shows `0`
+/// because that is genuinely what a freshly placed one drives; the probe
+/// shows `1` because it has to show *some* level and any of them would do.
+pub fn preview_label(kind: &ComponentKind) -> &'static str {
+    match kind {
+        ComponentKind::Probe => "1",
+        ComponentKind::Constant => "0",
+        _ => "",
+    }
+}
+
 pub fn draw(
     painter: &Painter,
     kind: &ComponentKind,
@@ -184,6 +199,9 @@ pub fn draw(
         }
         ComponentKind::TriStateSource => {
             draw_tri_state_source(painter, rect, rotation, stroke, color, state, text_layer)
+        }
+        ComponentKind::Constant => {
+            draw_constant(painter, rect, rotation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke, text_layer),
         // A circuit instance draws its own generated box, not a fixed symbol.
@@ -411,6 +429,58 @@ fn draw_switch(
 /// the net carries is whatever *else* is driving it, which is precisely what
 /// you place this component to find out.
 #[allow(clippy::too_many_arguments)]
+/// A constant: a tag carrying the value it puts on the wire, with a lead
+/// out of its point.
+///
+/// **It is the one component that is nothing but its value**, the same
+/// bounded exception the `Probe` already is: a symbol drawn without the
+/// digits would say only "a constant", when the number is the whole of
+/// what distinguishes one from another. The tag's point aims at the pin,
+/// so which way the value leaves is read from the shape rather than from
+/// an arrow.
+fn draw_constant(
+    painter: &Painter,
+    rect: Rect,
+    rotation: Rotation,
+    stroke: Stroke,
+    color: Color32,
+    state: SymbolState<'_>,
+    text_layer: &TextLayer,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| rotate(p, c, rotation);
+
+    let pin = pos2(rect.right(), c.y);
+    let (left, right) = (rect.left() + rect.width() * 0.1, c.x + rect.width() * 0.2);
+    let half = rect.height() * 0.3;
+    let point = right + rect.width() * 0.12;
+
+    let outline = [
+        pos2(left, c.y - half),
+        pos2(right, c.y - half),
+        pos2(point, c.y),
+        pos2(right, c.y + half),
+        pos2(left, c.y + half),
+        pos2(left, c.y - half),
+    ];
+    painter.line(outline.into_iter().map(r).collect(), stroke);
+    painter.line_segment([r(pos2(point, c.y)), r(pin)], stroke);
+
+    text_layer.text(
+        r(pos2((left + right) * 0.5, c.y)),
+        Align2::CENTER_CENTER,
+        state.label,
+        11.0,
+        color,
+    );
+
+    draw_pin(painter, r(pin), color);
+    PinPositions {
+        inputs: vec![],
+        outputs: vec![r(pin)],
+    }
+}
+
 fn draw_tri_state_source(
     painter: &Painter,
     rect: Rect,

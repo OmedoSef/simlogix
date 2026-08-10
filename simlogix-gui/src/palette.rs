@@ -68,6 +68,14 @@ pub enum ComponentKind {
     /// palette entries, two symbols, one component, because what differs is
     /// what it *means* on a schematic, not what it does to a net.
     TriStateSource,
+    /// A fixed value put on a wire, as wide as you tell it. The engine
+    /// component is a plain input port: driving a value on N bits is
+    /// exactly what one does, and the difference — that the value is a
+    /// *setting* rather than something you click through — lives in the
+    /// document and the symbol, not in the net.
+    ///
+    /// It works on a one-bit wire too, where it is simply 0 or 1.
+    Constant,
     /// An instance of another circuit in this project, by its path —
     /// `adder`, or `alu/adder` when it's filed in a folder. Deliberately
     /// *not* qualified by library: a local reference must survive the
@@ -82,7 +90,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 25] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 26] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -108,6 +116,7 @@ impl ComponentKind {
         (ComponentKind::InOutPort, "InOutPort"),
         (ComponentKind::Switch, "Switch"),
         (ComponentKind::TriStateSource, "TriStateSource"),
+        (ComponentKind::Constant, "Constant"),
     ];
 
     fn saved_name(&self) -> Option<&'static str> {
@@ -208,6 +217,7 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
                 ComponentKind::Button,
                 ComponentKind::Switch,
                 ComponentKind::TriStateSource,
+                ComponentKind::Constant,
                 ComponentKind::Clock,
                 ComponentKind::Ground,
                 ComponentKind::Power,
@@ -305,11 +315,6 @@ fn palette_row(ui: &mut Ui, kind: Option<&ComponentKind>, name: &str, is_active:
         );
         match kind {
             Some(kind) => {
-                let preview_label = if *kind == ComponentKind::Probe {
-                    "1"
-                } else {
-                    ""
-                };
                 symbol::draw(
                     ui.painter(),
                     kind,
@@ -317,7 +322,7 @@ fn palette_row(ui: &mut Ui, kind: Option<&ComponentKind>, name: &str, is_active:
                     Rotation::Deg0,
                     visuals.fg_stroke.color,
                     symbol::SymbolState {
-                        label: preview_label,
+                        label: symbol::preview_label(kind),
                         ..Default::default()
                     },
                     // No transform to undo out here in the panel.

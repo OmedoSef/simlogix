@@ -109,9 +109,14 @@ better at the thing it's for.
     merger. One thing to check when building it — not before — is the
     question the transceiver already answered: an `InOut` pin reads the net
     it drives, so it must not send back to the bus what it has just read.
-  - [ ] **A constant**, whose value is typed in a base of your choosing. It
-    works on a one-bit wire too, where it is simply 0 or 1.
-  - [ ] **A value a port can be set to**, rather than every bit alike. A
+  - [x] **A constant**, whose value is typed in a base of your choosing. It
+    works on a one-bit wire too, where it is simply 0 or 1. **No new engine
+    component**: driving a value on N bits is exactly what an input port
+    does, and what differs — that the value is a *setting* rather than
+    something clicked through — lives in the document and the symbol.
+    Shown by the same rule the value panel uses, hex past four bits and
+    decimal below, extracted so there is one rule rather than two.
+  - [x] **A value a port can be set to**, rather than every bit alike. A
     port drives all its bits the same today, so a two-bit one can only be 0
     or 3 — and that was the wrong justification: a port does not stand for a
     switch, it stands for *what a parent will drive*, and a parent drives
@@ -124,9 +129,10 @@ better at the thing it's for.
     opens and is a property like any other. The same digits, two different
     natures; one field for both would have to lie about one of them.
 
-    Typed in a base, and by the same widget the constant uses — the two ask
-    the identical question and building it twice is how the two answers
-    drift. The undriven position stays alongside: a value and *not driving*
+    Typed in a base, and by the same widget the constant uses — literally
+    the same one since the constant landed: `value_field` is shared, because
+    the two ask the identical question and building it twice is how the two
+    answers drift. The undriven position stays alongside: a value and *not driving*
     are different claims, and a three-state port needs both. On a one-bit
     port it degenerates to the 0/1/undriven cycle that exists, so nothing is
     lost.

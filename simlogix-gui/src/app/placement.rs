@@ -64,7 +64,10 @@ impl SimLogixApp {
             egui::Rect::from_center_size(at, BOX_SIZE),
             self.place_rotation,
             faint,
-            crate::symbol::SymbolState::default(),
+            crate::symbol::SymbolState {
+                label: crate::symbol::preview_label(kind),
+                ..Default::default()
+            },
             &crate::symbol::TextLayer::for_ui(ui),
         );
     }

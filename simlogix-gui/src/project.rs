@@ -47,7 +47,18 @@ use crate::properties::Properties;
 ///   such as a button's resting state or a LED's colour). Absent means the
 ///   behaviour that was there before, so nothing needed migrating.
 /// - `8` — a wire can carry a colour of its own.
-pub const CURRENT_VERSION: u32 = 12;
+/// - `9` — a circuit can carry a symbol of its own, drawn by hand. Absent
+///   means the generated box, which is what every circuit showed before.
+/// - `10` — a pin's name on a symbol can be nudged clear of the line art.
+/// - `11` — a pin on a symbol can be marked inverted, drawing the bubble.
+/// - `12` — a component can declare how many bits its pins carry.
+/// - `13` — a constant carries the value it puts on its wire.
+///
+/// From `7` on, every bump has only *added* optional fields: absent means
+/// the behaviour that was there before, so none of them needed a migration
+/// and the number only signals capability. `scripts/set-format-version.py`
+/// holds that same table, and a test here keeps the two in step.
+pub const CURRENT_VERSION: u32 = 13;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";

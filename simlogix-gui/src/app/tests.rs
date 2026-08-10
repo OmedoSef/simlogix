@@ -1639,3 +1639,64 @@ fn a_gate_told_it_is_wide_answers_bit_by_bit() {
         [Level::Low, Level::Low, Level::Low, Level::High],
     );
 }
+
+#[test]
+fn a_constant_drives_the_value_it_was_given() {
+    let mut app = SimLogixApp::default();
+    let constant = app.place(ComponentKind::Constant, egui::pos2(40.0, 40.0));
+
+    // Nothing typed: zero on a one-bit wire, which is where a wire sits
+    // before anything is said about it.
+    let net = app.circuit.pins(constant)[0].net;
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(app.circuit.signal_at(net).levels(), [Level::Low]);
+
+    let wide = Properties {
+        width: Some(4),
+        value: Some(0b1010),
+        ..Default::default()
+    };
+    if let Some(placed) = app.placed.iter_mut().find(|placed| placed.id() == constant) {
+        placed.set_properties(wide);
+    }
+    // A property change has to reach the engine, and a width change has to
+    // reach the net — the two halves that made a saved switch open as open.
+    app.rebuild_nets();
+    app.circuit.schedule_now(constant);
+    app.advance_circuit(SETTLE_TICKS);
+
+    let net = app.circuit.pins(constant)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Low, Level::High, Level::Low, Level::High],
+        "0b1010, least significant bit first"
+    );
+}
+
+#[test]
+fn a_constant_comes_back_from_a_saved_project_still_driving() {
+    // The trap `place_saved` exists for: `place` builds the component and
+    // the properties arrive afterwards, so a value that never reaches the
+    // cell is a constant that loads as zero.
+    let mut app = SimLogixApp::default();
+    let constant = app.place(ComponentKind::Constant, egui::pos2(40.0, 40.0));
+    if let Some(placed) = app.placed.iter_mut().find(|placed| placed.id() == constant) {
+        placed.set_properties(Properties {
+            width: Some(4),
+            value: Some(0b0110),
+            ..Default::default()
+        });
+    }
+    let project = app.to_project();
+
+    let mut app = SimLogixApp::from_project(&project, 0);
+    let constant = app.placed[0].id();
+    app.advance_circuit(SETTLE_TICKS);
+    let net = app.circuit.pins(constant)[0].net;
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Low, Level::High, Level::High, Level::Low],
+        "0b0110 came back"
+    );
+}

@@ -10,7 +10,7 @@
 //! a per-kind enum, because a property tends to start on one kind and turn
 //! out to make sense on several.
 
-use egui::{RichText, Ui};
+use egui::{Response, RichText, Ui};
 use serde::{Deserialize, Serialize};
 
 use simlogix_core::{all_ones, PortDrive, PortSetting};
@@ -65,6 +65,14 @@ pub struct Properties {
     /// letting the two disagree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<usize>,
+
+    /// What a `Constant` puts on its wire. Unset means zero.
+    ///
+    /// A *setting*, unlike the value a port is driving right now: it is
+    /// what the component is, so it is saved, undone and redone like any
+    /// other property. The digits are the same; the natures are not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<u64>,
 }
 
 impl Properties {
@@ -88,6 +96,12 @@ impl Properties {
     /// How many bits this component's pins carry. One unless it says wider.
     pub fn width(&self) -> usize {
         self.width.unwrap_or(1).max(1)
+    }
+
+    /// What a constant drives. Zero unless it says otherwise — the value a
+    /// wire sits at when nothing has been typed.
+    pub fn constant_value(&self) -> u64 {
+        self.value.unwrap_or(0) & all_ones(self.width())
     }
 
     /// Whether this kind can be told how wide its pins are.
@@ -115,6 +129,7 @@ impl Properties {
                 | ComponentKind::Xnor
                 | ComponentKind::Not
                 | ComponentKind::Buffer
+                | ComponentKind::Constant
         )
     }
 
@@ -218,35 +233,59 @@ pub fn show_value(
     }
 
     if let PortDrive::Driving(bits) = drive {
-        // Shown in hex past four bits and in decimal below, because that is
-        // how each is read; typed in any of the three, since a value copied
-        // from somewhere else arrives in whatever base that somewhere used.
-        let shown = if width > 4 {
-            format!("{bits:#X}")
-        } else {
-            bits.to_string()
-        };
-        let id = ui.id().with("port_value");
-        let mut text = ui
-            .data(|data| data.get_temp::<String>(id))
-            .unwrap_or_else(|| shown.clone());
-        let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
-        if response.has_focus() {
-            // Its own text while being typed, so a half-written number is
-            // not rewritten under the caret.
-            ui.data_mut(|data| data.insert_temp(id, text.clone()));
-        } else {
-            ui.data_mut(|data| data.remove_temp::<String>(id));
-        }
-        if response.changed() {
-            if let Some(parsed) = parse_value(&text) {
-                edited = Some(PortDrive::Driving(parsed & all_ones(width)));
-            }
+        if let (Some(value), _) = value_field(ui, "port_value", bits, width) {
+            edited = Some(PortDrive::Driving(value));
         }
         ui.label(RichText::new(strings.value_bases).weak());
     }
 
     edited
+}
+
+/// The field a value is typed into: shown by [`format_value`], read by
+/// `parse_value`, and masked to `width` so what is typed can never drive
+/// bits that do not exist.
+///
+/// Shared by the value panel and by a constant's property, which ask the
+/// identical question — building it twice is how the two answers would come
+/// to differ. The response comes back too, so a caller can tell an editing
+/// session beginning from a redraw.
+fn value_field(ui: &mut Ui, salt: &str, bits: u64, width: usize) -> (Option<u64>, Response) {
+    let id = ui.id().with(salt);
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(id))
+        .unwrap_or_else(|| format_value(bits, width));
+    let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
+    if response.has_focus() {
+        // Its own text while being typed, so a half-written number is not
+        // rewritten under the caret.
+        ui.data_mut(|data| data.insert_temp(id, text.clone()));
+    } else {
+        ui.data_mut(|data| data.remove_temp::<String>(id));
+    }
+    let edited = response
+        .changed()
+        .then(|| parse_value(&text).map(|parsed| parsed & all_ones(width)))
+        .flatten();
+    (edited, response)
+}
+
+/// How a value is written for a reader: hex past four bits, decimal below.
+///
+/// One rule in one place, read by the value panel, by a constant's symbol
+/// and by whatever wants it next. Hex above four bits because a bus value
+/// is a bit pattern and that is how a bit pattern is read; decimal below,
+/// where every base agrees anyway and a `0x` prefix would be noise.
+///
+/// It says nothing about what may be *typed* — `parse_value` takes all
+/// three bases whatever this shows, since a value copied from a datasheet
+/// or from code arrives in whichever the source used.
+pub fn format_value(bits: u64, width: usize) -> String {
+    if width > 4 {
+        format!("{bits:#X}")
+    } else {
+        bits.to_string()
+    }
 }
 
 /// Reads a value written in hex, binary or decimal.
@@ -778,6 +817,25 @@ pub fn show(
                 }
             }
         }
+        ComponentKind::Constant => {
+            ui.add_space(8.0);
+            ui.label(strings.property_value);
+            let (edited, response) = value_field(
+                ui,
+                "constant_value",
+                properties.constant_value(),
+                properties.width(),
+            );
+            if response.gained_focus() {
+                edit_started = true;
+            }
+            if let Some(value) = edited {
+                // Unset at zero, so a project that never typed a value keeps
+                // saying nothing about one.
+                properties.value = (value != 0).then_some(value);
+            }
+            ui.label(RichText::new(strings.value_bases).weak());
+        }
         _ => {}
     }
 
@@ -940,6 +998,7 @@ mod tests {
             tri_state: Some(true),
             initial: Some(PortSetting::High),
             width: Some(8),
+            value: Some(0xAB),
         };
 
         let json = serde_json::to_string(&properties).expect("serializes");
@@ -952,7 +1011,7 @@ mod tests {
         // asserting: `PortLevel` became `PortSetting` on the strength of it.
         assert_eq!(
             json,
-            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8}"#
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"value":171}"#
         );
     }
 

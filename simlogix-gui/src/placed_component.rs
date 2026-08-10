@@ -161,6 +161,15 @@ enum Shape {
         /// Absent on an output port, the one that only ever reads.
         handles: Option<PortHandles>,
     },
+    /// A fixed value on one output pin.
+    ///
+    /// Its own variant rather than a `HandSet`: that one is *defined* by
+    /// its click cycle, and a constant has none — its value is a property,
+    /// typed rather than clicked through. The handles are how that property
+    /// reaches the engine, exactly as a port's do.
+    Constant {
+        handles: PortHandles,
+    },
     /// Two `InOut` bus sides at pin indices 0/1 (`A`, `B`) and two control
     /// inputs at 2/3 (`Dir`, `Enable`) — the only component whose pins both
     /// read and drive.
@@ -229,6 +238,17 @@ impl PlacedComponent {
         handles: Option<PortHandles>,
     ) -> Self {
         Self::new(id, center, Shape::HandSet { kind, handles })
+    }
+
+    pub fn constant(id: ComponentId, center: Pos2, handles: PortHandles) -> Self {
+        // A constant always drives — that is the whole of what it is — and
+        // the cell it shares with the engine starts undriven, since it is a
+        // port's cell. Set here rather than in each caller: placing one from
+        // the palette, loading one, pasting one and flattening one would
+        // each have to remember, and the one that forgot would put a
+        // constant on the canvas driving nothing at all.
+        handles.drive.set(PortDrive::Driving(0));
+        Self::new(id, center, Shape::Constant { handles })
     }
 
     pub fn instance(
@@ -355,6 +375,15 @@ impl PlacedComponent {
             // faults every bit of that net.
             handles.width.set(properties.width());
         }
+        // A constant's value is a property and nothing else writes it, so
+        // it is pushed the same way — and unconditionally, since the width
+        // it drives has to be the one the net was given.
+        if let Shape::Constant { handles } = &self.shape {
+            handles.width.set(properties.width());
+            handles
+                .drive
+                .set(PortDrive::Driving(properties.constant_value()));
+        }
         // A switch needs the same push for the same reason: it latches, so
         // there is no "held" state for it to settle itself from the way a
         // button does.
@@ -375,6 +404,7 @@ impl PlacedComponent {
             Shape::Switch { .. } => ComponentKind::Switch,
             Shape::Led => ComponentKind::Led,
             Shape::HandSet { kind, .. } => kind.clone(),
+            Shape::Constant { .. } => ComponentKind::Constant,
             Shape::Instance { path, .. } => ComponentKind::Circuit(path.clone()),
             Shape::Transistor(kind)
             | Shape::BusTransceiver(kind)
@@ -935,6 +965,44 @@ impl PlacedComponent {
 
                 let response = interact_box(ui, painter, rect, rect_id, center, movable);
 
+                let net = circuit.pins(id)[0].net;
+                let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net, movable);
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins: vec![pin],
+                }
+            }
+            Shape::Constant { .. } => {
+                // Its own value, not the net's: a constant is not reporting
+                // what it sees, it is saying what it puts there.
+                let label = crate::properties::format_value(
+                    properties.constant_value(),
+                    properties.width(),
+                );
+                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let pin_positions = symbol::draw(
+                    painter,
+                    &kind,
+                    rect,
+                    *rotation,
+                    symbol_color,
+                    SymbolState {
+                        label: &label,
+                        ..Default::default()
+                    },
+                    &text_layer,
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
                 let net = circuit.pins(id)[0].net;
                 let pin = pin_handle(ui, painter, id, 0, pin_positions.outputs[0], net, movable);
 

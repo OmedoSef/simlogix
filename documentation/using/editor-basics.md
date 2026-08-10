@@ -41,7 +41,7 @@ the last one to drop back to Select.
 Clicking the highlighted palette entry again cancels it, as does Escape.
 
 The palette is grouped into **Interface** (Input, Output, Bidirectional),
-**Sources** (Button, Switch, Tri-state source, Clock, GND, PWR),
+**Sources** (Button, Switch, Tri-state source, Constant, Clock, GND, PWR),
 **Outputs** (LED, Probe), **Transistors** (NMOS, PMOS), **Gates** (AND, OR,
 NAND, NOR, XOR, XNOR, NOT, Buffer, Tri-state buffer), **Memory** (SR latch)
 and **Buses** (the two transceivers). Each category folds away, and the
@@ -158,7 +158,14 @@ project file.
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
 | **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
-| **Bits** | the three ports, and the plain gates | How many bits its pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
+| **Bits** | the three ports, the plain gates, Constant | How many bits its pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
+| **Value** | Constant | What it puts on its wire. Typed in decimal, or `0x…` / `0b…`. |
+
+A **constant** is the one component that is nothing but its value: it puts
+a fixed number on its wire and the symbol draws that number, shown in hex
+past four bits and in decimal below. It is not clickable — the value is a
+setting, so changing it is an ordinary edit that `Ctrl+Z` undoes, unlike a
+port's value which is runtime state. On a one-bit wire it is simply 0 or 1.
 
 A gate told it is four bits wide is four gates side by side: it computes on
 every bit on its own, and all of its pins are that width. That is also why
