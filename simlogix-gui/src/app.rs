@@ -6,6 +6,7 @@ mod camera;
 mod canvas_ui;
 mod circuits;
 mod menu;
+mod placement;
 mod wiring;
 
 use std::collections::{HashMap, HashSet};

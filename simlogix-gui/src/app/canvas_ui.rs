@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use simlogix_core::{ComponentId, NetId};
 
-use crate::canvas::{self, BOX_SIZE};
+use crate::canvas;
 use crate::toolbar::{self, Tool};
 
 use super::wiring::ResolvedRoute;
@@ -1195,55 +1195,7 @@ impl SimLogixApp {
                         }
                     }
 
-                    if let Tool::Place(kind) = &self.tool {
-                        // A translucent preview of what's about to be dropped, at
-                        // the grid position it will actually land on -- otherwise
-                        // placing is a blind click.
-                        if let Some(pos) = hover_pos {
-                            let at = canvas::snap_to_grid(pos);
-                            let faint = ui.visuals().strong_text_color().gamma_multiply(0.45);
-
-                            // An instance has no fixed symbol: its box is
-                            // generated from the ports of the circuit it
-                            // refers to, so the preview has to be generated
-                            // the same way -- `symbol::draw` has nothing to
-                            // show for one, which is why there was no ghost.
-                            if let Some(path) = kind.circuit_path() {
-                                // Through the same pair the real instance
-                                // uses, so the ghost shows the circuit's own
-                                // symbol when it has one.
-                                let (ports, appearance) = self.instance_preview(path);
-                                // Drawn where it will land, which for a
-                                // symbol drawn away from its origin is not
-                                // under the pointer.
-                                let at = self.drop_origin(kind, at, self.place_rotation);
-                                crate::symbol::draw_instance(
-                                    &painter,
-                                    at,
-                                    self.place_rotation,
-                                    faint,
-                                    path,
-                                    &ports,
-                                    &appearance,
-                                    &crate::symbol::TextLayer::for_ui(ui),
-                                );
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-                                return;
-                            }
-
-                            let rect = egui::Rect::from_center_size(at, BOX_SIZE);
-                            crate::symbol::draw(
-                                &painter,
-                                kind,
-                                rect,
-                                self.place_rotation,
-                                ui.visuals().strong_text_color().gamma_multiply(0.45),
-                                crate::symbol::SymbolState::default(),
-                                &crate::symbol::TextLayer::for_ui(ui),
-                            );
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
-                        }
-                    }
+                    self.draw_placement_ghost(ui, &painter, hover_pos);
                 });
 
             self.scene_rect = scene_rect;
@@ -1262,25 +1214,9 @@ impl SimLogixApp {
             // Placing goes through the scene's own background response, so a
             // click that landed on a component or a wire never also drops a
             // new component underneath it.
-            if let Tool::Place(kind) = self.tool.clone() {
-                if scene_response.response.clicked() {
-                    if let Some(pos) = scene_response.response.interact_pointer_pos() {
-                        self.record_edit();
-                        let at =
-                            self.drop_origin(&kind, canvas::snap_to_grid(pos), self.place_rotation);
-                        let id = self.place(kind, at);
-                        if let Some(placed) = self.placed.iter_mut().find(|p| p.id() == id) {
-                            placed.set_rotation(self.place_rotation);
-                        }
-                        self.pending_attach = Some(id);
-                        // Holding shift keeps the kind loaded, so a row of
-                        // LEDs is one trip to the palette rather than one per
-                        // component. Releasing it drops back to selecting,
-                        // which is what you want after the last one.
-                        if !ui.ctx().input(|i| i.modifiers.shift) {
-                            self.tool = Tool::Select;
-                        }
-                    }
+            if scene_response.response.clicked() {
+                if let Some(pos) = scene_response.response.interact_pointer_pos() {
+                    self.drop_placed(ui, pos);
                 }
             }
 
