@@ -290,6 +290,54 @@ fn a_circuit_with_a_symbol_of_its_own_stops_showing_the_generated_box() {
     assert_eq!(placed.rect().width(), 180.0, "the symbol decides its size");
 }
 
+#[test]
+fn a_symbol_drawn_away_from_its_origin_still_lands_under_the_pointer() {
+    let mut app = SimLogixApp::default();
+    app.rename_circuit(0, "sub");
+    app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    // Drawn well up and to the left of its origin, which is what dragging a
+    // pin out in the appearance editor leaves you with.
+    app.circuits[0].appearance = Some(crate::appearance::Appearance {
+        shapes: vec![crate::appearance::Shape::Polyline {
+            points: vec![(-140.0, -60.0), (-20.0, -60.0), (-20.0, 20.0)],
+            closed: true,
+        }],
+        pins: vec![crate::appearance::PinSlot {
+            at: (-140.0, -20.0),
+            facing: crate::appearance::Facing::Left,
+            lead: 20.0,
+            show_name: false,
+        }],
+        show_name: false,
+    });
+    app.create_circuit(String::new());
+
+    let kind = ComponentKind::Circuit("sub".to_string());
+    let at = egui::pos2(200.0, 200.0);
+    let origin = app.drop_origin(&kind, at, canvas::Rotation::Deg0);
+    // The origin is *not* where the pointer is, which is the whole point —
+    // and it is still a whole number of grid steps away, or the pins would
+    // no longer land on the grid.
+    assert_ne!(origin, at);
+    for offset in [origin.x - at.x, origin.y - at.y] {
+        assert_eq!(offset % canvas::GRID_SPACING, 0.0);
+    }
+
+    let id = app.place(kind, origin);
+    let placed = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == id)
+        .expect("just placed");
+    // What the pointer was on is the middle of the symbol, to within the
+    // rounding the grid costs.
+    let drift = placed.rect().center() - at;
+    assert!(
+        drift.x.abs() <= canvas::GRID_SPACING / 2.0 && drift.y.abs() <= canvas::GRID_SPACING / 2.0,
+        "landed {drift:?} from the pointer"
+    );
+}
+
 /// Builds `outer` containing an instance of `inner`, each with one input
 /// port and one output port, and returns the app with `main` open and an
 /// instance of `outer` placed in it.

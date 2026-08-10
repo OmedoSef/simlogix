@@ -1343,21 +1343,14 @@ impl SimLogixApp {
                             // the same way -- `symbol::draw` has nothing to
                             // show for one, which is why there was no ghost.
                             if let Some(path) = kind.circuit_path() {
-                                let ports: Vec<_> = self
-                                    .circuits
-                                    .iter()
-                                    .find(|circuit| circuit.path() == path)
-                                    .map(|saved| {
-                                        Self::port_slots(saved)
-                                            .into_iter()
-                                            .map(|(_, port)| port)
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                                // Through `appearance_of` like the real
-                                // instance, so the ghost shows the circuit's
-                                // own symbol when it has one.
-                                let appearance = self.appearance_of(path, &ports);
+                                // Through the same pair the real instance
+                                // uses, so the ghost shows the circuit's own
+                                // symbol when it has one.
+                                let (ports, appearance) = self.instance_preview(path);
+                                // Drawn where it will land, which for a
+                                // symbol drawn away from its origin is not
+                                // under the pointer.
+                                let at = self.drop_origin(kind, at, self.place_rotation);
                                 crate::symbol::draw_instance(
                                     &painter,
                                     at,
@@ -1407,7 +1400,9 @@ impl SimLogixApp {
                 if scene_response.response.clicked() {
                     if let Some(pos) = scene_response.response.interact_pointer_pos() {
                         self.record_edit();
-                        let id = self.place(kind, canvas::snap_to_grid(pos));
+                        let at =
+                            self.drop_origin(&kind, canvas::snap_to_grid(pos), self.place_rotation);
+                        let id = self.place(kind, at);
                         if let Some(placed) = self.placed.iter_mut().find(|p| p.id() == id) {
                             placed.set_rotation(self.place_rotation);
                         }

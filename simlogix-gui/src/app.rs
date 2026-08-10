@@ -1353,6 +1353,54 @@ impl SimLogixApp {
             .unwrap_or_else(|| Appearance::generated(ports))
     }
 
+    /// The pins an instance of `path` would expose, and what it would look
+    /// like — everything the placement ghost needs, worked out the same way
+    /// the real instance works it out so the two cannot disagree.
+    fn instance_preview(&self, path: &str) -> (Vec<InstancePort>, Appearance) {
+        let ports: Vec<InstancePort> = self
+            .circuits
+            .iter()
+            .find(|circuit| circuit.path() == path)
+            .map(|saved| {
+                Self::port_slots(saved)
+                    .into_iter()
+                    .map(|(_, port)| port)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let appearance = self.appearance_of(path, &ports);
+        (ports, appearance)
+    }
+
+    /// Where a component's *origin* goes when its symbol is dropped with the
+    /// pointer at `at`.
+    ///
+    /// Everything built in is drawn about its own origin, so for those the
+    /// two are the same point. A circuit's own symbol need not be: dragging a
+    /// pin out in the appearance editor moves the drawing away from the
+    /// origin, and the origin is what a position stores — so the pointer sat
+    /// somewhere off the symbol, well above it for a drawing that had grown
+    /// upwards, and you were placing by guesswork.
+    ///
+    /// The offset is rounded to a whole number of grid steps, and that is
+    /// what keeps the pins on the grid: `at` is already snapped, so an offset
+    /// that wasn't a multiple would take every pin off it. Rounded, the ghost
+    /// can sit up to half a step off the pointer, which is invisible next to
+    /// being a symbol's width away.
+    pub(super) fn drop_origin(
+        &self,
+        kind: &ComponentKind,
+        at: egui::Pos2,
+        rotation: canvas::Rotation,
+    ) -> egui::Pos2 {
+        let Some(path) = kind.circuit_path() else {
+            return at;
+        };
+        let (_, appearance) = self.instance_preview(path);
+        let middle = appearance.rect(egui::Pos2::ZERO, rotation).center();
+        at - canvas::snap_to_grid(middle).to_vec2()
+    }
+
     fn flatten(&mut self, path: &str) -> Option<InstanceWiring> {
         // A circuit that contains itself, however indirectly, would flatten
         // forever. The stack is the whole guard.
