@@ -181,39 +181,6 @@ better at the thing it's for.
   `Clock` already does — first fire *here*, then every *this many* ticks.
   What is missing in all three cases is a property and a way to type it.
 
-- [ ] **An inspector: the circuit as the engine sees it**
-
-  A window listing, for the selection or for everything: each **net** with
-  its id, its width, what it resolved to, and **every contribution to it**
-  — which component, which pin, what that pin is driving — plus whether it
-  is only weakly held. Alongside it the logical clock and what is scheduled
-  next.
-
-  The case for it is not theoretical. Every bug found in this project so far
-  was found by writing a throwaway test that printed exactly this and
-  reading it: the clock that never moved, the CMOS NAND that read `Error`,
-  the two-bit port that showed `E`. Each time the answer was one line of
-  engine state that nothing in the application could show.
-
-  It **reads and never writes** — a view, not an editor — so it can be left
-  open while you work, and it is the general form of two things wanted
-  separately: *which drivers disagree* on a faulted net, and *why is this
-  net the width it is*. Both are one row of the same table.
-
-  A window rather than a panel: the right-hand one is spoken for, and this
-  is something you open when a circuit surprises you rather than something
-  you keep on screen. Selecting a component or a wire should narrow it to
-  that, since "everything" is unreadable past a few dozen nets.
-
-  What it needs from `Circuit` is read-only and small: the nets, the
-  per-pin contributions behind each one, and the pending events.
-  `signal_at`, `net_width` and `next_event_tick` already exist; the driver
-  breakdown does not.
-
-  **Worth doing before the rest of the buses, not after.** It is the tool
-  that makes the remaining bus work quick to debug, and the bus work is what
-  will make the state hardest to reason about by eye.
-
 - [ ] **A waveform view**
 
   The engine is discrete-event and already knows *when* everything happened;

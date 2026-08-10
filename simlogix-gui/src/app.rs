@@ -365,6 +365,9 @@ pub struct SimLogixApp {
     /// Whether the shortcuts-and-gestures window is up. View state, like
     /// `show_about`: never saved, never an undo step.
     show_shortcuts: bool,
+    /// Whether the engine-state window is up. Same nature as the other two:
+    /// looking at something changes nothing.
+    show_inspector: bool,
     licenses: crate::licenses::State,
     circuit: Circuit,
     placed: Vec<PlacedComponent>,
@@ -571,6 +574,7 @@ impl Default for SimLogixApp {
     fn default() -> Self {
         Self {
             show_about: false,
+            show_inspector: false,
             show_signal_state: true,
             show_shortcuts: false,
             licenses: crate::licenses::State::default(),
@@ -2466,6 +2470,14 @@ impl SimLogixApp {
 
         // Stepping is allowed from every view, not only the simulation one:
         // it advances time, which is a thing the schematic is doing too.
+        if !ui.ctx().text_edit_focused()
+            && ui
+                .ctx()
+                .input_mut(|input| input.consume_shortcut(&keys.inspector))
+        {
+            self.show_inspector = !self.show_inspector;
+        }
+
         if !ui.ctx().text_edit_focused() {
             // The longer step is tried first. egui matches modifiers
             // exactly, so the two chords cannot both fire — but the order
@@ -3016,6 +3028,28 @@ impl SimLogixApp {
         }
 
         crate::help::show(ui.ctx(), strings, &mut self.show_shortcuts);
+        if self.show_inspector {
+            // Built here rather than inside the window, which borrows
+            // `self.circuit` and `self.show_inspector` at once otherwise.
+            let named: Vec<crate::inspector::Named> = self
+                .placed
+                .iter()
+                .map(|placed| crate::inspector::Named {
+                    id: placed.id(),
+                    label: placed
+                        .properties()
+                        .label()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            strings.component_kind_label(&placed.kind()).to_string()
+                        }),
+                })
+                .collect();
+            let focus: Vec<ComponentId> = self.selection.components.iter().copied().collect();
+            let mut open = true;
+            crate::inspector::show(ui.ctx(), strings, &self.circuit, &named, &focus, &mut open);
+            self.show_inspector = open;
+        }
         crate::licenses::show(ui.ctx(), strings, &mut self.licenses);
 
         egui::Window::new(strings.about_title)

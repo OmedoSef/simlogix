@@ -89,6 +89,19 @@ body:
       required: false
 
   - type: textarea
+    id: engine
+    attributes:
+      label: The engine state
+      description: >-
+        In SimLogix, press F12 (or Simulation → Engine state) and use
+        **Copy for a bug report**. It carries the version, the platform and
+        what the engine thinks every net is doing — which is usually the
+        whole answer. Attaching the .slgx file as well helps most.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
     id: logs
     attributes:
       label: Anything printed to the terminal

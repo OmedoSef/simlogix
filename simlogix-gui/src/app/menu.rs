@@ -42,6 +42,9 @@ pub(super) struct Shortcuts {
     /// The longest of the three, on the same key: one tick, one event, one
     /// clock edge.
     pub step_edge: egui::KeyboardShortcut,
+    /// `F12`, which every browser and debugger has meant by "show me what is
+    /// actually going on" for years.
+    pub inspector: egui::KeyboardShortcut,
 }
 
 impl Shortcuts {
@@ -63,6 +66,7 @@ impl Shortcuts {
             step: egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F10),
             step_event: egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::F10),
             step_edge: command(egui::Key::F10),
+            inspector: egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F12),
         }
     }
 }
@@ -211,6 +215,19 @@ impl SimLogixApp {
                         ui.close();
                     }
                     ui.separator();
+                    // In the Simulation menu rather than under `?`: it is
+                    // about what the circuit is doing, not about how to use
+                    // the application.
+                    if ui
+                        .add(
+                            egui::Button::new(strings.menu_simulation_inspector)
+                                .shortcut_text(ui.ctx().format_shortcut(&keys.inspector)),
+                        )
+                        .clicked()
+                    {
+                        self.show_inspector = true;
+                        ui.close();
+                    }
                     ui.menu_button(strings.menu_simulation_speed, |ui| {
                         for speed in super::SPEEDS {
                             if ui

@@ -7,6 +7,7 @@ mod circuit_tree;
 mod help;
 mod i18n;
 mod icon;
+mod inspector;
 mod licenses;
 mod palette;
 mod placed_component;

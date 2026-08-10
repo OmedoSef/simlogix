@@ -281,6 +281,68 @@ fn the_simulation_row_has_a_run_pause_button() {
     assert!(harness.state().running, "and started it again");
 }
 
+#[test]
+fn the_inspector_opens_and_names_what_is_driving_a_net() {
+    let mut harness = harness();
+    let source = harness
+        .state_mut()
+        .place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
+    harness.state_mut().selection.pick_component(source, false);
+    step(&mut harness);
+    assert!(!harness.state().show_inspector);
+
+    press(&mut harness, egui::Key::F12);
+    step(&mut harness);
+    assert!(harness.state().show_inspector, "F12 opens it");
+
+    // The line the whole window exists for: not what the net resolved to,
+    // but who put that there. Found on screen rather than in the state,
+    // since drawing it is the part that could be wrong.
+    let strings = crate::i18n::Strings::for_language(harness.state().language);
+    // The label *and* the pin together: searching for the kind's name alone
+    // found it in the palette, so the first version of this passed with the
+    // naming ripped out.
+    let row = format!(
+        "{} · {}",
+        strings.component_kind_label(&ComponentKind::InputPort),
+        strings.inspector_pin.replace("{}", "0"),
+    );
+    assert!(
+        harness.get_all_by_label_contains(&row).next().is_some(),
+        "expected a row naming what drives the net, found none matching {row:?}"
+    );
+
+    press(&mut harness, egui::Key::F12);
+    step(&mut harness);
+    assert!(!harness.state().show_inspector, "and closes it again");
+}
+
+#[test]
+fn the_bug_report_carries_the_build_and_what_drives_each_net() {
+    let mut harness = harness();
+    let source = harness
+        .state_mut()
+        .place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
+    step(&mut harness);
+
+    let app = harness.state();
+    let strings = crate::i18n::Strings::for_language(app.language);
+    let named = vec![crate::inspector::Named {
+        id: source,
+        label: "CLK".to_string(),
+    }];
+    let report = crate::inspector::report(strings, &app.circuit, &named);
+
+    // The first three questions any report has to answer before anyone can
+    // help: which build, on what, and what the engine thinks.
+    assert!(report.contains(env!("CARGO_PKG_VERSION")), "{report}");
+    assert!(report.contains(std::env::consts::OS), "{report}");
+    assert!(report.contains("CLK · pin 0"), "{report}");
+    // And never the drawing itself: a circuit is the user's, and a copy
+    // button should not quietly hand it over.
+    assert!(!report.contains("InputPort"), "{report}");
+}
+
 fn press_with(harness: &mut Harness<'_, SimLogixApp>, key: egui::Key, modifiers: egui::Modifiers) {
     harness.input_mut().events.push(egui::Event::Key {
         key,

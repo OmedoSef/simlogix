@@ -134,6 +134,7 @@ and gestures**.
 | `Shift+F10` | Skip to the next event |
 | `Ctrl+F10` | Step one clock edge |
 | `C` | Show / hide the signal state on wires |
+| `F12` | Show the engine state |
 | `F2` | Rename the circuit you are in |
 | `Shift` (held) | Keep placing the same component |
 | `Ctrl+Z` | Undo |

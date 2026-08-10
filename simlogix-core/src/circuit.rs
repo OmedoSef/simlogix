@@ -293,6 +293,63 @@ impl Circuit {
             .unwrap_or_else(|| Signal::splat(Level::Unknown, self.net_width(net)))
     }
 
+    /// Every net some pin sits on, in a stable order.
+    ///
+    /// Read-only, and for looking at the circuit rather than running it —
+    /// see [`Circuit::contributions`] for why that is worth having.
+    pub fn nets(&self) -> Vec<NetId> {
+        let mut nets: Vec<NetId> = self
+            .components
+            .values()
+            .flat_map(|registered| registered.pins.iter().map(|pin| pin.net))
+            .collect();
+        nets.sort_by_key(|net| net.0);
+        nets.dedup();
+        nets
+    }
+
+    /// What each pin is currently putting on `net`, pin by pin.
+    ///
+    /// This is the one thing about a circuit that nothing could see from
+    /// outside, and the one that answers the questions worth asking: *why*
+    /// is this net in error, and *why* is it that width. Knowing a net
+    /// resolved to `Error` says nothing; knowing that one port is driving
+    /// one bit onto a net of two says everything.
+    ///
+    /// Sorted, so a list built from it does not shuffle between frames.
+    pub fn contributions(&self, net: NetId) -> Vec<((ComponentId, usize), Signal)> {
+        let mut driving: Vec<((ComponentId, usize), Signal)> = self
+            .drivers
+            .get(&net)
+            .map(|on_net| {
+                on_net
+                    .iter()
+                    .map(|(&pin, signal)| (pin, signal.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        driving.sort_by_key(|((component, index), _)| (component.0, *index));
+        driving
+    }
+
+    /// What is queued and will actually run, soonest first.
+    ///
+    /// Events naming a component that has since been removed are left out,
+    /// for the same reason [`Circuit::next_event_tick`] skips them: they
+    /// are dropped without evaluating anything, so listing them would be
+    /// listing work that will not happen.
+    pub fn pending(&self) -> Vec<(u64, ComponentId)> {
+        let mut queued: Vec<(u64, ComponentId)> = self
+            .events
+            .iter()
+            .map(|Reverse(event)| (event.tick, event.component))
+            .filter(|(_, component)| self.components.contains_key(component))
+            .collect();
+        queued.sort();
+        queued.dedup();
+        queued
+    }
+
     /// The logical clock: how many ticks this circuit has been advanced by.
     ///
     /// Read-only, and deliberately not a wall-clock time — a tick is one
@@ -627,6 +684,42 @@ mod tests {
         fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
             scalar_eval(_inputs, |_inputs| vec![Level::High])
         }
+    }
+
+    #[test]
+    fn the_contributions_to_a_net_say_who_is_driving_it_and_with_what() {
+        let mut circuit = Circuit::new();
+        let net = circuit.add_net();
+        let a = circuit.add_component(
+            Box::new(AlwaysHigh),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+        let b = circuit.add_component(
+            Box::new(AlwaysHigh),
+            vec![Pin {
+                direction: PinDirection::Output,
+                net,
+            }],
+        );
+        circuit.rewire(&[NetGroup::wire(vec![(a, 0), (b, 0)])]);
+        circuit.schedule_now(a);
+        circuit.schedule_now(b);
+        circuit.run().expect("settles");
+
+        let net = circuit.pins(a)[0].net;
+        assert_eq!(circuit.nets(), vec![net]);
+
+        // The question a resolved value cannot answer: *who* put that there.
+        let contributions = circuit.contributions(net);
+        assert_eq!(contributions.len(), 2);
+        assert_eq!(contributions[0].0, (a, 0));
+        assert_eq!(contributions[1].0, (b, 0));
+        assert!(contributions
+            .iter()
+            .all(|(_, signal)| signal.only_level() == Level::High));
     }
 
     #[test]

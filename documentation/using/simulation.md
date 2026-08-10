@@ -154,6 +154,26 @@ you left on and forgot would otherwise make the circuit look wrong.
 Like pause, it is not remembered between runs: it is a way of working at a
 moment, not something you set once.
 
+## Looking at the engine
+
+`F12`, or **Simulation → Engine state**, opens a window showing the circuit
+as the engine sees it: the logical clock, what is scheduled next, and every
+net with its width, what it resolved to, and — the part worth having —
+**every contribution to it**: which component, which pin, how many bits, and
+what that pin is driving.
+
+That last line is what a resolved value cannot tell you. Knowing a net reads
+`Error` says nothing; knowing that one port is driving one bit onto a net of
+two says everything.
+
+Selecting something narrows it to the nets that thing touches. It reads and
+never writes, so it can be left open while you work.
+
+**Copy for a bug report** puts the whole of it on the clipboard, with the
+version and the platform, ready to paste into an issue. It deliberately does
+not include your circuit — attaching the `.slgx` file yourself is what helps
+most, and it should be your choice to send it.
+
 ## Signal colours
 
 Wires, and the components whose job is to show a state (Clock, Probe), are
