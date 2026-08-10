@@ -39,19 +39,29 @@ better at the thing it's for.
   argument for doing it sooner rather than later — the cost grows with
   everything built on top of the current shape.
 
-- [ ] **A clock's period, and a component's delay**
+- [ ] **A clock's period and phase, and a component's delay**
 
-  Both are constants today: every clock beats every sixty ticks, and every
-  component answers in one. Neither is reachable from the editor.
+  All three are constants today: every clock beats every sixty ticks, every
+  clock's phase is whenever it happened to enter the engine, and every
+  component answers in one tick. None is reachable from the editor.
 
-  The period is the one that bites first — two clocks at different rates is
-  the ordinary way to drive anything, and there is no way to ask for it. The
-  delay matters for the ripple counter already listed below: staged settling
-  is the whole difference between it and a synchronous one, and with every
-  stage at one tick there is nothing to see.
+  - **Period.** Two clocks at different rates is the ordinary way to drive
+    anything, and there is no way to ask for it.
+  - **Phase**, and with it **putting the clocks back in step**. This is the
+    one nobody chose: a clock's phase is decided by *when it was placed*, so
+    two of them are aligned or not by accident. Both halves are wanted —
+    deliberate skew, because two non-overlapping phases is how a real CMOS
+    datapath is clocked, and an *align them all* action for when the skew is
+    not the point.
+  - **Delay.** It decides whether the ripple counter listed below is worth
+    building at all: staged settling is the whole difference between it and
+    a synchronous one, and with every stage at one tick there is nothing to
+    watch.
 
-  `Component::propagation_delay` already exists per component; what is
-  missing is a property and a way to type it.
+  Cheaper together than apart. `Component::propagation_delay` already exists
+  per component, and period and phase are both arguments to the scheduling a
+  `Clock` already does — first fire *here*, then every *this many* ticks.
+  What is missing in all three cases is a property and a way to type it.
 
 - [ ] **A waveform view**
 
