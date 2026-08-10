@@ -37,6 +37,7 @@ use egui_kittest::Harness;
 use simlogix_core::ComponentId;
 
 use super::SimLogixApp;
+use super::WireEndpoint;
 use crate::palette::ComponentKind;
 use crate::toolbar;
 
@@ -318,4 +319,160 @@ fn dragging_a_component_does_nothing_in_the_simulation_view() {
     drag(&mut harness, at, egui::pos2(300.0, 260.0));
 
     assert_eq!(position_of(&harness, id), at);
+}
+
+/// A press and a release in the same place.
+fn click_at(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {
+    press_at(harness, canvas);
+    release(harness, canvas);
+}
+
+fn secondary_click_at(harness: &mut Harness<'_, SimLogixApp>, canvas: egui::Pos2) {
+    let pos = harness.state().screen_pos(canvas);
+    harness
+        .input_mut()
+        .events
+        .push(egui::Event::PointerMoved(pos));
+    step(harness);
+    for pressed in [true, false] {
+        harness.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        step(harness);
+    }
+}
+
+/// Two components with a wire between them, bent through one waypoint.
+fn wired_pair(harness: &mut Harness<'_, SimLogixApp>) -> egui::Pos2 {
+    let waypoint = egui::pos2(300.0, 200.0);
+    let app = harness.state_mut();
+    let a = app.place(ComponentKind::Switch, egui::pos2(200.0, 200.0));
+    let b = app.place(ComponentKind::Led, egui::pos2(400.0, 300.0));
+    app.add_wire(
+        WireEndpoint::Pin(a, 0),
+        WireEndpoint::Pin(b, 0),
+        vec![waypoint],
+    );
+    step(harness);
+    waypoint
+}
+
+#[test]
+fn dragging_a_wires_waypoint_reshapes_it() {
+    let mut harness = harness();
+    let waypoint = wired_pair(&mut harness);
+
+    drag(&mut harness, waypoint, egui::pos2(300.0, 120.0));
+
+    assert_eq!(
+        harness.state().wires[0].waypoints[0],
+        egui::pos2(300.0, 120.0)
+    );
+}
+
+#[test]
+fn right_clicking_a_wire_cuts_it_in_two() {
+    let mut harness = harness();
+    let (a, b) = {
+        let app = harness.state_mut();
+        (
+            app.place(ComponentKind::Switch, egui::pos2(200.0, 200.0)),
+            app.place(ComponentKind::Led, egui::pos2(460.0, 200.0)),
+        )
+    };
+    // Two waypoints, so the route has a segment that is neither its first
+    // nor its last. Cutting at the very start leaves nothing before the cut
+    // and so gives one piece rather than two — which is correct, and not
+    // what this test is about.
+    harness.state_mut().add_wire(
+        WireEndpoint::Pin(a, 0),
+        WireEndpoint::Pin(b, 0),
+        vec![egui::pos2(300.0, 200.0), egui::pos2(360.0, 200.0)],
+    );
+    step(&mut harness);
+    assert_eq!(harness.state().wires.len(), 1);
+
+    secondary_click_at(&mut harness, egui::pos2(330.0, 200.0));
+
+    let wires = &harness.state().wires;
+    assert_eq!(wires.len(), 2, "cut into two pieces");
+    // Each piece keeps the end it already had and gains a loose one where
+    // the cut fell, so neither is left attached to nothing.
+    assert!(wires
+        .iter()
+        .all(|wire| matches!(wire.from, WireEndpoint::Free(_))
+            || matches!(wire.to, WireEndpoint::Free(_))));
+}
+
+#[test]
+fn a_rubber_band_selects_everything_it_touches() {
+    let mut harness = harness();
+    let (a, b) = {
+        let app = harness.state_mut();
+        (
+            app.place(ComponentKind::Led, egui::pos2(240.0, 200.0)),
+            app.place(ComponentKind::Led, egui::pos2(240.0, 300.0)),
+        )
+    };
+    step(&mut harness);
+
+    // Starts on empty canvas above and left of both, and stops *inside* the
+    // second one rather than past it: the band takes what it overlaps, not
+    // only what it swallows whole, and a long component reaching out of the
+    // sweep would otherwise be impossible to catch.
+    drag(
+        &mut harness,
+        egui::pos2(140.0, 140.0),
+        egui::pos2(240.0, 300.0),
+    );
+
+    let selection = &harness.state().selection;
+    assert!(selection.components.contains(&a), "the one it covered");
+    assert!(
+        selection.components.contains(&b),
+        "and the one it only touched"
+    );
+}
+
+#[test]
+fn a_queued_component_is_dropped_where_the_canvas_is_clicked() {
+    // This broke once for a reason no unit test could see: a full-canvas
+    // `ui.interact` for the rubber band covered the `Scene`'s own background
+    // response, and placement goes through exactly that.
+    let mut harness = harness();
+    harness.state_mut().tool = toolbar::Tool::Place(ComponentKind::Led);
+    step(&mut harness);
+
+    click_at(&mut harness, egui::pos2(260.0, 220.0));
+
+    let placed = &harness.state().placed;
+    assert_eq!(placed.len(), 1);
+    assert_eq!(placed[0].center(), egui::pos2(260.0, 220.0));
+}
+
+#[test]
+fn switching_circuit_brings_the_drawing_into_view() {
+    // The logic here was right and the wiring threw the result away:
+    // `scene_rect` is copied into a local before `Scene::show` and written
+    // back after, so assigning the *field* had the value computed and
+    // discarded every frame. Only a real frame shows that.
+    let mut harness = harness();
+    let far = egui::pos2(2400.0, 1800.0);
+    {
+        let app = harness.state_mut();
+        app.place(ComponentKind::Led, far);
+        app.create_circuit(String::new());
+    }
+    step(&mut harness);
+
+    harness.state_mut().switch_to(0);
+    step(&mut harness);
+
+    assert!(
+        harness.state().scene_rect.contains(far),
+        "the camera should be looking at the drawing, not where it was before"
+    );
 }

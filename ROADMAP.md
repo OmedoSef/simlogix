@@ -121,15 +121,18 @@ Not user-visible, but they decide how expensive everything above is.
         and snapping hides an error smaller than a grid step, so a released
         drag came out equal with the bug back in
   - [x] Dragging a component in the simulation view does nothing
-  - [ ] Dragging a wire's waypoint, and the right-click that cuts a wire
-  - [ ] The rubber band, including that it catches what it merely touches
-  - [ ] Placing from the palette, which broke once when a widget covered the
+  - [x] Dragging a wire's waypoint, and the right-click that cuts a wire —
+        cutting a *middle* segment, since cutting the first leaves nothing
+        before the cut and correctly gives one piece rather than two
+  - [x] The rubber band, including that it catches what it merely touches
+  - [x] Placing on the canvas, which broke once when a widget covered the
         scene's own background response
-  - [ ] The view framing on open and on switching circuit — the logic was
-        right and the wiring threw the result away
+  - [x] The view framing on switching circuit — the logic was right and the
+        wiring threw the result away
   - [ ] Paint order: circuit labels behind the floating windows. Needs either
         a snapshot or a way to read the layer order back; worth deciding
-        which before writing it
+        which before writing it — the last one left, and the only one whose
+        approach isn't settled
 
 ## Known gaps in what ships
 
