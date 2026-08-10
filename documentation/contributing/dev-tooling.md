@@ -41,6 +41,33 @@ Use `Harness::run_steps`, not `Harness::run`: this application asks for a
 repaint every frame — which is what keeps a clock ticking — so it never
 settles, and `run` gives up after a few tries.
 
+## `scripts/set-format-version.py`
+
+```bash
+scripts/set-format-version.py ~/Projects/CPU/base_component.slgx 9
+```
+
+Stamps a project file with a different format version, for carrying one to
+a machine still running an older release. The version is what a build
+checks before reading anything else, and it refuses a document newer than
+itself — so a file saved from a working tree cannot be opened by the last
+release until that release catches up.
+
+Only the stamp changes. Nothing is stripped, so anything the older build
+cannot read is still in the file and comes back when you open it here
+again — but that build **writes back only what it understood**, so saving
+there drops it for good. Hence the backup, written beside the file, which
+is an ordinary project: rename it to open it, or type its full name into
+the open dialog, since the format is recognised from the bytes rather than
+the extension.
+
+It reads the result back before reporting success, and refuses if any entry
+other than `project.json` came out changed. It runs on the only copy of
+someone's work, so it does not get to assume the write went as intended.
+
+This exists because the alternative — cutting a release every time the
+format gains a field — makes the release the thing that has to wait.
+
 ## `cargo-audit`
 
 Installed in the devcontainer image, scans `Cargo.lock` against the [RustSec advisory database](https://rustsec.org/) for known vulnerabilities and unmaintained crates:
