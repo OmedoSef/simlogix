@@ -79,7 +79,10 @@ impl SimLogixApp {
         if ports.is_empty() {
             let strings = Strings::for_language(self.language);
             crate::symbol::TextLayer::for_ui(ui).text(
-                egui::pos2(center.x, appearance.rect(center).bottom() + 12.0),
+                egui::pos2(
+                    center.x,
+                    appearance.rect(center, canvas::Rotation::Deg0).bottom() + 12.0,
+                ),
                 egui::Align2::CENTER_TOP,
                 strings.appearance_no_ports,
                 10.0,

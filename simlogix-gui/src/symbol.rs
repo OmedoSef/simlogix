@@ -786,6 +786,17 @@ pub fn rotate(point: Pos2, center: Pos2, rotation: Rotation) -> Pos2 {
     center + d
 }
 
+/// A rectangle turned about `center`, still axis-aligned.
+///
+/// Quarter turns only, so this is exact rather than an approximation of one:
+/// turning two opposite corners and normalising is the whole of it.
+pub fn rotate_rect(rect: egui::Rect, center: Pos2, rotation: Rotation) -> egui::Rect {
+    egui::Rect::from_two_pos(
+        rotate(rect.min, center, rotation),
+        rotate(rect.max, center, rotation),
+    )
+}
+
 pub fn draw_pin(painter: &Painter, point: Pos2, color: Color32) {
     painter.circle_filled(point, PIN_RADIUS, color);
 }

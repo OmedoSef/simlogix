@@ -278,9 +278,18 @@ impl PlacedComponent {
         if let Shape::Instance { appearance, .. } = &self.shape {
             // A symbol you drew decides its own extent; the generated box
             // reports exactly what it always did.
-            return appearance.rect(self.center);
+            return appearance.rect(self.center, self.rotation);
         }
-        Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, BOX_SIZE.y))
+        // Turned too, and for the same reason: the box is not square, so a
+        // component on its side occupies the other way round. This one still
+        // covered its own centre, so it was a mis-shaped hit area rather than
+        // an absent one — visible in what the selection outline drew and in
+        // what a rubber band caught.
+        symbol::rotate_rect(
+            Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, BOX_SIZE.y)),
+            self.center,
+            self.rotation,
+        )
     }
 
     pub fn bus_transceiver(id: ComponentId, center: Pos2, kind: ComponentKind) -> Self {
@@ -632,7 +641,7 @@ impl PlacedComponent {
                 appearance,
                 ..
             } => {
-                let rect = appearance.rect(*center);
+                let rect = appearance.rect(*center, *rotation);
                 let pin_positions = symbol::draw_instance(
                     painter,
                     *center,

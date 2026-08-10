@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use crate::canvas::{self, Rotation};
 use crate::palette::ComponentKind;
 use crate::placed_component::{instance_height, InstancePort};
-use crate::symbol::{draw_pin, rotate, TextLayer};
+use crate::symbol::{draw_pin, rotate, rotate_rect, TextLayer};
 
 /// How wide the generated box's body is, as a fraction of the box.
 ///
@@ -459,8 +459,15 @@ impl Appearance {
 
     /// The box this symbol occupies on the canvas — what you click, drag and
     /// see the selection outline around.
-    pub fn rect(&self, center: Pos2) -> egui::Rect {
-        self.bounds().translate(center.to_vec2())
+    ///
+    /// Turned with the symbol, because [`Appearance::draw`] turns every point
+    /// it draws. Without that they part company, and a symbol drawn away from
+    /// its own origin parts company *completely*: one drawn 120 above it lands
+    /// 120 below when turned half a circle, while the box stayed where the
+    /// drawing used to be — nothing left to click, so the component could no
+    /// longer be selected or moved at all.
+    pub fn rect(&self, center: Pos2, rotation: Rotation) -> egui::Rect {
+        rotate_rect(self.bounds().translate(center.to_vec2()), center, rotation)
     }
 
     /// The symbol's extent about its centre — **not symmetric**.
@@ -653,6 +660,31 @@ mod tests {
         };
         assert_eq!(blank.bounds().center(), Pos2::ZERO);
         assert_eq!(blank.bounds().width(), canvas::BOX_SIZE.x);
+    }
+
+    #[test]
+    fn a_symbol_drawn_away_from_its_origin_is_clickable_where_it_lands() {
+        let mut symbol = Appearance::generated(&ports(1, 1));
+        // Drawn well above its own origin, which is what you naturally end
+        // up with once a pin has been dragged out — and what Romain's
+        // controlled buffer looks like.
+        symbol.shapes.push(Shape::Polyline {
+            points: vec![(-30.0, -140.0), (30.0, -120.0), (-30.0, -100.0)],
+            closed: true,
+        });
+
+        let center = pos2(100.0, 100.0);
+        let upright = symbol.rect(center, Rotation::Deg0);
+        let turned = symbol.rect(center, Rotation::Deg180);
+
+        // Half a circle takes the corner at (-30, -140) to (30, 140), so
+        // that is where the box has to reach.
+        let landed = center + egui::vec2(30.0, 140.0);
+        assert!(turned.contains(landed));
+        // And this is what makes the assertion above worth making: the box
+        // used to stay where the drawing had been, which for a symbol this
+        // far off its origin left the two with nothing in common.
+        assert!(!upright.contains(landed));
     }
 
     #[test]

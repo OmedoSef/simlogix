@@ -22,6 +22,32 @@ fn creating_a_circuit_opens_it_without_disturbing_the_others() {
 }
 
 #[test]
+fn a_component_on_its_side_occupies_the_other_way_round() {
+    let mut app = SimLogixApp::default();
+    let id = app.place(ComponentKind::And, egui::pos2(40.0, 40.0));
+    let placed = |app: &SimLogixApp| {
+        app.placed
+            .iter()
+            .find(|placed| placed.id() == id)
+            .expect("just placed")
+            .rect()
+    };
+
+    // The box is 80 by 40, so a quarter turn has to swap them: it is what
+    // the selection outline draws and what a rubber band catches.
+    let upright = placed(&app);
+    assert_eq!((upright.width(), upright.height()), (80.0, 40.0));
+
+    app.placed
+        .iter_mut()
+        .find(|placed| placed.id() == id)
+        .expect("just placed")
+        .rotate();
+    let turned = placed(&app);
+    assert_eq!((turned.width(), turned.height()), (40.0, 80.0));
+}
+
+#[test]
 fn switching_keeps_each_circuit_to_its_own_layout() {
     let mut app = SimLogixApp::default();
     app.place(ComponentKind::Button, egui::pos2(40.0, 40.0));

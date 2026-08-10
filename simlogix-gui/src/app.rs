@@ -1255,7 +1255,7 @@ impl SimLogixApp {
     fn content_rect(&self) -> Option<egui::Rect> {
         if self.view == toolbar::View::Appearance {
             let (_, appearance) = self.active_appearance();
-            return Some(appearance.rect(egui::Pos2::ZERO));
+            return Some(appearance.rect(egui::Pos2::ZERO, canvas::Rotation::Deg0));
         }
 
         let mut bounds: Option<egui::Rect> = None;
