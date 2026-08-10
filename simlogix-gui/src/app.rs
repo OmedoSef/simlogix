@@ -2118,13 +2118,15 @@ impl SimLogixApp {
             return;
         };
         let net = net.net;
-        let before = self.circuit.signal_at(net).only_level();
+        // The whole signal, not one level: a clock on a bus changes when
+        // any bit of it does.
+        let before = self.circuit.signal_at(net);
         for _ in 0..MAX_EDGE_EVENTS {
             let Some(tick) = self.circuit.next_event_tick() else {
                 return;
             };
             self.step(tick.saturating_sub(self.circuit.now()).max(1));
-            if self.circuit.signal_at(net).only_level() != before {
+            if self.circuit.signal_at(net) != before {
                 return;
             }
         }
@@ -2803,7 +2805,12 @@ impl SimLogixApp {
                                 .lone_wire()
                                 .and_then(|id| self.wires.iter().find(|wire| wire.id == id));
                             if let Some(wire) = selected_wire {
-                                if let Some(color) = properties::show_wire(ui, strings, wire.color)
+                                let width = self
+                                    .wire_net(wire)
+                                    .map(|net| self.circuit.net_width(net))
+                                    .unwrap_or(1);
+                                if let Some(color) =
+                                    properties::show_wire(ui, strings, wire.color, width)
                                 {
                                     pending_wire_color = Some((wire.id, color));
                                 }

@@ -5,6 +5,7 @@
 //! so the private fields they assert on stay private to everyone else.
 
 use super::*;
+use simlogix_core::Level;
 
 #[test]
 fn creating_a_circuit_opens_it_without_disturbing_the_others() {
@@ -1382,6 +1383,87 @@ fn a_clock_beat_still_to_come_is_not_a_change_waiting() {
         "a clock is pending"
     );
     assert!(!app.change_pending(), "but not *now*");
+}
+
+#[test]
+fn a_port_declaring_eight_bits_makes_the_net_a_bus() {
+    let mut app = SimLogixApp::default();
+    let source = app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    let sink = app.place(ComponentKind::OutputPort, egui::pos2(200.0, 0.0));
+    app.add_wire(
+        WireEndpoint::Pin(source, 0),
+        WireEndpoint::Pin(sink, 0),
+        Vec::new(),
+    );
+    let net = |app: &SimLogixApp| app.circuit.pins(source)[0].net;
+    assert_eq!(app.circuit.net_width(net(&app)), 1, "a plain wire to begin");
+
+    // The width is set on the *component*; the wire takes it from what it
+    // joins, which is the whole reason it is not asked for twice.
+    for id in [source, sink] {
+        let placed = app
+            .placed
+            .iter_mut()
+            .find(|placed| placed.id() == id)
+            .expect("just placed");
+        let mut properties = placed.properties().clone();
+        properties.width = Some(8);
+        placed.set_properties(properties);
+    }
+    app.rebuild_nets();
+
+    assert_eq!(app.circuit.net_width(net(&app)), 8);
+    assert_eq!(app.circuit.signal_at(net(&app)).width(), 8);
+
+    // And the port actually *drives* eight bits, which is the half that was
+    // missing when this first shipped: the property sized the net while the
+    // component went on supplying one, so the net faulted every bit of
+    // itself — correctly, since the port was lying about its own contract.
+    app.step(SETTLE_TICKS);
+    let signal = app.circuit.signal_at(net(&app));
+    assert_eq!(signal.width(), 8);
+    assert!(
+        signal.levels().iter().all(|&level| level != Level::Error),
+        "the port should supply the width it claims, got {signal:?}"
+    );
+}
+
+#[test]
+fn two_driven_widths_on_one_net_fault_it_rather_than_being_guessed_at() {
+    let mut app = SimLogixApp::default();
+    // Both *driving*, which is what makes the disagreement visible: a port
+    // that only reads contributes nothing, so its declared width is not
+    // something the net can notice. Saying so about a reader is the half of
+    // this still to be built.
+    let wide = app.place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    let narrow = app.place(ComponentKind::InputPort, egui::pos2(200.0, 0.0));
+    app.add_wire(
+        WireEndpoint::Pin(wide, 0),
+        WireEndpoint::Pin(narrow, 0),
+        Vec::new(),
+    );
+
+    let placed = app
+        .placed
+        .iter_mut()
+        .find(|placed| placed.id() == wide)
+        .expect("just placed");
+    let mut properties = placed.properties().clone();
+    properties.width = Some(8);
+    placed.set_properties(properties);
+    app.rebuild_nets();
+
+    // Eight against one. The net takes the wider, so the narrower pin then
+    // contributes the wrong width — and the whole net faults rather than
+    // being padded, which is what makes the mistake visible.
+    let net = app.circuit.pins(wide)[0].net;
+    assert_eq!(app.circuit.net_width(net), 8);
+    app.step(SETTLE_TICKS);
+    let signal = app.circuit.signal_at(net);
+    assert!(
+        signal.levels().iter().all(|&level| level == Level::Error),
+        "expected every bit faulted, got {signal:?}"
+    );
 }
 
 #[test]

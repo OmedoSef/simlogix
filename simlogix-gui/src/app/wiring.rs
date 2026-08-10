@@ -596,15 +596,38 @@ impl SimLogixApp {
             }
         }
 
+        // How wide each component's pins are, from its properties. The same
+        // pass that says what a net *joins* is the one that says how wide it
+        // is: both are read off the drawing, and neither can be restated
+        // without the other.
+        let declared: HashMap<ComponentId, usize> = self
+            .placed
+            .iter()
+            .map(|placed| (placed.id(), placed.properties().width()))
+            .collect();
+        // The widest pin on the net wins, and a narrower one then contributes
+        // the wrong width — which the engine already faults, on every bit.
+        // Taking the maximum rather than refusing here is what makes the
+        // mismatch *visible* instead of silently dropped.
+        let width_of = |group: &[(ComponentId, usize)]| {
+            group
+                .iter()
+                .filter_map(|(component, _)| declared.get(component))
+                .copied()
+                .max()
+                .unwrap_or(1)
+        };
+
         // A lone pin is its own net anyway, which `rewire` already does for
-        // anything it isn't told about.
-        // One bit each, for now: nothing in the drawing declares a width
-        // yet. When something does, it is read here — the same pass that
-        // says what a net *joins* is the one that says how wide it is.
+        // anything it isn't told about — but only at one bit, so a wide pin
+        // on its own has to be named.
         let groups: Vec<NetGroup> = groups
             .into_values()
-            .filter(|group| group.len() > 1)
-            .map(NetGroup::wire)
+            .filter(|group| group.len() > 1 || width_of(group) > 1)
+            .map(|group| {
+                let width = width_of(&group);
+                NetGroup::bus(group, width)
+            })
             .collect();
         self.circuit.rewire(&groups);
 
@@ -678,6 +701,12 @@ impl SimLogixApp {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for placed in &self.placed {
             placed.id().hash(&mut hasher);
+            // The declared width is part of connectivity now: it is what a
+            // net's width is derived from, so changing it has to rebuild.
+            // Without this the property would move and the net would keep
+            // the width it had — leaving the component driving a width the
+            // net no longer has, which faults every bit of it.
+            placed.properties().width().hash(&mut hasher);
         }
         for wire in &self.wires {
             wire.id.hash(&mut hasher);

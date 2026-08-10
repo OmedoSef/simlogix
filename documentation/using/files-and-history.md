@@ -95,6 +95,7 @@ to do anything, and is written back as `.slgx` next time you save.
 | 9 | A circuit can carry a symbol of its own. |
 | 10 | A pin's name can be nudged clear of the line art. |
 | 11 | A pin can carry an inversion bubble. |
+| 12 | A component can declare how many bits its pins carry. |
 
 ## Circuits
 

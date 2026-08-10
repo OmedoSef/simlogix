@@ -395,8 +395,8 @@ impl SimLogixApp {
                         let color = if self.show_signal_state {
                             match net {
                                 Some(net) => {
-                                    let level = canvas::signal_color(
-                                        self.circuit.signal_at(net).only_level(),
+                                    let level = canvas::bus_color(
+                                        &self.circuit.signal_at(net),
                                         ui.visuals().dark_mode,
                                     );
                                     // Faded when nothing but a pass
@@ -440,12 +440,23 @@ impl SimLogixApp {
                         }
 
                         let is_selected_wire = self.selection.wires.contains(&wire_id);
+                        // A bus is drawn heavier than a wire, so the two can
+                        // be told apart at a glance — which everything else
+                        // about buses depends on. Not proportional to the
+                        // width: what matters is one bit against several,
+                        // and a 32-bit wire as thick as a component would
+                        // be a schematic nobody can read.
+                        let bus = net.is_some_and(|net| self.circuit.net_width(net) > 1);
+                        let heavier = if bus { 2.0 } else { 0.0 };
                         let stroke = if is_selected_wire {
-                            egui::Stroke::new(3.0, canvas::accent_color(ui.visuals().dark_mode))
+                            egui::Stroke::new(
+                                3.0 + heavier,
+                                canvas::accent_color(ui.visuals().dark_mode),
+                            )
                         } else if is_hovered {
-                            egui::Stroke::new(3.0, color.gamma_multiply(1.6))
+                            egui::Stroke::new(3.0 + heavier, color.gamma_multiply(1.6))
                         } else {
-                            egui::Stroke::new(2.0, color)
+                            egui::Stroke::new(2.0 + heavier, color)
                         };
 
                         // The user's colour goes *underneath*, as a casing:

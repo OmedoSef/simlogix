@@ -5,7 +5,7 @@
 
 use egui::{pos2, Color32, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2};
 use serde::{Deserialize, Serialize};
-use simlogix_core::Level;
+use simlogix_core::{Level, Signal};
 
 /// What colour a net at `signal` is drawn in — the single place the signal
 /// colour code is defined, so wires and anything else reading out a net
@@ -44,6 +44,45 @@ pub fn signal_color(signal: Level, dark_mode: bool) -> Color32 {
             _ => Color32::from_gray(105),
         }
     }
+}
+
+/// What colour a whole signal is drawn in.
+///
+/// A plain wire keeps its level's colour. On a **bus** the exception
+/// dominates, in the order a schematic is read: a fault anywhere is the
+/// error colour, then anything unknown is the unknown one, then a bus
+/// nobody drives reads as nothing there.
+///
+/// A bus that carries a real value gets a colour of its own rather than
+/// High's or Low's, because a mix of ones and zeroes is neither and
+/// borrowing either would claim the bus was all one thing. The readout
+/// beside it is what says *which* value.
+pub fn bus_color(signal: &Signal, dark_mode: bool) -> Color32 {
+    if signal.width() == 1 {
+        return signal_color(signal.only_level(), dark_mode);
+    }
+    let levels: Vec<Level> = signal
+        .levels()
+        .iter()
+        .map(|level| level.strengthened())
+        .collect();
+    let dominant = if levels.contains(&Level::Error) {
+        Level::Error
+    } else if levels
+        .iter()
+        .any(|&level| level != Level::High && level != Level::Low && level != Level::HighZ)
+    {
+        Level::Unknown
+    } else if levels.iter().all(|&level| level == Level::HighZ) {
+        Level::HighZ
+    } else if levels.contains(&Level::HighZ) {
+        Level::Unknown
+    } else if dark_mode {
+        return Color32::from_rgb(96, 190, 200);
+    } else {
+        return Color32::from_rgb(18, 106, 116);
+    };
+    signal_color(dominant, dark_mode)
 }
 
 /// How much a weakly driven net's colour is faded.

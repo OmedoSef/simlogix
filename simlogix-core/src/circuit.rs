@@ -188,11 +188,25 @@ impl Circuit {
         }
 
         // Rebuild what each net carries from the contributions that moved.
+        // A contribution that no longer fits its net is *not* carried over:
+        // its component is woken to supply the right width instead.
+        //
+        // Keeping it would leave the net faulted on every bit until
+        // something else happened to disturb that component — and a
+        // component with no inputs, a port or a source, is never disturbed
+        // by anything. Making the rule hold here rather than asking every
+        // caller to remember it is the difference between an invariant and
+        // a convention.
         self.drivers.clear();
+        let mut resized: Vec<ComponentId> = Vec::new();
         for (pin, signal) in contributions {
             let Some(&net) = assignment.get(&pin) else {
                 continue; // Its component has since been removed.
             };
+            if signal.width() != self.net_width(net) {
+                resized.push(pin.0);
+                continue;
+            }
             self.drivers.entry(net).or_default().insert(pin, signal);
         }
         self.settled.clear();
@@ -207,6 +221,10 @@ impl Circuit {
                 // many unknown bits, not one.
                 .unwrap_or_else(|| Signal::splat(Level::Unknown, width));
             self.settled.insert(net, resolved);
+        }
+
+        for component in resized {
+            self.schedule_at(component, self.clock);
         }
 
         // Wake only what actually saw its input move.

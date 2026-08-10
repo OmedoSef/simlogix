@@ -94,6 +94,13 @@ better at the thing it's for.
   fixed by unplugging one; "four bits against eight" is fixed by changing a
   property. Two messages, not one.
 
+  Half of that works: the net takes the widest declared, so a narrower pin
+  that *drives* contributes the wrong width and the engine faults every bit
+  — visible, if not yet named. A pin that only **reads** contributes
+  nothing, so wiring a one-bit output to an eight-bit bus is still silent.
+  Saying so needs the declared widths compared where they are known, which
+  is `rebuild_nets`, and a channel to report it on.
+
   ### What has to exist
 
   - [ ] **A splitter**, one component and bidirectional: its pins are
@@ -104,15 +111,41 @@ better at the thing it's for.
     it drives, so it must not send back to the bus what it has just read.
   - [ ] **A constant**, whose value is typed in a base of your choosing. It
     works on a one-bit wire too, where it is simply 0 or 1.
-  - [ ] **A width property** on the components that are built in rather than
-    drawn — the ports first, then the gates.
+  - [ ] **A value a port can be set to**, rather than every bit alike. A
+    port drives all its bits the same today, so a two-bit one can only be 0
+    or 3 — and that was the wrong justification: a port does not stand for a
+    switch, it stands for *what a parent will drive*, and a parent drives
+    whatever it likes.
+
+    It goes in a **panel of its own** beside the properties, because there
+    are two things here and they must not be confused: the **value**, which
+    is what the port sends *now* — runtime state, no undo step, never saved
+    — and the **resting value**, which is where it sits when the project
+    opens and is a property like any other. The same digits, two different
+    natures; one field for both would have to lie about one of them.
+
+    Typed in a base, and by the same widget the constant uses — the two ask
+    the identical question and building it twice is how the two answers
+    drift. The undriven position stays alongside: a value and *not driving*
+    are different claims, and a three-state port needs both. On a one-bit
+    port it degenerates to the 0/1/undriven cycle that exists, so nothing is
+    lost.
+  - [ ] 🚧 **A width property** on the components that are built in rather
+    than drawn. **The ports have it**, and `rebuild_nets` reads it — the same
+    pass that says what a net joins now says how wide it is. The widest pin
+    on a net wins, so a narrower one contributes the wrong width and the
+    engine faults every bit: taking the maximum rather than refusing is what
+    makes a mismatch *visible* instead of quietly dropped. The gates are
+    next.
   - [ ] **Reading a bus.** The `Probe` gains a **base** — binary, hex,
     decimal — because eight letters in a row is not a reading. Its *width*
     stays derived from its net: that is a fact it can already look up, and a
     probe told the wrong number would quietly show something false.
-  - [ ] **Seeing a bus.** Drawn thicker than a wire, with its width written
-    on it. Until it can be told apart at a glance, nothing else here is
-    usable.
+  - [ ] 🚧 **Seeing a bus.** **Drawn thicker**, and a selected wire says how
+    many bits it carries. Not proportional to the width — what matters is
+    one bit against several, and a 32-bit wire as thick as a component is a
+    schematic nobody can read. Still missing: the width readable *without*
+    selecting, which probably means on hover.
 
   **Bit 0 is the least significant**, fixed once and written down, because
   the splitter has to say which bits go where and that convention is
@@ -147,6 +180,39 @@ better at the thing it's for.
   per component, and period and phase are both arguments to the scheduling a
   `Clock` already does — first fire *here*, then every *this many* ticks.
   What is missing in all three cases is a property and a way to type it.
+
+- [ ] **An inspector: the circuit as the engine sees it**
+
+  A window listing, for the selection or for everything: each **net** with
+  its id, its width, what it resolved to, and **every contribution to it**
+  — which component, which pin, what that pin is driving — plus whether it
+  is only weakly held. Alongside it the logical clock and what is scheduled
+  next.
+
+  The case for it is not theoretical. Every bug found in this project so far
+  was found by writing a throwaway test that printed exactly this and
+  reading it: the clock that never moved, the CMOS NAND that read `Error`,
+  the two-bit port that showed `E`. Each time the answer was one line of
+  engine state that nothing in the application could show.
+
+  It **reads and never writes** — a view, not an editor — so it can be left
+  open while you work, and it is the general form of two things wanted
+  separately: *which drivers disagree* on a faulted net, and *why is this
+  net the width it is*. Both are one row of the same table.
+
+  A window rather than a panel: the right-hand one is spoken for, and this
+  is something you open when a circuit surprises you rather than something
+  you keep on screen. Selecting a component or a wire should narrow it to
+  that, since "everything" is unreadable past a few dozen nets.
+
+  What it needs from `Circuit` is read-only and small: the nets, the
+  per-pin contributions behind each one, and the pending events.
+  `signal_at`, `net_width` and `next_event_tick` already exist; the driver
+  breakdown does not.
+
+  **Worth doing before the rest of the buses, not after.** It is the tool
+  that makes the remaining bus work quick to debug, and the bus work is what
+  will make the state hardest to reason about by eye.
 
 - [ ] **A waveform view**
 
@@ -219,10 +285,6 @@ better at the thing it's for.
   fit on screen.
 - [ ] **Reading a net's identity** on hover — today, telling two nets apart
   means following wires by eye.
-- [ ] **Saying which drivers disagree** on a net that reads `Error`. The
-  engine knows — the resolution is per pin — and the answer is currently
-  found by reading the schematic and reasoning, which is what a simulator is
-  supposed to save you.
 - [ ] **Reading a project written by a newer build** when the difference is
   only fields it doesn't know. The version check is all or nothing, so a
   format that gained an optional field refuses to open at all, and

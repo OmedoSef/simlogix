@@ -56,12 +56,25 @@ pub struct CircuitPort {
     /// What [`PortSetting::Undriven`] resolves to for this port.
     undriven: Level,
     level: Rc<Cell<PortSetting>>,
+    /// How many bits it drives — the same number the drawing gave the net.
+    ///
+    /// Shared rather than copied in, for the same reason the level is: the
+    /// GUI owns the property and can change it at any moment, and a port
+    /// driving a width the net no longer has would fault every bit of it.
+    width: Rc<Cell<usize>>,
+}
+
+/// The two handles the GUI keeps on a port: what it is set to, and how wide
+/// it is. Both are properties it owns and can change without rebuilding.
+pub struct PortHandles {
+    pub level: Rc<Cell<PortSetting>>,
+    pub width: Rc<Cell<usize>>,
 }
 
 impl CircuitPort {
     /// A value entering the circuit. Undriven is [`Level::Unknown`]:
     /// nothing outside is supplying it, so its value genuinely isn't known.
-    pub fn input() -> (Self, Rc<Cell<PortSetting>>) {
+    pub fn input() -> (Self, PortHandles) {
         Self::new(Level::Unknown)
     }
 
@@ -70,31 +83,43 @@ impl CircuitPort {
     /// drive the net. `Unknown` counts as a driver, so it would put every
     /// net a bidirectional port touches into conflict instead of stepping
     /// aside.
-    pub fn bidirectional() -> (Self, Rc<Cell<PortSetting>>) {
+    pub fn bidirectional() -> (Self, PortHandles) {
         Self::new(Level::HighZ)
     }
 
-    fn new(undriven: Level) -> (Self, Rc<Cell<PortSetting>>) {
+    fn new(undriven: Level) -> (Self, PortHandles) {
         let level = Rc::new(Cell::new(PortSetting::default()));
+        let width = Rc::new(Cell::new(1));
         (
             Self {
                 undriven,
                 level: Rc::clone(&level),
+                width: Rc::clone(&width),
             },
-            level,
+            PortHandles { level, width },
         )
     }
 }
 
 impl Component for CircuitPort {
+    /// The first component that is genuinely width-aware: it drives every
+    /// bit of its width alike.
+    ///
+    /// Setting a port to eight bits and driving one would be a contribution
+    /// of the wrong width, and the net would fault every bit of itself —
+    /// correctly, since a component that says it is eight bits wide and
+    /// supplies one is lying about its own contract.
+    ///
+    /// All bits the same because a port is set by hand, and one switch
+    /// cannot say eight different things. Typing a *value* is the
+    /// constant's job.
     fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(_inputs, |_inputs| {
-            vec![match self.level.get() {
-                PortSetting::Undriven => self.undriven,
-                PortSetting::Low => Level::Low,
-                PortSetting::High => Level::High,
-            }]
-        })
+        let level = match self.level.get() {
+            PortSetting::Undriven => self.undriven,
+            PortSetting::Low => Level::Low,
+            PortSetting::High => Level::High,
+        };
+        vec![Signal::splat(level, self.width.get().max(1))]
     }
 }
 
@@ -149,11 +174,11 @@ mod tests {
 
     #[test]
     fn an_input_holds_the_level_it_was_set_to() {
-        let (port, level) = CircuitPort::input();
+        let (port, handles) = CircuitPort::input();
         // Undriven from the outside is exactly what "not known" means here.
         assert_eq!(eval_levels(&port, &[]), vec![Level::Unknown]);
 
-        level.set(PortSetting::High);
+        handles.level.set(PortSetting::High);
         assert_eq!(eval_levels(&port, &[]), vec![Level::High]);
         // Latching, not momentary: nothing releases it.
         assert_eq!(eval_levels(&port, &[]), vec![Level::High]);
@@ -161,14 +186,27 @@ mod tests {
 
     #[test]
     fn an_undriven_bidirectional_port_steps_aside_rather_than_clouding_its_net() {
-        let (port, level) = CircuitPort::bidirectional();
+        let (port, handles) = CircuitPort::bidirectional();
         // The difference from an input, and the reason the two exist:
         // `HighZ` is ignored when a net resolves, so the circuit inside can
         // drive it. `Unknown` would count as a driver and cause a conflict.
         assert_eq!(eval_levels(&port, &[]), vec![Level::HighZ]);
 
-        level.set(PortSetting::Low);
+        handles.level.set(PortSetting::Low);
         assert_eq!(eval_levels(&port, &[]), vec![Level::Low]);
+    }
+
+    #[test]
+    fn a_port_drives_every_bit_of_the_width_it_was_given() {
+        let (port, handles) = CircuitPort::input();
+        handles.level.set(PortSetting::High);
+        handles.width.set(4);
+
+        // All four alike: a port is set by hand, and one switch cannot say
+        // four different things. Typing a value is the constant's job.
+        let driven = port.eval(&[]);
+        assert_eq!(driven.len(), 1);
+        assert_eq!(driven[0].levels(), [Level::High; 4]);
     }
 
     #[test]

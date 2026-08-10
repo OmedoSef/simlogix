@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
-use simlogix_core::{Circuit, ComponentId, Level, NetId, PortSetting};
+use simlogix_core::{Circuit, ComponentId, Level, NetId, PortHandles, PortSetting, Signal};
 
 use crate::appearance::Appearance;
 use crate::canvas::{self, Rotation, BOX_SIZE};
@@ -158,7 +158,8 @@ enum Shape {
     /// put — neither springs back.
     HandSet {
         kind: ComponentKind,
-        level: Option<Rc<Cell<PortSetting>>>,
+        /// Absent on an output port, the one that only ever reads.
+        handles: Option<PortHandles>,
     },
     /// Two `InOut` bus sides at pin indices 0/1 (`A`, `B`) and two control
     /// inputs at 2/3 (`Dir`, `Enable`) — the only component whose pins both
@@ -225,9 +226,9 @@ impl PlacedComponent {
         id: ComponentId,
         center: Pos2,
         kind: ComponentKind,
-        level: Option<Rc<Cell<PortSetting>>>,
+        handles: Option<PortHandles>,
     ) -> Self {
-        Self::new(id, center, Shape::HandSet { kind, level })
+        Self::new(id, center, Shape::HandSet { kind, handles })
     }
 
     pub fn instance(
@@ -320,7 +321,7 @@ impl PlacedComponent {
     /// would be making an edit.
     pub fn hand_set_level(&self) -> Option<&Rc<Cell<PortSetting>>> {
         match &self.shape {
-            Shape::HandSet { level, .. } => level.as_ref(),
+            Shape::HandSet { handles, .. } => handles.as_ref().map(|handles| &handles.level),
             _ => None,
         }
     }
@@ -335,12 +336,17 @@ impl PlacedComponent {
         // a button's `pressed`, except a latching port has no "held" state
         // to settle itself from, so it's pushed explicitly.
         if let Shape::HandSet {
-            level: Some(level), ..
+            handles: Some(handles),
+            ..
         } = &self.shape
         {
             if properties.initial_level() != self.properties.initial_level() {
-                level.set(properties.initial_level());
+                handles.level.set(properties.initial_level());
             }
+            // Unconditional: the component has to drive the width the net
+            // was given, and a port claiming a width it does not supply
+            // faults every bit of that net.
+            handles.width.set(properties.width());
         }
         // A switch needs the same push for the same reason: it latches, so
         // there is no "held" state for it to settle itself from the way a
@@ -546,9 +552,16 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net).only_level())
-                    .unwrap_or(Level::Unknown);
-                let color = if signal == Level::High {
+                    .map(|pin| circuit.signal_at(pin.net))
+                    .unwrap_or_default();
+                // A LED lights on a definite high — on a bus, only when
+                // every bit of it is high, since a LED has one lamp and
+                // cannot report eight different bits.
+                let color = if signal
+                    .levels()
+                    .iter()
+                    .all(|&l| l.strengthened() == Level::High)
+                {
                     let [r, g, b] = properties.color.unwrap_or(DEFAULT_LED_COLOR);
                     Color32::from_rgb(r, g, b)
                 } else {
@@ -705,20 +718,20 @@ impl PlacedComponent {
                     pins,
                 }
             }
-            Shape::HandSet { level, .. } => {
+            Shape::HandSet { handles, .. } => {
                 // Every port shows what its net resolves to, driving or not:
                 // on an output that's the whole point, and on the other two
                 // it's what tells you a value you set is being fought over.
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net).only_level())
-                    .unwrap_or(Level::Unknown);
-                let readout = signal_letter(signal);
+                    .map(|pin| circuit.signal_at(pin.net))
+                    .unwrap_or_default();
+                let readout = signal_text(&signal);
                 // The readout follows the signal, the body doesn't: which way
                 // the value crosses the boundary is structure and shouldn't
                 // change colour as the circuit runs.
-                let mut readout_color = canvas::signal_color(signal, dark_mode);
+                let mut readout_color = canvas::bus_color(&signal, dark_mode);
                 if circuit
                     .pins(id)
                     .first()
@@ -735,9 +748,9 @@ impl PlacedComponent {
                     *rotation,
                     symbol_color,
                     SymbolState {
-                        label: readout,
+                        label: &readout,
                         label_color: Some(readout_color),
-                        level: level.as_ref().map(|level| level.get()),
+                        level: handles.as_ref().map(|handles| handles.level.get()),
                         ..Default::default()
                     },
                     &text_layer,
@@ -750,7 +763,7 @@ impl PlacedComponent {
                 // Latching: a click advances it and it stays there. Only on
                 // a click, never on a drag, so moving a port across the
                 // canvas can't also change what it carries.
-                if let Some(level) = level {
+                if let Some(level) = handles.as_ref().map(|handles| &handles.level) {
                     if response.clicked() {
                         level.set(level.get().next(properties.cycles_undriven(&kind)));
                         circuit.schedule_now(id);
@@ -928,12 +941,12 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net).only_level())
-                    .unwrap_or(Level::Unknown);
+                    .map(|pin| circuit.signal_at(pin.net))
+                    .unwrap_or_default();
                 // A probe reads out the net it's attached to, so it uses the
                 // very colour code that net is drawn in — its own duplicate
                 // of the five states was the one place they could disagree.
-                let mut color = canvas::signal_color(signal, dark_mode);
+                let mut color = canvas::bus_color(&signal, dark_mode);
                 if circuit
                     .pins(id)
                     .first()
@@ -941,7 +954,7 @@ impl PlacedComponent {
                 {
                     color = color.gamma_multiply(canvas::WEAK_FADE);
                 }
-                let label = signal_letter(signal);
+                let label = signal_text(&signal);
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
@@ -950,7 +963,7 @@ impl PlacedComponent {
                     *rotation,
                     color,
                     SymbolState {
-                        label,
+                        label: &label,
                         ..Default::default()
                     },
                     &text_layer,
@@ -978,13 +991,13 @@ impl PlacedComponent {
                 let signal = circuit
                     .pins(id)
                     .first()
-                    .map(|pin| circuit.signal_at(pin.net).only_level())
-                    .unwrap_or(Level::Unknown);
+                    .map(|pin| circuit.signal_at(pin.net))
+                    .unwrap_or_default();
                 // A clock is a signal source, so its symbol follows the same
                 // colour code as the wire it drives (`canvas::signal_color`)
                 // rather than a lit/unlit one of its own — green while high,
                 // not red.
-                let color = canvas::signal_color(signal, dark_mode);
+                let color = canvas::bus_color(&signal, dark_mode);
                 let rect = Rect::from_center_size(*center, BOX_SIZE);
                 let pin_positions = symbol::draw(
                     painter,
@@ -1128,6 +1141,51 @@ impl PlacedComponent {
 /// The interactive area is inset by [`PIN_HIT_MARGIN`] so it never overlaps
 /// a pin's own hit-rect — see that constant.
 /// The one-character readout a `Probe` or a port shows for a signal.
+/// What a whole signal reads as, in as few characters as possible.
+///
+/// A plain wire keeps its single letter. A bus cannot: `only_level` answers
+/// `Error` for anything wider, which is right for a *component* that has no
+/// meaning on a bus and quite wrong for a readout — it made a perfectly
+/// healthy two-bit port show `E`.
+///
+/// The exception dominates, in the order a schematic is read: a fault
+/// anywhere is `E`, then anything unknown is `?`, then a bus nobody drives
+/// is `Z`. Only once every bit is a definite level is there a *value* to
+/// show, and then it is shown in hex, least significant bit first being
+/// what `Signal` already promises.
+fn signal_text(signal: &Signal) -> String {
+    if signal.width() == 1 {
+        return signal_letter(signal.only_level()).to_string();
+    }
+    let levels: Vec<Level> = signal
+        .levels()
+        .iter()
+        .map(|level| level.strengthened())
+        .collect();
+    if levels.contains(&Level::Error) {
+        return "E".to_string();
+    }
+    if levels
+        .iter()
+        .any(|&level| level != Level::High && level != Level::Low && level != Level::HighZ)
+    {
+        return "?".to_string();
+    }
+    if levels.iter().all(|&level| level == Level::HighZ) {
+        return "Z".to_string();
+    }
+    if levels.contains(&Level::HighZ) {
+        return "?".to_string();
+    }
+    let value: u128 = levels
+        .iter()
+        .enumerate()
+        .filter(|(_, &level)| level == Level::High)
+        .map(|(bit, _)| 1u128 << bit.min(127))
+        .sum();
+    format!("{value:X}")
+}
+
 fn signal_letter(signal: Level) -> &'static str {
     // A net never resolves to a weak level, so those arms are unreachable;
     // reading them as their full-strength selves is the only answer that
@@ -1271,6 +1329,28 @@ fn pin_handle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_healthy_bus_does_not_read_as_an_error() {
+        // The bug this exists for: `only_level` answers `Error` for
+        // anything wider than a bit — right for a component with no meaning
+        // on a bus, and quite wrong for a readout. A two-bit port sitting
+        // there undriven showed a red `E`.
+        let undriven = Signal::splat(Level::Unknown, 2);
+        assert_eq!(signal_text(&undriven), "?");
+
+        // Every bit definite is a *value*, in hex, bit 0 least significant.
+        let five = Signal::from_levels(vec![Level::High, Level::Low, Level::High]);
+        assert_eq!(signal_text(&five), "5");
+
+        // And a fault anywhere still dominates, which is the order a
+        // schematic is read in.
+        let faulted = Signal::from_levels(vec![Level::High, Level::Error]);
+        assert_eq!(signal_text(&faulted), "E");
+
+        // A plain wire is untouched.
+        assert_eq!(signal_text(&Signal::bit(Level::High)), "1");
+    }
 
     fn port(kind: ComponentKind) -> InstancePort {
         InstancePort {

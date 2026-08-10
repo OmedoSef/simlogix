@@ -56,6 +56,15 @@ pub struct Properties {
     /// the current one: runtime state is still never saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial: Option<PortSetting>,
+
+    /// How many bits this component's pins carry. Unset means one — a plain
+    /// wire, which is what everything drawn before buses existed is.
+    ///
+    /// Set on the *component*, never on a wire: a wire takes its width from
+    /// what it joins, so asking for it there would be asking twice and
+    /// letting the two disagree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<usize>,
 }
 
 impl Properties {
@@ -74,6 +83,11 @@ impl Properties {
     /// to whatever will drive the pin from outside.
     pub fn cycles_undriven(&self, kind: &ComponentKind) -> bool {
         *kind == ComponentKind::TriStateSource || self.is_tri_state()
+    }
+
+    /// How many bits this component's pins carry. One unless it says wider.
+    pub fn width(&self) -> usize {
+        self.width.unwrap_or(1).max(1)
     }
 
     pub fn is_tri_state(&self) -> bool {
@@ -121,6 +135,12 @@ const MAX_TEXT_SIZE: f32 = 32.0;
 /// A lead longer than this stops being part of the symbol and starts being a
 /// wire the user didn't draw.
 const MAX_PIN_LEAD: f32 = 40.0;
+
+/// The widest bus offered. Not a limit the engine has — a signal is a list
+/// and could be any length — but a number past which a schematic is not
+/// what you want, and a spinner with no ceiling invites a typo that turns
+/// into a million-entry vector.
+const MAX_WIDTH: usize = 64;
 
 fn siblings(kind: &ComponentKind) -> Option<[ComponentKind; 2]> {
     VARIANTS.into_iter().find(|pair| pair.contains(kind))
@@ -609,7 +629,8 @@ pub fn show(
         }
         // Everything that drives a level you set by hand. An output port
         // only reads, so it has neither a resting value nor a say in how
-        // many states the interface has.
+        // many states the interface has — but it does have a width, which
+        // is offered to all three below rather than here.
         ComponentKind::InputPort | ComponentKind::InOutPort | ComponentKind::TriStateSource => {
             // A source has nothing to declare: three positions is what it
             // is. A port's count is a promise to whatever drives its pin
@@ -650,6 +671,29 @@ pub fn show(
         _ => {}
     }
 
+    // Every port, an output included: it reads a bus as much as an input
+    // drives one. Outside the match because it is not one kind's extra —
+    // the gates and the rest get it next.
+    if matches!(
+        kind,
+        ComponentKind::InputPort | ComponentKind::OutputPort | ComponentKind::InOutPort
+    ) {
+        ui.add_space(8.0);
+        ui.label(strings.property_width);
+        let mut width = properties.width();
+        let response = ui
+            .add(egui::DragValue::new(&mut width).range(1..=MAX_WIDTH))
+            .on_hover_text(strings.property_width_hint);
+        if response.drag_started() || response.gained_focus() {
+            edit_started = true;
+        }
+        if response.changed() {
+            // Unset when it is back to a plain wire, so a project that never
+            // asked for a bus keeps saying nothing about widths.
+            properties.width = (width > 1).then_some(width);
+        }
+    }
+
     result.edit_started = edit_started;
     result
 }
@@ -664,12 +708,20 @@ pub fn show_wire(
     ui: &mut Ui,
     strings: &Strings,
     color: Option<[u8; 3]>,
+    width: usize,
 ) -> Option<Option<[u8; 3]>> {
     let mut edited = None;
 
     ui.heading(strings.properties_heading);
     ui.add_space(4.0);
     ui.label(strings.property_wire);
+    // Shown, never set: a wire takes its width from what it joins, so this
+    // is a reading rather than a choice. Set it on a component.
+    if width > 1 {
+        ui.label(
+            RichText::new(strings.property_wire_bits.replace("{}", &width.to_string())).weak(),
+        );
+    }
     ui.add_space(8.0);
 
     ui.label(strings.property_color);
@@ -764,6 +816,7 @@ mod tests {
             color: Some([1, 2, 3]),
             tri_state: Some(true),
             initial: Some(PortSetting::High),
+            width: Some(8),
         };
 
         let json = serde_json::to_string(&properties).expect("serializes");
@@ -776,7 +829,7 @@ mod tests {
         // asserting: `PortLevel` became `PortSetting` on the strength of it.
         assert_eq!(
             json,
-            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High"}"#
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8}"#
         );
     }
 

@@ -56,6 +56,7 @@ ADDITIVE = {
     9: True,   # a circuit can carry a symbol of its own
     10: True,  # a pin's name can be nudged
     11: True,  # a pin can carry an inversion bubble
+    12: True,  # a component can declare how many bits its pins carry
 }
 
 
