@@ -964,8 +964,17 @@ impl PlacedComponent {
                 // Latching: a click advances it and it stays there. Only on
                 // a click, never on a drag, so moving a port across the
                 // canvas can't also change what it carries.
+                //
+                // **And only while the circuit is being watched.** A click
+                // in the schematic *selects* — to set a width, a name, a
+                // base — and driving on the same gesture meant every such
+                // click also poked the circuit. What it carries is runtime
+                // state, so changing it belongs to the mode that exists for
+                // running the thing. A `Switch` is deliberately not like
+                // this: its position is part of the document, so flipping
+                // one is an edit and belongs where edits are made.
                 if let Some(drive) = handles.as_ref().map(|handles| &handles.drive) {
-                    if response.clicked() {
+                    if response.clicked() && !movable {
                         drive.set(
                             drive
                                 .get()

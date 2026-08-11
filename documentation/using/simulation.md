@@ -154,6 +154,26 @@ you left on and forgot would otherwise make the circuit look wrong.
 Like pause, it is not remembered between runs: it is a way of working at a
 moment, not something you set once.
 
+## Driving a circuit by hand
+
+**Click a port or a tri-state source to drive it**, in the **Simulation**
+view. Each click steps its value by one: undriven, 0, 1, 2… up to the
+widest it can carry, then back to undriven. On a one-bit port that is the
+switch it has always been; on a bus it counts, so a click can never lose
+more than a step of whatever you set.
+
+In the **Schematic** view the same click *selects* instead, so picking a
+port to set its width or its name never also pokes the circuit.
+
+To set a whole value at once, use the **Value** panel on the right — type
+it in decimal, or `0x…` for hex and `0b…` for binary. That panel stays
+usable while the simulation is showing, unlike the properties above it:
+what a port is driving *now* is runtime state, never saved and never an
+undo step, which is exactly why it is a section of its own.
+
+A **switch** is the exception on purpose: its position is part of the
+document, so flipping one is an edit and works in either view.
+
 ## When two widths meet
 
 A net takes the **widest** width declared by anything on it. Anything

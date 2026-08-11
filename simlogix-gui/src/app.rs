@@ -3038,7 +3038,13 @@ impl SimLogixApp {
                             ui.label(egui::RichText::new(strings.properties_read_only).weak());
                             ui.separator();
                         }
-                        ui.add_enabled_ui(editable, |ui| {
+                        // Enabled whatever the mode, because what is
+                        // disabled is chosen section by section below. The
+                        // **value** stays live while a circuit is being
+                        // watched: it is runtime state, which is the whole
+                        // reason it was split out of the properties, and
+                        // greying it with them undid that distinction.
+                        ui.add_enabled_ui(true, |ui| {
                             // A symbol's shapes are what's selectable while the
                             // appearance is showing; components and wires belong
                             // to the other view and aren't even on screen.
@@ -3103,8 +3109,11 @@ impl SimLogixApp {
                                     .wire_net(wire)
                                     .map(|net| self.circuit.net_width(net))
                                     .unwrap_or(1);
-                                if let Some(color) =
-                                    properties::show_wire(ui, strings, wire.color, width)
+                                if let Some(color) = ui
+                                    .add_enabled_ui(editable, |ui| {
+                                        properties::show_wire(ui, strings, wire.color, width)
+                                    })
+                                    .inner
                                 {
                                     pending_wire_color = Some((wire.id, color));
                                 }
@@ -3118,13 +3127,17 @@ impl SimLogixApp {
                             match selected {
                                 Some(placed) => {
                                     let mut edited = placed.properties().clone();
-                                    let outcome = properties::show(
-                                        ui,
-                                        strings,
-                                        &placed.kind(),
-                                        &mut edited,
-                                        self.base,
-                                    );
+                                    let outcome = ui
+                                        .add_enabled_ui(editable, |ui| {
+                                            properties::show(
+                                                ui,
+                                                strings,
+                                                &placed.kind(),
+                                                &mut edited,
+                                                self.base,
+                                            )
+                                        })
+                                        .inner;
                                     if let Some(kind) = outcome.change_kind {
                                         pending_kind = Some((placed.id(), kind));
                                     }

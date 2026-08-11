@@ -707,6 +707,12 @@ fn a_tri_state_source_can_be_clicked_into_letting_go() {
     let mut harness = harness();
     let at = egui::pos2(200.0, 200.0);
     let id = harness.state_mut().place(ComponentKind::TriStateSource, at);
+    // Driving by hand is a simulation gesture: in the schematic a click on
+    // one of these selects it, so that setting a width or a name does not
+    // also poke the circuit.
+    harness
+        .state_mut()
+        .switch_view(crate::toolbar::View::Simulation);
     step(&mut harness);
 
     let signal = |harness: &Harness<'_, SimLogixApp>| {
@@ -718,10 +724,13 @@ fn a_tri_state_source_can_be_clicked_into_letting_go() {
     // is putting on it.
     assert_eq!(signal(&harness), Level::Unknown);
 
-    click_at(&mut harness, at);
-    assert_eq!(signal(&harness), Level::High);
+    // Low then high: a click steps the value up, which on a plain wire is
+    // the switch it has always been — the order is the one thing that
+    // changed when the cycle stopped rebuilding the value out of all-ones.
     click_at(&mut harness, at);
     assert_eq!(signal(&harness), Level::Low);
+    click_at(&mut harness, at);
+    assert_eq!(signal(&harness), Level::High);
 
     // And round to letting go, without a property having to be set for it.
     // A port would have gone back to high here: there the number of states
@@ -1055,5 +1064,107 @@ fn a_wide_readout_grows_its_box_and_a_one_bit_one_does_not() {
     assert!(
         harness.state().placed[0].rect().width() > wide,
         "binary takes four times the characters of hexadecimal"
+    );
+}
+
+#[test]
+fn clicking_a_bus_port_steps_its_value_instead_of_wiping_it() {
+    // Romain's: a click rebuilt the value out of all-ones, so it slammed
+    // every bit alike and threw away whatever had been typed. Handy on a
+    // plain wire, where the value *is* the position; destructive on a bus.
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::InputPort, at);
+    harness.state_mut().set_component_properties(
+        id,
+        crate::properties::Properties {
+            width: Some(4),
+            ..Default::default()
+        },
+    );
+    harness
+        .state_mut()
+        .switch_view(crate::toolbar::View::Simulation);
+    step(&mut harness);
+
+    let value = |harness: &Harness<'_, SimLogixApp>| {
+        harness.state().placed[0]
+            .hand_set_level()
+            .expect("a driving port has a level")
+            .get()
+    };
+
+    // Five clicks from nothing: down onto zero, then a step each time.
+    for expected in 0..=3u64 {
+        click_at(&mut harness, at);
+        assert_eq!(
+            value(&harness),
+            simlogix_core::PortDrive::Driving(expected),
+            "after {} clicks",
+            expected + 1
+        );
+    }
+}
+
+#[test]
+fn the_value_panel_stays_live_while_the_simulation_view_is_showing() {
+    // The whole reason the value was split out of the properties: it is
+    // runtime state, not something the document holds. Greying it along
+    // with them undid that distinction, in the one mode it is for.
+    let mut harness = harness();
+    let id = harness
+        .state_mut()
+        .place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
+    harness.state_mut().selection.pick_component(id, false);
+    harness
+        .state_mut()
+        .switch_view(crate::toolbar::View::Simulation);
+    step(&mut harness);
+
+    let drive = |harness: &Harness<'_, SimLogixApp>| {
+        harness.state().placed[0]
+            .hand_set_level()
+            .expect("a driving port has a level")
+            .get()
+    };
+    assert_eq!(drive(&harness), simlogix_core::PortDrive::Undriven);
+
+    // Clicked for real, through the widget: a disabled checkbox answers a
+    // click with nothing, which is exactly what this has to rule out.
+    let strings = crate::i18n::Strings::for_language(harness.state().language);
+    harness.get_by_label(strings.value_driving).click();
+    step(&mut harness);
+
+    assert_eq!(
+        drive(&harness),
+        simlogix_core::PortDrive::Driving(0),
+        "the value panel answered a click while the simulation was showing"
+    );
+}
+
+#[test]
+fn a_click_in_the_schematic_selects_a_port_without_driving_it() {
+    // The other half of the rule, and the reason for it: a click in the
+    // schematic is how a port is picked to set its width, its name or its
+    // base — and driving on that same gesture poked the circuit every time.
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::InputPort, at);
+    step(&mut harness);
+
+    click_at(&mut harness, at);
+    step(&mut harness);
+
+    assert!(
+        harness.state().selection.components.contains(&id),
+        "the click picked the port"
+    );
+    assert_eq!(
+        harness.state().placed[0]
+            .hand_set_level()
+            .expect("a driving port has a level")
+            .get(),
+        simlogix_core::PortDrive::Undriven,
+        "and left what it carries alone"
     );
 }

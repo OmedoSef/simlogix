@@ -101,19 +101,29 @@ impl PortDrive {
         }
     }
 
-    /// The next position of the click cycle: undriven, all high, all low,
-    /// round again. `tri_state` off skips the undriven position entirely.
+    /// The next position of the click cycle: **one step up the value**,
+    /// wrapping past the top to undriven. `tri_state` off skips the
+    /// undriven position entirely.
     ///
-    /// A click is one gesture and cannot say a whole value; that is what
-    /// the value field is for. What it can do is the three positions a
-    /// switch has always had.
+    /// One rule at every width, and at one bit it *is* the switch it has
+    /// always been — undriven, low, high, round again. On a bus it counts,
+    /// which is usable by hand at four bits and harmless at thirty-two: a
+    /// click can never move the value by more than a step.
+    ///
+    /// It used to rebuild the value out of `all_ones`, so a click on a bus
+    /// slammed every bit to the same level and wiped whatever had been
+    /// typed. Handy on a plain wire, where the value *is* the position;
+    /// destructive on a bus, where a port stands for what a parent will
+    /// drive and a parent drives whatever it likes. Setting a whole value
+    /// at once is what the value field is for.
     pub fn next(self, tri_state: bool, width: usize) -> Self {
-        let high = Self::Driving(all_ones(width));
+        let top = all_ones(width);
         match (self, tri_state) {
-            (Self::Undriven, _) => high,
-            (Self::Driving(bits), _) if bits != 0 => Self::Driving(0),
+            (Self::Undriven, _) => Self::Driving(0),
+            (Self::Driving(bits), _) if bits < top => Self::Driving(bits + 1),
+            // Past the top: back to letting go, or round to nothing again.
             (Self::Driving(_), true) => Self::Undriven,
-            (Self::Driving(_), false) => high,
+            (Self::Driving(_), false) => Self::Driving(0),
         }
     }
 }
@@ -293,25 +303,52 @@ mod tests {
     }
 
     #[test]
-    fn a_click_cycles_the_three_positions_a_switch_has() {
-        // A click is one gesture and cannot say a value; what it can do is
-        // undriven, all high, all low — which is what it always did.
+    fn a_click_on_a_plain_wire_is_still_the_switch_it_has_always_been() {
+        // One bit is the case the click cycle was built for, and the rule
+        // has to keep meaning the same thing there: off, on, let go.
         let mut drive = PortDrive::Undriven;
         for expected in [
-            PortDrive::Driving(0b11),
             PortDrive::Driving(0),
+            PortDrive::Driving(1),
             PortDrive::Undriven,
         ] {
-            drive = drive.next(true, 2);
+            drive = drive.next(true, 1);
             assert_eq!(drive, expected);
         }
 
         // Two-state: it never reaches undriven again once it has left.
-        let mut drive = PortDrive::Driving(0b11);
-        for expected in [PortDrive::Driving(0), PortDrive::Driving(0b11)] {
-            drive = drive.next(false, 2);
+        let mut drive = PortDrive::Driving(0);
+        for expected in [PortDrive::Driving(1), PortDrive::Driving(0)] {
+            drive = drive.next(false, 1);
             assert_eq!(drive, expected);
         }
+    }
+
+    #[test]
+    fn a_click_on_a_bus_counts_rather_than_wiping_it() {
+        // What Romain reported: a click rebuilt the value out of `all_ones`,
+        // so it slammed every bit alike and threw away whatever had been
+        // typed. A step at a time can never lose more than a step.
+        let mut drive = PortDrive::Driving(0b1010);
+        for expected in [
+            PortDrive::Driving(0b1011),
+            PortDrive::Driving(0b1100),
+            PortDrive::Driving(0b1101),
+        ] {
+            drive = drive.next(true, 4);
+            assert_eq!(drive, expected);
+        }
+
+        // And past the top it lets go rather than wrapping silently, so the
+        // cycle still has an end you can reach by clicking.
+        assert_eq!(
+            PortDrive::Driving(0b1111).next(true, 4),
+            PortDrive::Undriven
+        );
+        assert_eq!(
+            PortDrive::Driving(0b1111).next(false, 4),
+            PortDrive::Driving(0)
+        );
     }
 
     #[test]

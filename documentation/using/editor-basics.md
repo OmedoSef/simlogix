@@ -164,6 +164,7 @@ project file.
 | **Closed** | Switch | Where the switch is now, and how it will be saved. |
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
 | **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
+| **Value** (panel) | Input, Bidirectional, Tri-state source | What it is driving *now* — runtime, never saved. Clicking the component steps it by one. |
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
 | **Bits** | the three ports, the plain gates, Constant, Tri-state buffer, the transceivers | How many bits its *data* pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
 | **Value** | Constant | What it puts on its wire. Typed in decimal, or `0x…` / `0b…`. |
