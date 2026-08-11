@@ -2387,3 +2387,39 @@ fn colouring_a_branch_leaves_its_bus_and_its_siblings_alone() {
         assert_eq!(colour(wires[other]), None, "nor branch {other}");
     }
 }
+
+#[test]
+fn a_rail_drives_as_wide_as_the_wire_it_is_tied_to() {
+    // No property to set: a rail has no value of its own, so nothing about
+    // it would say `8`. The width comes from the wire, which is what makes
+    // tying a bus down one gesture rather than two.
+    let mut app = SimLogixApp::default();
+    let rail = app.place(ComponentKind::Power, egui::pos2(40.0, 40.0));
+    let out = app.place(ComponentKind::OutputPort, egui::pos2(200.0, 40.0));
+    app.add_wire(
+        WireEndpoint::Pin(rail, 0),
+        WireEndpoint::Pin(out, 0),
+        Vec::new(),
+    );
+    // The port is what declares the width; the rail declares nothing at all,
+    // exactly as a probe does, so it can never disagree with its net.
+    widen(&mut app, &[out], 8);
+    app.advance_circuit(SETTLE_TICKS);
+
+    let net = app.circuit.pins(out)[0].net;
+    assert_eq!(app.circuit.net_width(net), 8);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::High; 8],
+        "every bit of the bus is pulled up"
+    );
+
+    // And on a plain wire it is exactly what it always was.
+    let mut app = SimLogixApp::default();
+    let ground = app.place(ComponentKind::Ground, egui::pos2(40.0, 40.0));
+    app.rebuild_nets();
+    app.advance_circuit(SETTLE_TICKS);
+    let net = app.circuit.pins(ground)[0].net;
+    assert_eq!(app.circuit.net_width(net), 1);
+    assert_eq!(app.circuit.signal_at(net).levels(), [Level::Low]);
+}

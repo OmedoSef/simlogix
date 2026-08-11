@@ -11,7 +11,7 @@ use crate::signal::Signal;
 pub struct Nor;
 
 impl Component for Nor {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         bitwise_eval(inputs, |inputs| match inputs {
             [a, b] => nor(*a, *b),
             _ => Level::Unknown,

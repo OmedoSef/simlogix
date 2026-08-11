@@ -12,7 +12,7 @@ use crate::signal::Signal;
 pub struct Probe;
 
 impl Component for Probe {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         scalar_eval(_inputs, |_inputs| Vec::new())
     }
 }

@@ -9,7 +9,7 @@ use crate::signal::Signal;
 pub struct Buffer;
 
 impl Component for Buffer {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         bitwise_eval(inputs, |inputs| match inputs {
             [a] => *a,
             _ => Level::Unknown,

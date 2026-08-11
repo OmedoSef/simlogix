@@ -193,7 +193,7 @@ impl Component for CircuitPort {
     /// Bit by bit from whatever value it was set to, so a two-bit port can
     /// be any of the four things a parent might drive into it — not only
     /// all-low and all-high, which is all a single level could say.
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         let drive = self.drive.get();
         let width = self.width.get().max(1);
         vec![Signal::from_levels(
@@ -214,7 +214,7 @@ impl Component for CircuitPort {
 pub struct CircuitOutput;
 
 impl Component for CircuitOutput {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         scalar_eval(_inputs, |_inputs| Vec::new())
     }
 }
@@ -240,7 +240,7 @@ impl Component for CircuitAnchor {
     /// which is what a splitter's own pins would have done to the bus they
     /// are supposed to be part of. An anchor is not a driver; the honest
     /// way to say so is to hand back no signal.
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         Vec::new()
     }
 }
@@ -289,18 +289,18 @@ mod tests {
         // whatever it likes.
         handles.drive.set(PortDrive::Driving(0b0101));
         assert_eq!(
-            port.eval(&[])[0].levels(),
+            port.eval(&[], &[])[0].levels(),
             [Level::High, Level::Low, Level::High, Level::Low],
             "bit 0 is the least significant"
         );
 
         // All high is still one setting away, and it means all four.
         handles.drive.set(PortSetting::High.to_drive(4));
-        assert_eq!(port.eval(&[])[0].levels(), [Level::High; 4]);
+        assert_eq!(port.eval(&[], &[])[0].levels(), [Level::High; 4]);
 
         // Undriven is a whole-port state, not a value.
         handles.drive.set(PortDrive::Undriven);
-        assert_eq!(port.eval(&[])[0].levels(), [Level::Unknown; 4]);
+        assert_eq!(port.eval(&[], &[])[0].levels(), [Level::Unknown; 4]);
     }
 
     #[test]
@@ -383,11 +383,14 @@ mod tests {
         // four faults the net on every bit, which is what a splitter's own
         // pins would do to the bus they are part of.
         assert!(CircuitAnchor
-            .eval(&[
-                Signal::bit(Level::High),
-                Signal::bit(Level::Low),
-                Signal::bit(Level::Unknown),
-            ])
+            .eval(
+                &[
+                    Signal::bit(Level::High),
+                    Signal::bit(Level::Low),
+                    Signal::bit(Level::Unknown),
+                ],
+                &[]
+            )
             .is_empty());
     }
 

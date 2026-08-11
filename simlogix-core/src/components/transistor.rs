@@ -76,7 +76,7 @@ impl Transistor {
 }
 
 impl Component for Transistor {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         scalar_eval(inputs, |inputs| match inputs {
             [gate, source] if self.conducts(*gate) => vec![self.pass(*source)],
             _ => vec![Level::HighZ],

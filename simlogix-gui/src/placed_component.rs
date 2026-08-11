@@ -507,7 +507,11 @@ impl PlacedComponent {
     pub fn pin_width(&self, index: usize) -> Option<usize> {
         let declared = self.properties.width();
         match &self.shape {
-            Shape::Probe => None,
+            // Neither declares a width: a probe *measures* its net and a
+            // rail follows it, so being wrong about one is not a thing
+            // either can do. A `Led` deliberately still says one bit —
+            // wiring a one-bit device to a bus is a real mistake.
+            Shape::Probe | Shape::Rail(_) => None,
             Shape::Instance { ports, .. } => Some(ports.get(index).map_or(1, |port| port.width)),
             // It shares `TwoInputGate`'s shape but not its pins: the enable
             // at index 1 is one bit whatever passes through.

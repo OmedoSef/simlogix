@@ -38,7 +38,7 @@ impl Button {
 }
 
 impl Component for Button {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         scalar_eval(_inputs, |_inputs| {
             vec![if self.pressed.get() {
                 Level::High

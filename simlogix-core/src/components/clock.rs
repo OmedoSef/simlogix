@@ -29,7 +29,7 @@ impl Clock {
 }
 
 impl Component for Clock {
-    fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         scalar_eval(_inputs, |_inputs| {
             let next = match self.state.get() {
                 Level::High => Level::Low,

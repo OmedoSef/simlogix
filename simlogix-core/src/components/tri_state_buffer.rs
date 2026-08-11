@@ -18,7 +18,7 @@ use crate::signal::Signal;
 pub struct TriStateBuffer;
 
 impl Component for TriStateBuffer {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         match inputs {
             [data, enable] => {
                 // One enable governs the whole bus, however wide it is: the
@@ -117,7 +117,7 @@ mod tests {
         // against a buffer that only ever looked at bit 0.
         let data = Signal::from_levels(vec![Level::Low, Level::High, Level::High, Level::Low]);
         assert_eq!(
-            TriStateBuffer.eval(&[data.clone(), Signal::bit(Level::High)]),
+            TriStateBuffer.eval(&[data.clone(), Signal::bit(Level::High)], &[]),
             vec![data]
         );
     }
@@ -125,7 +125,10 @@ mod tests {
     #[test]
     fn a_disabled_buffer_lets_go_of_every_bit() {
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::splat(Level::High, 4), Signal::bit(Level::Low)]),
+            TriStateBuffer.eval(
+                &[Signal::splat(Level::High, 4), Signal::bit(Level::Low)],
+                &[]
+            ),
             vec![Signal::splat(Level::HighZ, 4)]
         );
     }
@@ -137,13 +140,16 @@ mod tests {
         // same width.
         for enable in [Level::Unknown, Level::HighZ] {
             assert_eq!(
-                TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::bit(enable)]),
+                TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::bit(enable)], &[]),
                 vec![Signal::splat(Level::Unknown, 3)],
                 "an enable that is merely {enable:?} leaves every bit unknown"
             );
         }
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::bit(Level::Error)]),
+            TriStateBuffer.eval(
+                &[Signal::splat(Level::High, 3), Signal::bit(Level::Error)],
+                &[]
+            ),
             vec![Signal::splat(Level::Error, 3)]
         );
     }
@@ -153,7 +159,10 @@ mod tests {
         // Nothing about a wide enable says which bit switches the buffer on,
         // and `only_level` is what refuses to guess.
         assert_eq!(
-            TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::splat(Level::High, 3)]),
+            TriStateBuffer.eval(
+                &[Signal::splat(Level::High, 3), Signal::splat(Level::High, 3)],
+                &[]
+            ),
             vec![Signal::splat(Level::Error, 3)]
         );
     }

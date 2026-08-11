@@ -43,7 +43,7 @@ impl SrLatch {
 }
 
 impl Component for SrLatch {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         scalar_eval(inputs, |inputs| {
             let next = match inputs {
                 [set, reset] => next_state(*set, *reset, self.state.get()),

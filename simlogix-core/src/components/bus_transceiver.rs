@@ -64,7 +64,7 @@ impl BusTransceiver {
 }
 
 impl Component for BusTransceiver {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         match inputs {
             [a, b, dir, enable] => {
                 // `Dir` and the enable are one wire each whatever the two
@@ -234,12 +234,15 @@ mod tests {
         let value = Signal::from_levels(vec![Level::High, Level::Low, Level::Low, Level::High]);
         for part in both_variants() {
             assert_eq!(
-                part.eval(&[
-                    value.clone(),
-                    Signal::splat(Level::Unknown, 4),
-                    Signal::bit(Level::High),
-                    Signal::bit(on(part)),
-                ]),
+                part.eval(
+                    &[
+                        value.clone(),
+                        Signal::splat(Level::Unknown, 4),
+                        Signal::bit(Level::High),
+                        Signal::bit(on(part)),
+                    ],
+                    &[]
+                ),
                 vec![Signal::splat(Level::HighZ, 4), value.clone()],
                 "A drives B, and the listening side lets go of every bit"
             );
@@ -251,12 +254,15 @@ mod tests {
         let part = BusTransceiver::active_high();
         let wide = || Signal::splat(Level::High, 4);
         assert_eq!(
-            part.eval(&[
-                wide(),
-                wide(),
-                Signal::bit(Level::Low),
-                Signal::bit(Level::Low)
-            ]),
+            part.eval(
+                &[
+                    wide(),
+                    wide(),
+                    Signal::bit(Level::Low),
+                    Signal::bit(Level::Low)
+                ],
+                &[]
+            ),
             vec![
                 Signal::splat(Level::HighZ, 4),
                 Signal::splat(Level::HighZ, 4)
@@ -272,12 +278,15 @@ mod tests {
         // available rather than an answer about the bits that line up.
         let part = BusTransceiver::active_high();
         assert_eq!(
-            part.eval(&[
-                Signal::splat(Level::High, 2),
-                Signal::splat(Level::High, 4),
-                Signal::bit(Level::High),
-                Signal::bit(Level::High),
-            ]),
+            part.eval(
+                &[
+                    Signal::splat(Level::High, 2),
+                    Signal::splat(Level::High, 4),
+                    Signal::bit(Level::High),
+                    Signal::bit(Level::High),
+                ],
+                &[]
+            ),
             vec![
                 Signal::splat(Level::Error, 4),
                 Signal::splat(Level::Error, 4)

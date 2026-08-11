@@ -12,7 +12,15 @@ pub trait Component {
     /// with no meaning on a bus reads its inputs with
     /// [`Signal::only_level`], which answers `Error` for anything but a
     /// plain wire rather than quietly reporting bit 0.
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal>;
+    ///
+    /// `widths` is how wide each **output** pin is, in the same order as the
+    /// signals to return — a component is evaluated *in* a circuit, and how
+    /// wide its own pins are is part of that. Nearly everything ignores it:
+    /// a gate takes its width from its inputs, a port and a constant from a
+    /// property they were set. It exists for what drives without reading and
+    /// has nothing of its own to say about width — a [`crate::Rail`], where
+    /// there is no value to set and so nothing that could carry a width.
+    fn eval(&self, inputs: &[Signal], widths: &[usize]) -> Vec<Signal>;
 
     /// Delay, in logical ticks, between an input change and the resulting output change.
     /// Defaults to 1 tick.
@@ -113,7 +121,9 @@ pub fn across_bits(buses: &[&Signal], bit: impl Fn(&[Level]) -> Vec<Level>) -> V
 pub(crate) fn eval_levels(component: &dyn Component, inputs: &[Level]) -> Vec<Level> {
     let inputs: Vec<Signal> = inputs.iter().copied().map(Signal::bit).collect();
     component
-        .eval(&inputs)
+        // A plain wire on every output pin, which is what every test in this
+        // crate says and what a circuit with nothing wider in it would ask.
+        .eval(&inputs, &[1; 8])
         .iter()
         .map(Signal::only_level)
         .collect()
@@ -131,7 +141,7 @@ mod tests {
     struct NotGate;
 
     impl Component for NotGate {
-        fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
             let level = match inputs {
                 [only] => match only.only_level() {
                     Level::High => Level::Low,

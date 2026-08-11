@@ -14,7 +14,7 @@ use crate::signal::Signal;
 pub struct And;
 
 impl Component for And {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         bitwise_eval(inputs, |inputs| match inputs {
             [a, b] => and(*a, *b),
             _ => Level::Unknown,
@@ -67,7 +67,7 @@ mod tests {
         let a = Signal::from_levels(vec![Level::Low, Level::High]);
         let b = Signal::from_levels(vec![Level::High, Level::High]);
         assert_eq!(
-            And.eval(&[a, b]),
+            And.eval(&[a, b], &[]),
             vec![Signal::from_levels(vec![Level::Low, Level::High])]
         );
     }
@@ -79,7 +79,7 @@ mod tests {
         let a = Signal::from_levels(vec![Level::Low, Level::High]);
         let b = Signal::from_levels(vec![Level::Unknown, Level::Unknown]);
         assert_eq!(
-            And.eval(&[a, b]),
+            And.eval(&[a, b], &[]),
             vec![Signal::from_levels(vec![Level::Low, Level::Unknown])]
         );
     }

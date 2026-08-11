@@ -550,7 +550,17 @@ impl Circuit {
             })
             .collect();
 
-        let outputs = self.components[&component].component.eval(&inputs);
+        // How wide each output pin is, read the same way the inputs were and
+        // in the order the component must answer in. Nearly everything
+        // ignores it; a rail is what it is for.
+        let widths: Vec<usize> = pins
+            .iter()
+            .enumerate()
+            .filter(|(_, pin)| pin.direction != PinDirection::Input)
+            .map(|(index, pin)| self.pin_slice((component, index), pin.net).1)
+            .collect();
+
+        let outputs = self.components[&component].component.eval(&inputs, &widths);
 
         let output_pins = pins
             .into_iter()
@@ -779,7 +789,7 @@ mod tests {
     struct NotGate;
 
     impl Component for NotGate {
-        fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
             scalar_eval(inputs, |inputs| match inputs {
                 [Level::High] => vec![Level::Low],
                 [Level::Low] => vec![Level::High],
@@ -792,7 +802,7 @@ mod tests {
     struct AlwaysHigh;
 
     impl Component for AlwaysHigh {
-        fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
             scalar_eval(_inputs, |_inputs| vec![Level::High])
         }
     }
@@ -973,7 +983,7 @@ mod tests {
     struct Inverter;
 
     impl Component for Inverter {
-        fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+        fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
             scalar_eval(inputs, |inputs| match inputs {
                 [Level::High] => vec![Level::Low],
                 _ => vec![Level::High],

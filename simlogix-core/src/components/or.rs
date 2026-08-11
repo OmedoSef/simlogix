@@ -13,7 +13,7 @@ use crate::signal::Signal;
 pub struct Or;
 
 impl Component for Or {
-    fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
+    fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
         bitwise_eval(inputs, |inputs| match inputs {
             [a, b] => or(*a, *b),
             _ => Level::Unknown,

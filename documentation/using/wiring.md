@@ -130,6 +130,17 @@ properties panel — and the wires between them follow. When two pins
 disagree, the wider one wins and the other is flagged: see
 [when two widths meet](simulation.md#when-two-widths-meet).
 
+Two things deliberately have no **Bits** of their own and follow the wire
+instead. **Ground** and **Power** are as wide as whatever they are tied to,
+so pulling a whole bus up or down is one gesture rather than two — there is
+no value to set on a rail, and so nothing a width could hang on. A **Probe**
+likewise measures its wire rather than declaring anything about it. Neither
+can ever be flagged for disagreeing with its net, because neither says
+anything for the net to disagree with.
+
+A **LED** is deliberately *not* like this: it is a one-bit device, so wiring
+one to a bus is a real mistake and stays flagged.
+
 ## Telling wires apart
 
 Two problems make a crossing hard to read: every wire at the same logic
