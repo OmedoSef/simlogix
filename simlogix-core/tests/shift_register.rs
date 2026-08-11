@@ -1,5 +1,7 @@
-//! Three D flip-flops chained on one clock, which is the test that says the
-//! *engine* supports edge-triggered storage rather than just the component.
+//! Three storage elements chained on one control wire — flip-flops, then
+//! latches — which is the test that says the *engine* supports edge-triggered
+//! storage rather than just the component, and the pair that says what the
+//! difference between the two components actually is.
 //!
 //! Every stage is clocked at the same instant, so a simulator that let an
 //! output reach the next stage's input within the same edge would shift the
@@ -16,7 +18,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use simlogix_core::{Button, Circuit, ComponentId, DFlipFlop, Level, NetGroup, Pin, PinDirection};
+use simlogix_core::{
+    Button, Circuit, Component, ComponentId, DFlipFlop, DLatch, Level, NetGroup, Pin, PinDirection,
+};
 
 /// How long to let the circuit settle after each change. Generous: three
 /// stages at one tick each, and nothing here is periodic.
@@ -32,7 +36,11 @@ struct ShiftRegister {
 }
 
 impl ShiftRegister {
-    fn new(length: usize) -> Self {
+    /// `stage` builds one element of the chain, so the same harness can say
+    /// what a flip-flop does and what a latch does instead — which is the
+    /// only way to show that the difference is the *component* and not the
+    /// wiring, since the wiring here is identical.
+    fn new(length: usize, stage: impl Fn() -> Box<dyn Component>) -> Self {
         let mut circuit = Circuit::new();
 
         let (data_source, data) = Button::new();
@@ -49,7 +57,7 @@ impl ShiftRegister {
                 let nets: Vec<_> = (0..4).map(|_| circuit.add_net()).collect();
                 circuit.add_component(
                     // No asynchronous inputs: this is about the clock alone.
-                    Box::new(DFlipFlop::rising()),
+                    stage(),
                     vec![input(nets[0]), input(nets[1]), out(nets[2]), out(nets[3])],
                 )
             })
@@ -92,14 +100,19 @@ impl ShiftRegister {
         let _ = self.circuit.advance(SETTLE);
     }
 
+    /// Holds the control pin at one level — a clock for a flip-flop, an
+    /// enable for a latch.
+    fn set_clock(&mut self, high: bool) {
+        self.clock.set(high);
+        self.circuit.schedule_now(self.clock_button);
+        let _ = self.circuit.advance(SETTLE);
+    }
+
     /// One complete clock cycle: up, then down. The capture happens on the
     /// way up; the way down is what makes the *next* rise an edge.
     fn pulse(&mut self) {
-        for level in [true, false] {
-            self.clock.set(level);
-            self.circuit.schedule_now(self.clock_button);
-            let _ = self.circuit.advance(SETTLE);
-        }
+        self.set_clock(true);
+        self.set_clock(false);
     }
 
     /// What each stage is holding, first stage first.
@@ -132,7 +145,7 @@ fn input(net: simlogix_core::NetId) -> Pin {
 #[test]
 fn a_one_walks_down_the_chain_one_stage_per_edge() {
     use Level::{High, Low};
-    let mut register = ShiftRegister::new(3);
+    let mut register = ShiftRegister::new(3, || Box::new(DFlipFlop::rising()));
 
     // Clear it: three edges with a low input, and every stage holds `Low`.
     // Until then they hold nothing at all, which is not a value to shift.
@@ -167,7 +180,7 @@ fn a_one_walks_down_the_chain_one_stage_per_edge() {
 #[test]
 fn nothing_moves_without_an_edge() {
     use Level::{High, Low};
-    let mut register = ShiftRegister::new(3);
+    let mut register = ShiftRegister::new(3, || Box::new(DFlipFlop::rising()));
     register.set_data(false);
     for _ in 0..3 {
         register.pulse();
@@ -186,4 +199,37 @@ fn nothing_moves_without_an_edge() {
             "the clock never moved, so neither did anything else"
         );
     }
+}
+
+#[test]
+fn a_chain_of_latches_passes_a_value_straight_through() {
+    use Level::High;
+    // The same wiring, the same harness, one word changed — and the opposite
+    // behaviour. A latch is transparent while enabled, so holding the enable
+    // high lets the value run down the whole chain at once. That is not the
+    // race the flip-flop had to be fixed for: it is what a latch *is*, and
+    // it is why a shift register is built from flip-flops.
+    let mut register = ShiftRegister::new(3, || Box::new(DLatch::new()));
+
+    // Enable low, so nothing is transparent yet.
+    register.set_data(false);
+    register.set_clock(false);
+    assert_eq!(
+        register.contents(),
+        vec![Level::Unknown; 3],
+        "never enabled, so nothing has been caught"
+    );
+
+    register.set_data(true);
+    register.set_clock(true);
+    assert_eq!(
+        register.contents(),
+        vec![High, High, High],
+        "one enable, and it reaches the far end"
+    );
+
+    // And it stops following the moment the enable drops.
+    register.set_clock(false);
+    register.set_data(false);
+    assert_eq!(register.contents(), vec![High, High, High], "held");
 }

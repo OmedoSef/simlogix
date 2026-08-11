@@ -264,6 +264,7 @@ impl Properties {
                 // asynchronous inputs stay one bit, which `pin_width` says.
                 | ComponentKind::DFlipFlop
                 | ComponentKind::DFlipFlopFalling
+                | ComponentKind::DLatch
         )
     }
 
@@ -974,7 +975,7 @@ pub fn show(
         // only reads, so it has neither a resting value nor a say in how
         // many states the interface has — but it does have a width, which
         // is offered to all three below rather than here.
-        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling => {
+        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
             ui.add_space(8.0);
             let mut async_inputs = properties.async_set_reset();
             if ui

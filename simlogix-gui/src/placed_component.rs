@@ -255,10 +255,11 @@ enum Shape {
     /// (`Q`, `Q̄`) — the first component with more than one output, which is
     /// why it doesn't fit `TwoInputGate`.
     SrLatch,
-    /// A D flip-flop. `async_inputs` says whether it was given `S` and
-    /// `R`, which is what decides between four pins and six — a fact the
-    /// engine cannot report, since it only holds the opaque trait object.
-    DFlipFlop {
+    /// A D flip-flop or a D latch: one data pin, one control pin, `Q` and
+    /// `Q̄`. `async_inputs` says whether it was given `S` and `R`, which is
+    /// what decides between four pins and six — a fact the engine cannot
+    /// report, since it only holds the opaque trait object.
+    Storage {
         kind: ComponentKind,
         async_inputs: bool,
     },
@@ -317,13 +318,8 @@ impl PlacedComponent {
         Self::new(id, center, Shape::SrLatch)
     }
 
-    pub fn d_flip_flop(
-        id: ComponentId,
-        center: Pos2,
-        kind: ComponentKind,
-        async_inputs: bool,
-    ) -> Self {
-        Self::new(id, center, Shape::DFlipFlop { kind, async_inputs })
+    pub fn storage(id: ComponentId, center: Pos2, kind: ComponentKind, async_inputs: bool) -> Self {
+        Self::new(id, center, Shape::Storage { kind, async_inputs })
     }
 
     pub fn hand_set(
@@ -531,7 +527,7 @@ impl PlacedComponent {
             // `D` at 0 and the two outputs widen; the clock at 1 and the
             // asynchronous inputs at 2 and 3 are one wire each, the way a
             // tri-state buffer's enable is.
-            Shape::DFlipFlop { async_inputs, .. } => Some(match index {
+            Shape::Storage { async_inputs, .. } => Some(match index {
                 1 => 1,
                 2 | 3 if *async_inputs => 1,
                 _ => declared,
@@ -625,7 +621,7 @@ impl PlacedComponent {
             Shape::Probe => ComponentKind::Probe,
             Shape::Clock => ComponentKind::Clock,
             Shape::SrLatch => ComponentKind::SrLatch,
-            Shape::DFlipFlop { kind, .. } => kind.clone(),
+            Shape::Storage { kind, .. } => kind.clone(),
         }
     }
 
@@ -1066,7 +1062,7 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            Shape::DFlipFlop { async_inputs, .. } => {
+            Shape::Storage { async_inputs, .. } => {
                 let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,

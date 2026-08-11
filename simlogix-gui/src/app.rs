@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
-    Component, ComponentId, DFlipFlop, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection,
+    Component, ComponentId, DFlipFlop, DLatch, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection,
     PortDrive, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
@@ -1055,7 +1055,7 @@ impl SimLogixApp {
                 );
                 PlacedComponent::sr_latch(id, center)
             }
-            ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling => {
+            ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
                 // How many pins it has is one of its properties, which is
                 // why this needs `place_with`: a built component's pins are
                 // fixed, so asking for the asynchronous inputs afterwards
@@ -1073,13 +1073,13 @@ impl SimLogixApp {
                         net: self.circuit.add_net(),
                     })
                     .collect();
-                let component: Box<dyn Component> = if kind == ComponentKind::DFlipFlop {
-                    Box::new(DFlipFlop::rising())
-                } else {
-                    Box::new(DFlipFlop::falling())
+                let component: Box<dyn Component> = match kind {
+                    ComponentKind::DFlipFlop => Box::new(DFlipFlop::rising()),
+                    ComponentKind::DFlipFlopFalling => Box::new(DFlipFlop::falling()),
+                    _ => Box::new(DLatch::new()),
                 };
                 let id = self.circuit.add_component(component, pins);
-                PlacedComponent::d_flip_flop(id, center, kind, async_inputs)
+                PlacedComponent::storage(id, center, kind, async_inputs)
             }
             ComponentKind::Not | ComponentKind::Buffer => {
                 let input = self.circuit.add_net();
@@ -2057,7 +2057,9 @@ impl SimLogixApp {
                     // same reason.
                     || (matches!(
                         kind,
-                        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling
+                        ComponentKind::DFlipFlop
+                            | ComponentKind::DFlipFlopFalling
+                            | ComponentKind::DLatch
                     ) && placed.properties().async_set_reset() != edited.async_set_reset())
             });
         if rebuild {

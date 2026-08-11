@@ -16,6 +16,7 @@ pub use components::bus_transceiver::BusTransceiver;
 pub use components::button::Button;
 pub use components::clock::Clock;
 pub use components::d_flip_flop::DFlipFlop;
+pub use components::d_latch::DLatch;
 pub use components::led::Led;
 pub use components::nand::Nand;
 pub use components::nor::Nor;

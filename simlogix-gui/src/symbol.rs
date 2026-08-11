@@ -343,15 +343,17 @@ pub fn draw(
             draw_splitter(painter, rect, orientation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, orientation, stroke, text_layer),
-        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling => draw_d_flip_flop(
-            painter,
-            rect,
-            orientation,
-            stroke,
-            text_layer,
-            kind == &ComponentKind::DFlipFlopFalling,
-            state.async_inputs,
-        ),
+        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
+            draw_storage(
+                painter,
+                rect,
+                orientation,
+                stroke,
+                text_layer,
+                kind,
+                state.async_inputs,
+            )
+        }
         // A circuit instance draws its own generated box, not a fixed symbol.
         ComponentKind::Circuit(_) => PinPositions::default(),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, orientation, stroke),
@@ -952,24 +954,31 @@ fn draw_port(
 /// Both outputs are lettered `Q`, and the **bubble** on the lower one is
 /// what says which is the complement — a mark rather than a glyph, so
 /// nothing has to be in a font for it to appear.
-/// A D flip-flop: the same body as an [`draw_sr_latch`], with the clock's
-/// triangle on its lower-left input and, when it was given them, an
+/// A D flip-flop or a D latch: the same body as [`draw_sr_latch`], the
+/// control pin on its lower left, and — when it was given them — an
 /// asynchronous set on the top edge and a reset on the bottom.
 ///
-/// That placement is the recognisable one — `PRE` above and `CLR` below on
-/// a 74x74 — and it happens to be the only one that keeps every pin on the
-/// grid: the corners and the mid-points of a box whose half-extents are
+/// That placement is the recognisable one, `PRE` above and `CLR` below on a
+/// 74x74, and it happens to be the only one that keeps every pin on the
+/// grid: the corners and edge mid-points of a box whose half-extents are
 /// whole grid steps are all dots.
+///
+/// **The clock triangle is what tells the two apart**, since it is the mark
+/// that means edge-triggered. A latch draws `EN` instead — without the
+/// triangle the two left-hand pins would otherwise be indistinguishable, and
+/// they are anything but interchangeable.
 #[allow(clippy::too_many_arguments)]
-fn draw_d_flip_flop(
+fn draw_storage(
     painter: &Painter,
     rect: Rect,
     orientation: Orientation,
     stroke: Stroke,
     text_layer: &TextLayer,
-    falling: bool,
+    kind: &ComponentKind,
     async_inputs: bool,
 ) -> PinPositions {
+    let falling = kind == &ComponentKind::DFlipFlopFalling;
+    let edge_triggered = kind != &ComponentKind::DLatch;
     let c = rect.center();
     let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
@@ -1013,24 +1022,25 @@ fn draw_d_flip_flop(
     ];
     painter.line(corners.into_iter().map(r).collect(), stroke);
 
-    // The clock triangle, inside the body against its edge. It is the one
-    // mark that says "edge-triggered" rather than "level", so it is drawn
-    // rather than written.
     let tip = 6.0_f32;
     let middle = body.bottom() - tip;
-    painter.line(
-        [
-            pos2(body.left(), middle - tip),
-            pos2(body.left() + tip * 1.4, middle),
-            pos2(body.left(), middle + tip),
-        ]
-        .into_iter()
-        .map(r)
-        .collect(),
-        stroke,
-    );
-
     let pad = 4.0;
+    if edge_triggered {
+        // Inside the body against its edge. It is the one mark that says
+        // "edge-triggered" rather than "level", so it is drawn rather than
+        // written.
+        painter.line(
+            [
+                pos2(body.left(), middle - tip),
+                pos2(body.left() + tip * 1.4, middle),
+                pos2(body.left(), middle + tip),
+            ]
+            .into_iter()
+            .map(r)
+            .collect(),
+            stroke,
+        );
+    }
     let label = |at: Pos2, align: Align2, text: &str| {
         text_layer.text(r(at), align, text, 9.0, color);
     };
@@ -1039,6 +1049,13 @@ fn draw_d_flip_flop(
         Align2::LEFT_CENTER,
         "D",
     );
+    if !edge_triggered {
+        label(
+            pos2(body.left() + pad, body.bottom() - pad - 3.0),
+            Align2::LEFT_CENTER,
+            "EN",
+        );
+    }
     label(
         pos2(body.right() - pad, body.top() + pad + 3.0),
         Align2::RIGHT_CENTER,

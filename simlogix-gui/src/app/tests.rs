@@ -2583,3 +2583,51 @@ fn asking_a_flip_flop_for_its_asynchronous_inputs_grows_its_pins() {
         vec![Some(4), Some(1), Some(1), Some(1), Some(4), Some(4)],
     );
 }
+
+#[test]
+fn a_latch_is_transparent_where_a_flip_flop_is_not() {
+    // The same wiring for both, so what differs is the component. A latch
+    // follows `D` while enabled; a flip-flop ignores it until an edge.
+    let mut app = SimLogixApp::default();
+    let data = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let enable = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let latch = app.place(ComponentKind::DLatch, egui::pos2(200.0, 80.0));
+    for (from, to) in [((data, 0), (latch, 0)), ((enable, 0), (latch, 1))] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    app.rebuild_nets();
+
+    let q = app.circuit.pins(latch)[2].net;
+    drive(&mut app, enable, 1);
+    drive(&mut app, data, 1);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(q).levels(),
+        [Level::High],
+        "no edge anywhere: it is transparent"
+    );
+
+    drive(&mut app, data, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(q).levels(),
+        [Level::Low],
+        "it follows"
+    );
+
+    drive(&mut app, data, 1);
+    app.advance_circuit(SETTLE_TICKS);
+    drive(&mut app, enable, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    drive(&mut app, data, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(q).levels(),
+        [Level::High],
+        "disabled, it holds what it had"
+    );
+}

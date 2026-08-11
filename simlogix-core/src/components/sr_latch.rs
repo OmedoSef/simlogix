@@ -1,6 +1,7 @@
 use std::cell::Cell;
 
 use crate::component::{across_bits, Component};
+use crate::components::storage::{complement, resize};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -56,12 +57,7 @@ impl Component for SrLatch {
         // guess. `across_bits` refuses a ragged set anyway; this makes the
         // refusal a stated rule rather than an accident of the adapter.
         let width = set.width().max(reset.width());
-        let held = self.state.take();
-        let held = if held.width() == width {
-            held
-        } else {
-            Signal::splat(Level::Unknown, width)
-        };
+        let held = resize(self.state.take(), width);
 
         let outputs = across_bits(&[set, reset, &held], |bits| match bits {
             [set, reset, held] => {
@@ -89,17 +85,6 @@ fn next_state(set: Level, reset: Level, held: Level) -> Level {
         // guess that it's `Low`; the honest answer is that `Q` is no longer
         // known either.
         _ => Level::Unknown,
-    }
-}
-
-/// `Q̄`, which is only a real complement once `Q` is a definite level —
-/// an unknown or faulted latch drives the same thing on both outputs
-/// rather than pretending one of them is good.
-pub(crate) fn complement(state: Level) -> Level {
-    match state {
-        Level::High => Level::Low,
-        Level::Low => Level::High,
-        other => other,
     }
 }
 

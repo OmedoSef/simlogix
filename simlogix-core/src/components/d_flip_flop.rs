@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use crate::component::{across_bits, Component};
-use crate::components::sr_latch::complement;
+use crate::components::storage::{complement, forced, resize};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -99,7 +99,7 @@ impl DFlipFlop {
     /// Both levels have to be definite. A clock that was `Unknown` and is now
     /// `High` may or may not have risen — the honest answer is that nothing
     /// is known about it, which [`DFlipFlop::forced`] turns into an unknown
-    /// stored value rather than a silent hold.
+    /// stored value rather than a silent hold — see `storage::forced`.
     fn edge(&self, clock: Level) -> bool {
         let (before, after) = if self.rising {
             (Level::Low, Level::High)
@@ -107,39 +107,6 @@ impl DFlipFlop {
             (Level::High, Level::Low)
         };
         self.previous_clock.get() == before && clock == after
-    }
-
-    /// The level every bit is forced to, when something other than the data
-    /// decides — or `None` when the clocked behaviour applies.
-    ///
-    /// `set`/`reset` are `None` when this flip-flop has no asynchronous
-    /// inputs, which is not the same as their being low: absent means the
-    /// question does not arise.
-    fn forced(&self, clock: Level, set: Option<Level>, reset: Option<Level>) -> Option<Level> {
-        if let (Some(set), Some(reset)) = (set, reset) {
-            match (set, reset) {
-                // Asynchronous, so they win over the clock — including over a
-                // faulted one: a chip being held clear is held clear whatever
-                // its clock is doing.
-                (Level::High, Level::High) => return Some(Level::Error),
-                (Level::High, Level::Low) => return Some(Level::High),
-                (Level::Low, Level::High) => return Some(Level::Low),
-                (Level::Error, _) | (_, Level::Error) => return Some(Level::Error),
-                (Level::Low, Level::Low) => {}
-                // One of them is undriven or not yet known, so whether the
-                // flip-flop is being held is unknown, and so is what it holds.
-                _ => return Some(Level::Unknown),
-            }
-        }
-        match clock {
-            // A faulted clock is a faulted flip-flop: there is no reading of
-            // "this wire is in conflict" under which the stored value is good.
-            Level::Error => Some(Level::Error),
-            Level::High | Level::Low => None,
-            // Undriven, or not known yet. Holding would be claiming no edge
-            // happened, which is more than is known.
-            _ => Some(Level::Unknown),
-        }
     }
 }
 
@@ -162,23 +129,13 @@ impl Component for DFlipFlop {
         // register just widened does not know its new bits: nothing says they
         // line up with the old ones, so carrying bit 0 across would be a
         // guess. Same rule as `SrLatch`.
-        let held = self.state.take();
-        let held = if held.width() == data.width() {
-            held
-        } else {
-            Signal::splat(Level::Unknown, data.width())
-        };
+        let held = resize(self.state.take(), data.width());
 
         // What `D` carried before this evaluation, brought to the same width
         // for the same reason the held value is.
-        let sampled = self.previous_data.take();
-        let sampled = if sampled.width() == data.width() {
-            sampled
-        } else {
-            Signal::splat(Level::Unknown, data.width())
-        };
+        let sampled = resize(self.previous_data.take(), data.width());
 
-        let forced = self.forced(clock, set, reset);
+        let forced = forced(clock, set, reset);
         let capture = self.edge(clock);
         let outputs = across_bits(&[&sampled, &held], |bits| match bits {
             [sampled, held] => {
