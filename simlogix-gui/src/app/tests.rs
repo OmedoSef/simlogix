@@ -1948,8 +1948,63 @@ fn the_inspector_reports_a_branch_pins_own_width_not_the_bus_it_hangs_off() {
     app.rebuild_nets();
     let splitter = app.placed[0].id();
 
-    let widths: Vec<usize> = (0..app.circuit.pins(splitter).len())
+    let widths: Vec<Option<usize>> = (0..app.circuit.pins(splitter).len())
         .map(|index| app.placed[0].pin_width(index))
         .collect();
-    assert_eq!(widths, vec![4, 2, 2], "the bus, then each branch");
+    assert_eq!(
+        widths,
+        vec![Some(4), Some(2), Some(2)],
+        "the bus, then each branch"
+    );
+}
+
+#[test]
+fn a_probe_on_a_bus_reads_it_without_being_wrong_about_it() {
+    // Romain's screenshot: a 4-bit port and a probe, nothing else. The
+    // probe showed the right value and its pin was ringed in red anyway,
+    // because it declared one bit — an instrument reading a net was being
+    // treated as something that could disagree with it.
+    let mut app = SimLogixApp::default();
+    let port = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let probe = app.place(ComponentKind::Probe, egui::pos2(200.0, 40.0));
+    app.add_wire(
+        WireEndpoint::Pin(port, 0),
+        WireEndpoint::Pin(probe, 0),
+        Vec::new(),
+    );
+    app.set_component_properties(
+        port,
+        Properties {
+            width: Some(4),
+            ..Default::default()
+        },
+    );
+    app.rebuild_nets();
+
+    let net = app.circuit.pins(probe)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4, "the port decides the width");
+    assert!(
+        app.width_faults.is_empty(),
+        "a probe declares nothing, so it cannot disagree: {:?}",
+        app.width_faults
+    );
+}
+
+#[test]
+fn a_probe_alone_on_a_wire_leaves_it_one_bit() {
+    // The other half: declaring nothing must not mean declaring *something
+    // wide*. A probe on its own is a plain wire, as everything is until
+    // something says otherwise.
+    let mut app = SimLogixApp::default();
+    let probe = app.place(ComponentKind::Probe, egui::pos2(40.0, 40.0));
+    let led = app.place(ComponentKind::Led, egui::pos2(200.0, 40.0));
+    app.add_wire(
+        WireEndpoint::Pin(probe, 0),
+        WireEndpoint::Pin(led, 0),
+        Vec::new(),
+    );
+    app.rebuild_nets();
+
+    assert_eq!(app.circuit.net_width(app.circuit.pins(probe)[0].net), 1);
+    assert!(app.width_faults.is_empty());
 }

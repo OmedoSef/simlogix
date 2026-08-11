@@ -24,7 +24,7 @@ use crate::symbol::{self, SymbolState};
 pub struct InstanceWiring {
     pub ports: Vec<InstancePort>,
     pub inner_groups: Vec<Vec<(ComponentId, usize)>>,
-    pub inner_widths: Vec<((ComponentId, usize), usize)>,
+    pub inner_widths: Vec<((ComponentId, usize), Option<usize>)>,
 }
 
 /// The pair the net rebuild reads back off an instance.
@@ -176,9 +176,9 @@ enum Shape {
         /// has to re-apply — it derives everything else from the *open*
         /// drawing, and these wires aren't in it.
         inner_groups: Vec<Vec<(ComponentId, usize)>>,
-        /// How wide each of the innards' pins is, since they are not in the
-        /// drawing for `rebuild_nets` to ask.
-        inner_widths: Vec<((ComponentId, usize), usize)>,
+        /// What each of the innards' pins declares, since they are not in
+        /// the drawing for `rebuild_nets` to ask.
+        inner_widths: Vec<((ComponentId, usize), Option<usize>)>,
         /// What it looks like: the circuit's own symbol if it has one, and
         /// otherwise the generated box. Resolved once, when the instance is
         /// built, rather than worked out again on every frame.
@@ -342,7 +342,7 @@ impl PlacedComponent {
     /// engine and their `PlacedComponent`s dropped — so nothing else can be
     /// asked. Carried up with the wiring, and for the same reason: the
     /// record would otherwise go with the entry that held it.
-    pub fn inner_pin_widths(&self) -> &[((ComponentId, usize), usize)] {
+    pub fn inner_pin_widths(&self) -> &[((ComponentId, usize), Option<usize>)] {
         match &self.shape {
             Shape::Instance { inner_widths, .. } => inner_widths,
             _ => &[],
@@ -420,40 +420,38 @@ impl PlacedComponent {
         self.properties.width()
     }
 
-    /// How many bits pin `index` carries.
+    /// How many bits pin `index` **declares**, and `None` when it declares
+    /// nothing and simply takes whatever its net carries.
     ///
     /// Per *pin*, because a component's pins are not always alike: a
     /// tri-state buffer's enable and a transceiver's direction are one bit
     /// whatever the data beside them is, and an instance's pins are as wide
     /// as the ports they stand for, one by one.
     ///
+    /// `None` is not "one bit" — it is a pin with no opinion, so it never
+    /// widens a net and can never disagree with one. A `Probe` is the case
+    /// it exists for: it is an instrument reading a net, not a part of the
+    /// circuit, and telling it a width is how it would come to show
+    /// something the net does not say.
+    ///
     /// A kind that is never offered the setting answers one whatever its
     /// properties happen to hold — a width pasted onto a LED is not a claim
     /// it ever made.
-    pub fn pin_width(&self, index: usize) -> usize {
+    pub fn pin_width(&self, index: usize) -> Option<usize> {
         let declared = self.properties.width();
         match &self.shape {
-            Shape::Instance { ports, .. } => ports.get(index).map_or(1, |port| port.width),
+            Shape::Probe => None,
+            Shape::Instance { ports, .. } => Some(ports.get(index).map_or(1, |port| port.width)),
             // It shares `TwoInputGate`'s shape but not its pins: the enable
             // at index 1 is one bit whatever passes through.
             Shape::TwoInputGate(kind) if *kind == ComponentKind::TriStateBuffer => {
-                if index == 1 {
-                    1
-                } else {
-                    declared
-                }
+                Some(if index == 1 { 1 } else { declared })
             }
             // `A` and `B` carry the data; `Dir` and the enable do not.
-            Shape::BusTransceiver(_) => {
-                if index < 2 {
-                    declared
-                } else {
-                    1
-                }
-            }
+            Shape::BusTransceiver(_) => Some(if index < 2 { declared } else { 1 }),
             // Pin 0 is the bus, as wide as it says; each branch after it
             // carries its own share.
-            Shape::Splitter => match index.checked_sub(1) {
+            Shape::Splitter => Some(match index.checked_sub(1) {
                 None => declared,
                 Some(branch) => self
                     .properties
@@ -461,9 +459,9 @@ impl PlacedComponent {
                     .get(branch)
                     .copied()
                     .unwrap_or(1),
-            },
-            _ if Properties::has_width(&self.kind()) => declared,
-            _ => 1,
+            }),
+            _ if Properties::has_width(&self.kind()) => Some(declared),
+            _ => Some(1),
         }
     }
 

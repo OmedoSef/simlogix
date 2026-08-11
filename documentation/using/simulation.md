@@ -172,6 +172,12 @@ cutting it short would be inventing bits nobody asked for.
 
 It clears the moment the drawing agrees again.
 
+A **probe never disagrees**: it declares no width at all and simply reads
+whatever its net carries, so it can be dropped onto a bus of any width. That
+is what makes it an instrument rather than a part of the circuit. A **LED**
+is the other case on purpose — it is a one-bit device, so wiring one to a
+bus is a real mistake and is flagged as one.
+
 ## Looking at the engine
 
 `F12`, or **Simulation → Engine state**, opens a window showing the circuit

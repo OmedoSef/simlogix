@@ -1603,7 +1603,7 @@ impl SimLogixApp {
         // only record of how wide an inner pin is lives in the entry about
         // to be dropped, and `rebuild_nets` has no other way to ask.
         let mut nested: Vec<Vec<(ComponentId, usize)>> = Vec::new();
-        let mut inner_widths: Vec<((ComponentId, usize), usize)> = Vec::new();
+        let mut inner_widths: Vec<((ComponentId, usize), Option<usize>)> = Vec::new();
         for placed in &self.placed[first_inner..] {
             for index in 0..self.circuit.try_pins(placed.id()).map_or(0, <[_]>::len) {
                 inner_widths.push(((placed.id(), index), placed.pin_width(index)));
@@ -1882,7 +1882,7 @@ impl SimLogixApp {
                 id: placed.id(),
                 pin_widths: (0..self.circuit.try_pins(placed.id()).map_or(0, <[_]>::len))
                     .map(|index| placed.pin_width(index))
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 label: placed
                     .properties()
                     .label()

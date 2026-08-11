@@ -607,7 +607,7 @@ impl SimLogixApp {
         // pins are as wide as the ports they stand for, one by one.
         // Everything an instance carried up about its innards, which are in
         // the engine but not in the drawing.
-        let inner_widths: HashMap<(ComponentId, usize), usize> = self
+        let inner_widths: HashMap<(ComponentId, usize), Option<usize>> = self
             .placed
             .iter()
             .flat_map(|placed| placed.inner_pin_widths().iter().copied())
@@ -618,20 +618,24 @@ impl SimLogixApp {
             .map(|placed| (placed.id(), placed))
             .collect();
         // A component the drawing does not list is one flattened in from a
-        // sub-circuit; its declared widths were carried up with its wiring.
-        let declared = |&(component, index): &(ComponentId, usize)| -> usize {
-            by_id
-                .get(&component)
-                .map(|placed| placed.pin_width(index))
-                .or_else(|| inner_widths.get(&(component, index)).copied())
-                .unwrap_or(1)
+        // sub-circuit; its declarations were carried up with its wiring.
+        //
+        // `None` is a pin with **no opinion** — a `Probe` — which is why
+        // this answers an `Option` rather than a number. Such a pin never
+        // widens a net and can never disagree with one, where a pin claiming
+        // one bit would do both.
+        let declared = |&(component, index): &(ComponentId, usize)| -> Option<usize> {
+            match by_id.get(&component) {
+                Some(placed) => placed.pin_width(index),
+                None => inner_widths.get(&(component, index)).copied().flatten(),
+            }
         };
         // The widest pin on the net wins, and a narrower one then contributes
         // the wrong width — which the engine already faults, on every bit.
         // Taking the maximum rather than refusing here is what makes the
         // mismatch *visible* instead of silently dropped.
         let width_of =
-            |group: &[(ComponentId, usize)]| group.iter().map(declared).max().unwrap_or(1);
+            |group: &[(ComponentId, usize)]| group.iter().filter_map(declared).max().unwrap_or(1);
 
         // A lone pin is its own net anyway, which `rewire` already does for
         // anything it isn't told about — but only at one bit, so a wide pin
@@ -656,7 +660,7 @@ impl SimLogixApp {
                 group
                     .pins
                     .iter()
-                    .filter(|pin| declared(pin) != group.width)
+                    .filter(|pin| declared(pin).is_some_and(|width| width != group.width))
                     .copied()
             })
             .collect();

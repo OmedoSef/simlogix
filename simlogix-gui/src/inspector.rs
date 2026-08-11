@@ -31,7 +31,11 @@ pub struct Named {
     /// a splitter's bus width against a branch net would invent a mismatch
     /// where there is none, in the one window whose whole job is to say
     /// where a real one is.
-    pub pin_widths: Vec<usize>,
+    ///
+    /// `None` is a pin that declares nothing and takes whatever its net
+    /// carries — a `Probe`. It is shown at the net's own width and can
+    /// never be the thing that disagrees.
+    pub pin_widths: Vec<Option<usize>>,
 }
 
 /// The whole of what this window shows, as text to paste into a bug report.
@@ -91,8 +95,8 @@ pub fn report(strings: &Strings, circuit: &Circuit, named: &[Named]) -> String {
                 "    {} · pin {} · {} bits · reads{}\n",
                 label_of(named, component),
                 index,
-                declared,
-                if declared == circuit.net_width(net) {
+                declared.unwrap_or_else(|| circuit.net_width(net)),
+                if declared.is_none_or(|width| width == circuit.net_width(net)) {
                     ""
                 } else {
                     "  (width mismatch)"
@@ -236,10 +240,12 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
                     "{} · {} · {} · {}",
                     label_of(named, component),
                     strings.inspector_pin.replace("{}", &index.to_string()),
-                    strings.inspector_bits.replace("{}", &declared.to_string()),
+                    strings
+                        .inspector_bits
+                        .replace("{}", &declared.unwrap_or(width).to_string()),
                     strings.inspector_reads,
                 );
-                if declared != width {
+                if declared.is_some_and(|declared| declared != width) {
                     row.push_str(&format!("  ⚠ {}", strings.inspector_mismatch));
                 }
                 ui.label(row);
@@ -247,13 +253,18 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
         });
 }
 
-fn width_of(named: &[Named], component: ComponentId, index: usize) -> usize {
+/// What a reading pin says it is, and whether that is a claim at all.
+///
+/// `None` means the pin declares nothing and takes the net's width, so it
+/// is reported *at* that width and never marked — a probe is an instrument
+/// reading a net, not something that can be wrong about it.
+fn width_of(named: &[Named], component: ComponentId, index: usize) -> Option<usize> {
     named
         .iter()
         .find(|entry| entry.id == component)
         .and_then(|entry| entry.pin_widths.get(index))
         .copied()
-        .unwrap_or(1)
+        .unwrap_or(Some(1))
 }
 
 fn label_of(named: &[Named], component: ComponentId) -> &str {
