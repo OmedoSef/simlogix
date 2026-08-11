@@ -733,12 +733,19 @@ impl SimLogixApp {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for placed in &self.placed {
             placed.id().hash(&mut hasher);
-            // The declared width is part of connectivity now: it is what a
-            // net's width is derived from, so changing it has to rebuild.
-            // Without this the property would move and the net would keep
-            // the width it had — leaving the component driving a width the
-            // net no longer has, which faults every bit of it.
-            placed.properties().width().hash(&mut hasher);
+            // The declared widths are part of connectivity now: they are
+            // what a net's width is derived from, so changing one has to
+            // rebuild. Without this the property would move and the net
+            // would keep the width it had — leaving the component driving a
+            // width the net no longer has, which faults every bit of it.
+            //
+            // Per *pin*, and read the same way `rebuild_nets` reads it. The
+            // component's own `width` property is not the same question and
+            // was not enough: regrouping a splitter's branches changes how
+            // wide two nets are while leaving that property alone.
+            for index in 0..self.circuit.try_pins(placed.id()).map_or(0, <[_]>::len) {
+                placed.pin_width(index).hash(&mut hasher);
+            }
         }
         for wire in &self.wires {
             wire.id.hash(&mut hasher);

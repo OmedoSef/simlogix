@@ -403,16 +403,7 @@ fn the_inspector_shows_a_reader_that_disagrees_about_the_width() {
     }
 
     let strings = crate::i18n::Strings::for_language(harness.state().language);
-    let named: Vec<crate::inspector::Named> = harness
-        .state()
-        .placed
-        .iter()
-        .map(|placed| crate::inspector::Named {
-            id: placed.id(),
-            label: strings.component_kind_label(&placed.kind()).to_string(),
-            width: placed.width(),
-        })
-        .collect();
+    let named = harness.state().named_components(strings);
     let report = crate::inspector::report(strings, &harness.state().circuit, &named);
 
     // Not the net's number, which is handed out afresh on every rebuild.
@@ -431,13 +422,22 @@ fn the_bug_report_carries_the_build_and_what_drives_each_net() {
         .place(ComponentKind::InputPort, egui::pos2(200.0, 200.0));
     step(&mut harness);
 
+    // Named for real rather than by hand: what the report has to carry is
+    // the name *the user gave*, so setting the property is the thing worth
+    // checking — building the row here would prove only that a string put
+    // into a struct comes back out of it.
+    harness.state_mut().set_component_properties(
+        source,
+        crate::properties::Properties {
+            name: Some("CLK".to_string()),
+            ..Default::default()
+        },
+    );
+    step(&mut harness);
+
     let app = harness.state();
     let strings = crate::i18n::Strings::for_language(app.language);
-    let named = vec![crate::inspector::Named {
-        id: source,
-        label: "CLK".to_string(),
-        width: 1,
-    }];
+    let named = app.named_components(strings);
     let report = crate::inspector::report(strings, &app.circuit, &named);
 
     // The first three questions any report has to answer before anyone can

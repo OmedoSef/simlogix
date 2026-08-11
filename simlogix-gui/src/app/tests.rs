@@ -1869,3 +1869,87 @@ fn a_value_driven_onto_a_splitters_bus_comes_out_on_its_branches() {
         "bits 2-3"
     );
 }
+
+#[test]
+fn regrouping_a_splitters_branches_is_a_change_to_connectivity() {
+    let mut app = SimLogixApp::default();
+    let splitter = app.place(ComponentKind::Splitter, egui::pos2(200.0, 200.0));
+    app.set_component_properties(
+        splitter,
+        Properties {
+            width: Some(4),
+            branches: Some(vec![1, 3]),
+            ..Default::default()
+        },
+    );
+    app.rebuild_nets();
+    let before = app.connectivity_fingerprint();
+
+    // Same number of branches, different bits in each: no pin appears or
+    // goes, so nothing goes through the document — but two nets change
+    // width, which is exactly what the fingerprint exists to notice.
+    let splitter = app.placed[0].id();
+    app.set_component_properties(
+        splitter,
+        Properties {
+            width: Some(4),
+            branches: Some(vec![2, 2]),
+            ..Default::default()
+        },
+    );
+    assert_ne!(
+        before,
+        app.connectivity_fingerprint(),
+        "regrouping the branches changed how wide two nets are"
+    );
+}
+
+#[test]
+fn an_instance_follows_its_circuit_being_edited() {
+    let mut app = SimLogixApp::default();
+    app.rename_circuit(0, "sub");
+    let port = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    app.create_circuit(String::new());
+    let instance = app.place(
+        ComponentKind::Circuit("sub".to_string()),
+        egui::pos2(200.0, 200.0),
+    );
+    app.rebuild_nets();
+    assert_eq!(app.circuit.net_width(app.circuit.pins(instance)[0].net), 1);
+
+    // Now widen the port inside the sub-circuit and come back.
+    app.switch_to(0);
+    let port = app.placed.iter().find(|p| p.id() == port).map(|p| p.id());
+    let port = port.unwrap_or_else(|| app.placed[0].id());
+    app.set_component_properties(
+        port,
+        Properties {
+            width: Some(4),
+            ..Default::default()
+        },
+    );
+    app.switch_to(1);
+    app.rebuild_nets();
+
+    let instance = app.placed[0].id();
+    assert_eq!(
+        app.circuit.net_width(app.circuit.pins(instance)[0].net),
+        4,
+        "the instance followed its circuit being widened"
+    );
+}
+
+#[test]
+fn the_inspector_reports_a_branch_pins_own_width_not_the_bus_it_hangs_off() {
+    // The window exists to say where a width disagreement is. Reporting a
+    // splitter's bus width against its branch nets would invent one on
+    // every branch — in the one place that must not be wrong about widths.
+    let (mut app, _) = wide_splitter();
+    app.rebuild_nets();
+    let splitter = app.placed[0].id();
+
+    let widths: Vec<usize> = (0..app.circuit.pins(splitter).len())
+        .map(|index| app.placed[0].pin_width(index))
+        .collect();
+    assert_eq!(widths, vec![4, 2, 2], "the bus, then each branch");
+}

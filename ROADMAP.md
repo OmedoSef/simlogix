@@ -220,6 +220,36 @@ better at the thing it's for.
   before — the relay is honest about what it is, and this is a rework of the
   net model rather than an afternoon.
 
+- [ ] **Which bits go to which branch, freely**
+
+  A splitter's branches take bits **in order from 0**, each a contiguous
+  run. That covers splitting a bus into halves or into single bits, and
+  stops covering it the moment you decode an instruction: `[15:12]` and
+  `[3:0]` in one branch is an ordinary thing to want, and today it takes two
+  splitters and a merge that is really a third.
+
+  What it needs is for a branch to be *a list of bit positions* rather than
+  a width — the widths become the lengths of those lists, and everything
+  downstream still works, since the component already reads its widths off
+  the shapes it is handed. The cost is the editor: a table of branch against
+  bit is the honest control, and a width spinner is not.
+
+  Worth settling **with** [the splitter as connectivity](#next) rather than
+  before it: offsets in the net model are the same question asked once, and
+  a bit list is what a weighted union-find would carry anyway.
+
+- [ ] **Getting to a width fault**
+
+  The status bar says how many pins disagree with their net, and each is
+  ringed in red on the schematic. On a drawing bigger than the window that
+  is a hunt: the complaint knows exactly where the fault is and does not
+  say. Clicking the message should select them, and the view should go
+  there — `content_rect` and `refit_view` already exist for opening a
+  project.
+
+  Small, and it finishes something already half-delivered: naming the pin
+  was the whole point of putting the fault on the pin rather than the net.
+
 - [ ] **A clock's period and phase, and a component's delay**
 
   All three are constants today: every clock beats every sixty ticks, every
@@ -306,8 +336,9 @@ better at the thing it's for.
 
 ## Later
 
-- [ ] **Memory: RAM and ROM.** Wants buses first; a byte-addressed memory
-  with one-bit wires is not worth drawing.
+- [ ] **Memory: RAM and ROM.** Wanted buses first, and they are here now —
+  so what was blocking this is gone. A byte-addressed memory with one-bit
+  wires was not worth drawing; with a bus it is.
 - [ ] **Autosave and crash recovery.** Nothing is written until you press
   `Ctrl+S`, so a crash costs everything since the last save. Worth doing
   before anyone but Romain relies on it.
@@ -348,13 +379,24 @@ that is what's wanted.
 - [ ] T flip-flop
 - [ ] Counter
 
+**Every one of these wants a width**, now that a wire can carry more than
+one bit: an *n*-bit D flip-flop is a register, which is what a datapath is
+made of, and a counter that counts past one is a counter. The one that
+exists already shows the gap — `SrLatch` takes no width, deliberately,
+because a wide one is a register and what `S` and `R` mean for it is a
+design question rather than a number. That question has to be answered once,
+here, rather than per component: which pins carry the data and which stay
+one bit whatever it is. `PlacedComponent::pin_width` is where the answer
+goes, and it already says exactly that for the transceiver.
+
 The **multiplexer** and **demultiplexer** carry a question of their own:
 how many ways. A selector of *n* bits picks between 2ⁿ, so either the
 width is a property and the symbol grows pins with it, or each width is
 its own entry in the palette.
-Worth settling when they are built rather than now — and worth building
-after [multi-bit buses](#next), since a mux is the component that changes
-most if a wire can carry more than one bit.
+Worth settling when they are built rather than now. They wanted
+[multi-bit buses](#next) first — a mux is the component that changes most
+if a wire can carry more than one bit — and that is no longer a reason to
+wait.
 
 The flip-flop's edge is a **variant**, and the shape of that answer is
 already settled: it lives in the `ComponentKind`, as the transistor's

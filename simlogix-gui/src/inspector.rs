@@ -23,10 +23,15 @@ pub struct Named {
     pub id: ComponentId,
     /// The user's own name if they gave one, else the kind's label.
     pub label: String,
-    /// How wide its properties say its pins are. The engine does not know
+    /// How wide each of its pins is, in order. The engine does not know
     /// this — a net's width is derived *from* it — so it has to be handed
     /// over, and it is the number that makes a disagreement visible.
-    pub width: usize,
+    ///
+    /// Per *pin*, because a component's pins are not always alike: reporting
+    /// a splitter's bus width against a branch net would invent a mismatch
+    /// where there is none, in the one window whose whole job is to say
+    /// where a real one is.
+    pub pin_widths: Vec<usize>,
 }
 
 /// The whole of what this window shows, as text to paste into a bug report.
@@ -81,7 +86,7 @@ pub fn report(strings: &Strings, circuit: &Circuit, named: &[Named]) -> String {
             ));
         }
         for (component, index) in circuit.readers(net) {
-            let declared = width_of(named, component);
+            let declared = width_of(named, component, index);
             out.push_str(&format!(
                 "    {} · pin {} · {} bits · reads{}\n",
                 label_of(named, component),
@@ -226,7 +231,7 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
             // four-bit bus is a real mistake that nothing else reports, and
             // this is the one line that shows it.
             for (component, index) in circuit.readers(net) {
-                let declared = width_of(named, component);
+                let declared = width_of(named, component, index);
                 let mut row = format!(
                     "{} · {} · {} · {}",
                     label_of(named, component),
@@ -242,11 +247,12 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
         });
 }
 
-fn width_of(named: &[Named], component: ComponentId) -> usize {
+fn width_of(named: &[Named], component: ComponentId, index: usize) -> usize {
     named
         .iter()
         .find(|entry| entry.id == component)
-        .map(|entry| entry.width)
+        .and_then(|entry| entry.pin_widths.get(index))
+        .copied()
         .unwrap_or(1)
 }
 

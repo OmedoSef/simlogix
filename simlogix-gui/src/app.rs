@@ -1869,6 +1869,29 @@ impl SimLogixApp {
         self.edit_saved_component(id, |component| component.kind = kind);
     }
 
+    /// What the inspector needs to name each component and say how wide its
+    /// pins are.
+    ///
+    /// Its own method so the window and a test build it the same way — the
+    /// tests used to assemble it by hand, which is how a test comes to check
+    /// something the application never does.
+    fn named_components(&self, strings: &Strings) -> Vec<crate::inspector::Named> {
+        self.placed
+            .iter()
+            .map(|placed| crate::inspector::Named {
+                id: placed.id(),
+                pin_widths: (0..self.circuit.try_pins(placed.id()).map_or(0, <[_]>::len))
+                    .map(|index| placed.pin_width(index))
+                    .collect(),
+                label: placed
+                    .properties()
+                    .label()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| strings.component_kind_label(&placed.kind()).to_string()),
+            })
+            .collect()
+    }
+
     /// Applies edited properties to one component, and makes the engine
     /// notice.
     ///
@@ -3230,21 +3253,7 @@ impl SimLogixApp {
         if self.show_inspector {
             // Built here rather than inside the window, which borrows
             // `self.circuit` and `self.show_inspector` at once otherwise.
-            let named: Vec<crate::inspector::Named> = self
-                .placed
-                .iter()
-                .map(|placed| crate::inspector::Named {
-                    id: placed.id(),
-                    width: placed.width(),
-                    label: placed
-                        .properties()
-                        .label()
-                        .map(str::to_string)
-                        .unwrap_or_else(|| {
-                            strings.component_kind_label(&placed.kind()).to_string()
-                        }),
-                })
-                .collect();
+            let named = self.named_components(strings);
             let focus: Vec<ComponentId> = self.selection.components.iter().copied().collect();
             let mut open = true;
             crate::inspector::show(ui.ctx(), strings, &self.circuit, &named, &focus, &mut open);
