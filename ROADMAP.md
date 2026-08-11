@@ -259,14 +259,107 @@ better at the thing it's for.
   `Signal` and the engine, so their cost grows with everything stacked on
   top, while this one only waits.
 
-- [ ] **Importing a circuit from another project**
+- [ ] 🚧 **Libraries: importing another project to place its circuits**
 
-  The groundwork is done and unused: projects carry a library name,
-  components are saved qualified by it, and a reference from outside is meant
-  to read `library:folder/name`. What's missing is the gesture and the copy.
+  A personal library of gates, reused across projects. The groundwork has
+  been sitting unused since the namespace work: projects carry a library
+  name, components are saved qualified by it, and a reference from outside
+  was always meant to read `library:folder/name`.
 
-  The cheapest item here relative to what it unlocks — a personal library of
-  gates reused across projects.
+  Settled with Romain, and his framing is what made it small. My own was
+  "import a circuit and its dependencies", which needed the reference graph
+  rewritten on the way in, a transitive closure computed, and an answer for
+  what "update an import" means. Each of those **disappears** below rather
+  than being solved.
+
+  ### A library is a project, stored exactly like one
+
+  `libraries/<name>/project.json` and `libraries/<name>/circuits/`, which is
+  the layout a project already has. One format, one reader, and importing is
+  "drop the other `.slgx`'s contents under `libraries/<name>/`".
+
+  **Copied in, never linked.** The container exists so that *one file*
+  travels; a link to another project destroys exactly that.
+
+  **Nested, not flattened**: a library carries its own libraries, at
+  `libraries/foo/libraries/bar/`. That looks redundant and is the point —
+  the **diamond disappears**. Two libraries each needing `bar` carry their
+  own, so there is never a version to choose between, which is the hardest
+  question in package management and not one worth having here. The price is
+  duplication, measured in kilobytes of uncompressed JSON.
+
+  And a consequence better than the mechanism: **a library's own libraries
+  are private by construction.** The host sees `foo`; `foo` sees `bar`. A
+  public circuit of `foo` instantiating `bar:adder` resolves *inside* `foo`,
+  so `bar` never reaches the host's palette.
+
+  ### `circuit:` resolves relative to the library it is written in
+
+  This is what removes the rewriting. A local reference is stored bare
+  (`circuit:alu/adder`) so it survives its project being renamed — which
+  means it says *"in my project"*, and after an import "my project" would be
+  the **host**: an imported `alu` would silently find the host's own
+  `adder`. So it is read relative to the library of the circuit referring,
+  not the document. A rule, not a transformation — and re-importing stays
+  trivial because nothing was altered on the way in.
+
+  ### In the palette, not in the tree
+
+  What you *do* with a library circuit is what you do with a built-in: click,
+  place. So it belongs where the built-ins are, as one more folding section
+  headed with the library's name. Nothing marks the individual entries: the
+  provenance is the heading, and an entry already draws itself with its own
+  symbol.
+
+  It also keeps the circuit tree meaning exactly one thing — **yours, the
+  ones you can open and edit** — so the rule is one sentence: the palette is
+  what you place, the tree is what you edit.
+
+  - **Folders nest inside the section.** Romain's projects use them, so a
+    library will have them; the palette already uses folding headers.
+  - **"Look inside"** on a context menu, opening it read-only without it
+    entering the tree. Wanting to know what an imported adder is made of is
+    legitimate, and the palette has no notion of opening.
+  - **Read-only, with an explicit way out**: "copy this into my project",
+    which makes it yours and forks it. Better than forbidding, and better
+    than letting an edit happen quietly.
+  - **No update, no merge.** Re-importing *replaces*. Between two edited
+    copies there is no right answer, and promising one would be a lie.
+
+  ### Circuits that stay out of the library
+
+  A project has plumbing — a `nand` made of transistors, a test bench — and
+  what it offers should be its interface, not its workings. So a circuit can
+  be marked as not part of it.
+
+  **The subtlety that decides the design: it is still copied.** If a public
+  `adder` instantiates a hidden `nand`, the library must carry it or the
+  adder arrives broken. Hidden means **absent from the listing**, not absent
+  from the file — the module rule, where a private item serves a public one
+  and simply isn't in the interface. That makes the flag purely
+  presentational, so it cannot break a circuit whatever is marked.
+
+  **Not called "private".** The circuit stays in the `.slgx`, readable by
+  anyone who opens it, and *has* to for dependencies to work. "Private"
+  promises a protection this does not give; the label should say the effect
+  — hidden from the library, or internal.
+
+  Navigation still reaches it: opening a public circuit that instantiates a
+  hidden one and then wanting to see that one is not a dead end.
+
+  **Per circuit to begin with.** Marking a whole folder would be convenient,
+  and is a second mechanism; add it if the use asks.
+
+  ### Two things to get right rather than clever
+
+  Names are **sanitised per level**, as `unique_file_name` already does for
+  circuits: a library called `../..` must not be a way out of the container.
+
+  And the flag and the `libraries` list are both **additive** — absent means
+  public, absent means none — so no project changes behaviour. Which is also
+  the argument for doing [the format work](#next) first: an older build
+  opening a project with libraries would drop them on save, silently, and
+  that item is precisely what stops it.
 
 ## Later
 
