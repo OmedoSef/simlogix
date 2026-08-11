@@ -103,6 +103,13 @@ left button does: sweep a **selection rectangle** (the default) or **move
 the view**. Pick whichever you do more often; the other stays one toolbar
 click away.
 
+**Settings → Values shown in** picks the base every value on screen is
+written in — binary, decimal or hexadecimal. *Automatic* is the default and
+means `0`/`1` on a plain wire and hexadecimal on a bus, which is how a bit
+pattern is read. Any single component can be told to use another base with
+its own **Shown in** property; everything else keeps following this, so
+changing it here still moves them.
+
 **Settings → Theme** follows the operating system by default, and can be
 forced to light or dark. **Settings → Language** offers English, French and
 Italian, defaulting to the system locale. Neither affects what a project
@@ -160,7 +167,20 @@ project file.
 | **Colour** | LED | What it glows when lit. *Reset* puts it back to red. |
 | **Bits** | the three ports, the plain gates, Constant, Tri-state buffer, the transceivers | How many bits its *data* pins carry. A pin that disagrees with its wire is [ringed in red](simulation.md#when-two-widths-meet). |
 | **Value** | Constant | What it puts on its wire. Typed in decimal, or `0x…` / `0b…`. |
+| **Shown in** | Probe, the three ports, Tri-state source, Constant | Which base its value is written in. *Follow the setting* is the default. |
 | **Branches** | Splitter | How many bits each branch takes, from bit 0 upward. |
+
+A component that shows a value **keeps its body upright when you rotate
+it**: only its pin moves round to another edge. Text is never drawn
+sideways, so turning the body would leave a wide value lying across a tall
+narrow box. It is the rule the plain gates have always followed — the shape
+stays put and which edge carries the pins is what turns.
+
+A component that shows a value **grows to hold it**: a 32-bit port is wider
+than a one-bit one, and wider again in binary than in hexadecimal. It is
+sized from the width and the base, never from the value on it, so it keeps
+its size while the simulation runs rather than shifting its own pins about.
+A one-bit component is exactly the box it has always been.
 
 A **constant** is the one component that is nothing but its value: it puts
 a fixed number on its wire and the symbol draws that number, shown in hex

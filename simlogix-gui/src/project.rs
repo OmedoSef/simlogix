@@ -54,12 +54,13 @@ use crate::properties::Properties;
 /// - `12` — a component can declare how many bits its pins carry.
 /// - `13` — a constant carries the value it puts on its wire.
 /// - `14` — a splitter carries the width of each of its branches.
+/// - `15` — a component can name the base it shows its value in.
 ///
 /// From `7` on, every bump has only *added* optional fields: absent means
 /// the behaviour that was there before, so none of them needed a migration
 /// and the number only signals capability. `scripts/set-format-version.py`
 /// holds that same table, and a test here keeps the two in step.
-pub const CURRENT_VERSION: u32 = 14;
+pub const CURRENT_VERSION: u32 = 15;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";

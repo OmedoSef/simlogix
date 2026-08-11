@@ -160,14 +160,20 @@ better at the thing it's for.
     branch pins are of different widths by definition — not the optional
     tidy-up it looked like. The SR latch is still left out: a wide one is a
     register, and what `S` and `R` mean for it is a design question.
-  - [ ] 🚧 **Reading a bus.** The `Probe` gains a **base** — binary, hex,
-    decimal — because eight letters in a row is not a reading.
+  - [x] **Reading a bus.** The base is a **choice**, on the probe, the
+    three ports, the tri-state source and the constant alike: a global
+    default in the settings, which a property on any one of them can
+    override. `Auto` is a choice *not made* rather than a fourth base, so
+    changing the default still moves everything that never asked for
+    something else.
 
-    Its **width is derived from its net**, and now genuinely is: a probe
-    *declares nothing*, so it neither widens a net nor can disagree with
-    one. It used to declare one bit, which had it ringed as faulty on every
-    bus it read — the instrument being treated as something that could be
-    wrong about what it was measuring. What is left here is the base.
+    Its **width is derived from its net**: a probe *declares nothing*, so
+    it neither widens a net nor can disagree with one.
+
+    It also closed a fault nobody had named: there were **two formatting
+    rules**, so a constant showed `10` where a probe on the same value
+    showed `A`. One rule now, with a prefix only where a value is typed
+    back in.
   - [x] **Seeing a bus.** **Drawn thicker**, and a selected wire says how
     many bits it carries. Not proportional to the width — what matters is
     one bit against several, and a 32-bit wire as thick as a component is a

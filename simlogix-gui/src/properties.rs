@@ -22,6 +22,58 @@ use crate::palette::ComponentKind;
 use crate::placed_component::InstancePort;
 
 /// What the user has set on one component.
+/// Which base a value is shown in.
+///
+/// `Auto` is a *choice not made* rather than a fourth base: it resolves to
+/// `0`/`1` on a plain wire and hexadecimal on a bus, which is how a bit
+/// pattern is read. Kept as a variant of its own so "I never chose" and "I
+/// chose hexadecimal" stay different answers — the same reasoning the
+/// language setting already follows.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NumberBase {
+    #[default]
+    Auto,
+    Binary,
+    Decimal,
+    Hexadecimal,
+}
+
+impl NumberBase {
+    /// What `Auto` means for a signal this wide.
+    fn resolve(self, width: usize) -> Self {
+        match self {
+            Self::Auto if width <= 1 => Self::Decimal,
+            Self::Auto => Self::Hexadecimal,
+            chosen => chosen,
+        }
+    }
+
+    /// How many characters the widest value of `width` bits takes.
+    ///
+    /// From the width, never from the value — a symbol is sized by this, and
+    /// one that resized as the simulation ran would move its own pins under
+    /// the wires.
+    pub fn digits(self, width: usize) -> usize {
+        match self.resolve(width) {
+            Self::Binary => width.max(1),
+            Self::Hexadecimal => width.div_ceil(4).max(1),
+            // The decimal digits of 2^width - 1, without building it:
+            // log10(2) is a little over 0.30103.
+            _ => ((width as f64) * std::f64::consts::LOG10_2).floor() as usize + 1,
+        }
+    }
+
+    /// What a value written in this base is prefixed with, so that what is
+    /// on screen can be typed straight back in.
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Binary => "0b",
+            Self::Hexadecimal => "0x",
+            _ => "",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Properties {
     /// A label of the user's own, drawn under the symbol.
@@ -65,6 +117,14 @@ pub struct Properties {
     /// letting the two disagree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<usize>,
+
+    /// Which base this component shows its value in.
+    ///
+    /// Unset follows the setting, which itself defaults to `Auto` — so "I
+    /// never chose" reaches all the way down, and changing the global
+    /// default still moves everything that never asked for something else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<NumberBase>,
 
     /// A `Splitter`'s branch widths, from bit 0 upward.
     ///
@@ -123,6 +183,23 @@ impl Properties {
             }
             _ => vec![1; self.width()],
         }
+    }
+
+    /// Whether this kind shows a value, and so can be told which base to
+    /// show it in.
+    ///
+    /// Everything that puts a number on screen. A LED and a button show a
+    /// state rather than a value, and have nothing to choose.
+    pub fn has_base(kind: &ComponentKind) -> bool {
+        matches!(
+            kind,
+            ComponentKind::Probe
+                | ComponentKind::InputPort
+                | ComponentKind::OutputPort
+                | ComponentKind::InOutPort
+                | ComponentKind::TriStateSource
+                | ComponentKind::Constant
+        )
     }
 
     /// Whether this kind can be told how wide its pins are.
@@ -247,6 +324,7 @@ pub fn show_value(
     strings: &Strings,
     drive: PortDrive,
     width: usize,
+    base: NumberBase,
 ) -> Option<PortDrive> {
     let mut edited = None;
 
@@ -266,7 +344,7 @@ pub fn show_value(
     }
 
     if let PortDrive::Driving(bits) = drive {
-        if let (Some(value), _) = value_field(ui, "port_value", bits, width) {
+        if let (Some(value), _) = value_field(ui, "port_value", bits, width, base) {
             edited = Some(PortDrive::Driving(value));
         }
         ui.label(RichText::new(strings.value_bases).weak());
@@ -283,11 +361,17 @@ pub fn show_value(
 /// identical question — building it twice is how the two answers would come
 /// to differ. The response comes back too, so a caller can tell an editing
 /// session beginning from a redraw.
-fn value_field(ui: &mut Ui, salt: &str, bits: u64, width: usize) -> (Option<u64>, Response) {
+fn value_field(
+    ui: &mut Ui,
+    salt: &str,
+    bits: u64,
+    width: usize,
+    base: NumberBase,
+) -> (Option<u64>, Response) {
     let id = ui.id().with(salt);
     let mut text = ui
         .data(|data| data.get_temp::<String>(id))
-        .unwrap_or_else(|| format_value(bits, width));
+        .unwrap_or_else(|| format_value(u128::from(bits), width, base, true));
     let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
     if response.has_focus() {
         // Its own text while being typed, so a half-written number is not
@@ -303,22 +387,34 @@ fn value_field(ui: &mut Ui, salt: &str, bits: u64, width: usize) -> (Option<u64>
     (edited, response)
 }
 
-/// How a value is written for a reader: hex past four bits, decimal below.
+/// How a value is written for a reader.
 ///
-/// One rule in one place, read by the value panel, by a constant's symbol
-/// and by whatever wants it next. Hex above four bits because a bus value
-/// is a bit pattern and that is how a bit pattern is read; decimal below,
-/// where every base agrees anyway and a `0x` prefix would be noise.
+/// **One rule in one place**, read by a symbol's readout, by the value
+/// panel and by a constant's field. There used to be two — a bare hex form
+/// for the readouts and a hex-or-decimal one for the typed fields — so a
+/// constant showed `10` where a probe on the same value showed `A`. Which
+/// base is a *choice*; whether it is prefixed is a matter of where it is
+/// written, and only that second part legitimately differs.
 ///
-/// It says nothing about what may be *typed* — `parse_value` takes all
-/// three bases whatever this shows, since a value copied from a datasheet
-/// or from code arrives in whichever the source used.
-pub fn format_value(bits: u64, width: usize) -> String {
-    if width > 4 {
-        format!("{bits:#X}")
-    } else {
-        bits.to_string()
-    }
+/// `prefix` is for a field you type into, where `0xC` has to read back; a
+/// symbol takes the bare digits, since a prefix on a schematic is noise.
+/// Neither says anything about what may be *typed* — `parse_value` takes
+/// all three bases whatever this shows.
+///
+/// **Not padded**, deliberately, and only for now. Padding to
+/// [`NumberBase::digits`] would keep a readout the same size as its value
+/// changes, which is worth having — but only once a symbol is *sized* from
+/// that number. Until then it would turn `FF` into `000000FF` on a 32-bit
+/// port and push the overflow further out, which is the complaint it is
+/// meant to help with. The two land together.
+pub fn format_value(bits: u128, width: usize, base: NumberBase, prefix: bool) -> String {
+    let base = base.resolve(width);
+    let digits = match base {
+        NumberBase::Binary => format!("{bits:b}"),
+        NumberBase::Hexadecimal => format!("{bits:X}"),
+        _ => bits.to_string(),
+    };
+    format!("{}{digits}", if prefix { base.prefix() } else { "" })
 }
 
 /// Reads a value written in hex, binary or decimal.
@@ -724,9 +820,13 @@ pub fn show(
     strings: &Strings,
     kind: &ComponentKind,
     properties: &mut Properties,
+    default_base: NumberBase,
 ) -> PanelResult {
     let mut result = PanelResult::default();
     let mut edit_started = false;
+    // What this component shows values in: its own choice, or the setting
+    // it is following.
+    let base = properties.base.unwrap_or(default_base);
 
     ui.heading(strings.properties_heading);
     ui.add_space(4.0);
@@ -909,6 +1009,7 @@ pub fn show(
                 "constant_value",
                 properties.constant_value(),
                 properties.width(),
+                base,
             );
             if response.gained_focus() {
                 edit_started = true;
@@ -921,6 +1022,27 @@ pub fn show(
             ui.label(RichText::new(strings.value_bases).weak());
         }
         _ => {}
+    }
+
+    // Outside the match for the same reason the width is: several kinds
+    // show a value, and which base is the same question for all of them.
+    if Properties::has_base(kind) {
+        ui.add_space(8.0);
+        ui.label(strings.property_base);
+        for (choice, label) in [
+            (None, strings.base_follow_setting),
+            (Some(NumberBase::Binary), strings.base_binary),
+            (Some(NumberBase::Decimal), strings.base_decimal),
+            (Some(NumberBase::Hexadecimal), strings.base_hexadecimal),
+        ] {
+            // *Follow the setting* is offered as a position of its own, not
+            // as the absence of one: it is what almost everything is on, and
+            // going back to it has to be as easy as leaving it.
+            if ui.radio(properties.base == choice, label).clicked() && properties.base != choice {
+                edit_started = true;
+                properties.base = choice;
+            }
+        }
     }
 
     // Outside the match because it is not one kind's extra: a port declares
@@ -1074,6 +1196,29 @@ mod tests {
     }
 
     #[test]
+    fn one_value_reads_the_same_wherever_it_is_written() {
+        // The fault Romain saw: a constant showed `10` where a probe on the
+        // same value showed `A`, because there were two formatting rules.
+        // The base is the same question everywhere; only the prefix is a
+        // matter of where it is written.
+        let bare = format_value(10, 8, NumberBase::Auto, false);
+        let typed = format_value(10, 8, NumberBase::Auto, true);
+        assert_eq!(bare, "A", "a readout takes the bare digits");
+        assert_eq!(typed, "0xA", "a field you type into carries its prefix");
+    }
+
+    #[test]
+    fn auto_is_a_choice_not_made_rather_than_a_fourth_base() {
+        // A plain wire reads 0/1 whatever the base, so `Auto` there is
+        // decimal; a bus is a bit pattern, and hex is how one is read.
+        assert_eq!(format_value(1, 1, NumberBase::Auto, false), "1");
+        assert_eq!(format_value(12, 8, NumberBase::Auto, false), "C");
+        // And naming a base overrides that, at any width.
+        assert_eq!(format_value(12, 8, NumberBase::Decimal, false), "12");
+        assert_eq!(format_value(12, 4, NumberBase::Binary, false), "1100");
+    }
+
+    #[test]
     fn properties_survive_a_round_trip() {
         let properties = Properties {
             name: Some("clk".to_string()),
@@ -1082,6 +1227,7 @@ mod tests {
             tri_state: Some(true),
             initial: Some(PortSetting::High),
             width: Some(8),
+            base: Some(NumberBase::Binary),
             branches: Some(vec![4, 4]),
             value: Some(0xAB),
         };
@@ -1096,7 +1242,7 @@ mod tests {
         // asserting: `PortLevel` became `PortSetting` on the strength of it.
         assert_eq!(
             json,
-            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"branches":[4,4],"value":171}"#
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"base":"Binary","branches":[4,4],"value":171}"#
         );
     }
 

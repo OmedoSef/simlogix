@@ -196,6 +196,7 @@ impl SimLogixApp {
                             &mut self.circuit,
                             is_selected,
                             editing,
+                            self.base,
                         );
                         if let Some(id) = frame.clicked {
                             self.selection.pick_component(id, extend_selection);

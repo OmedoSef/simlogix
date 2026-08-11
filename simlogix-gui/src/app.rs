@@ -265,6 +265,11 @@ struct Settings {
     language: Option<Language>,
     #[serde(default)]
     left_drag_pans: bool,
+    /// Which base values are shown in, for everything that hasn't been told
+    /// otherwise. `Auto` is the default, and is a choice not made rather
+    /// than a fourth base.
+    #[serde(default)]
+    base: crate::properties::NumberBase,
     /// Projects opened or saved recently, most recent first.
     ///
     /// A preference, not document state: it says what *you* have been
@@ -388,6 +393,9 @@ pub struct SimLogixApp {
     /// `Tool::Marquee` and `Tool::Pan` each force one of the two — so this
     /// only decides which is free.
     left_drag_pans: bool,
+    /// Which base values are shown in, unless a component names its own.
+    /// Persisted with the settings.
+    base: crate::properties::NumberBase,
     /// The recent projects, most recent first. Persisted with the settings.
     recent: Vec<PathBuf>,
     /// Where a rubber-band drag began, in scene coordinates, while one is in
@@ -593,6 +601,7 @@ impl Default for SimLogixApp {
             clipboard: None,
             language_chosen: false,
             left_drag_pans: false,
+            base: crate::properties::NumberBase::default(),
             recent: Vec::new(),
             band_origin: None,
             wiring_from: None,
@@ -1333,6 +1342,7 @@ impl SimLogixApp {
     /// wanted.
     fn reset_settings(&mut self, ctx: &egui::Context) {
         self.left_drag_pans = false;
+        self.base = crate::properties::NumberBase::default();
         // Back to *following* the OS locale, not to a fixed language:
         // clearing the choice is the reset, and re-detecting is what that
         // means the next time the machine's locale differs.
@@ -1869,6 +1879,46 @@ impl SimLogixApp {
         self.edit_saved_component(id, |component| component.kind = kind);
     }
 
+    /// Works out how much room each component's readout needs, so its box
+    /// can be sized to hold it.
+    ///
+    /// Every frame rather than stored: the base is a setting that changes
+    /// without the drawing changing, and a probe's width comes from a net
+    /// that is reallocated on every edit. Derived, so it cannot go stale —
+    /// the same bargain the wire routes make.
+    ///
+    /// Measured in the real font, since a box a little too narrow clips the
+    /// value it exists to show.
+    fn refresh_readouts(&mut self, ui: &egui::Ui) {
+        let default_base = self.base;
+        let per_char = crate::symbol::readout_char_width(ui);
+        let room: Vec<f32> = self
+            .placed
+            .iter()
+            .map(|placed| {
+                let kind = placed.kind();
+                if !Properties::has_base(&kind) {
+                    return 0.0;
+                }
+                // A probe declares no width of its own — it reads whatever
+                // its net carries, so that is what it has to have room for.
+                let bits = if kind == ComponentKind::Probe {
+                    self.circuit
+                        .try_pins(placed.id())
+                        .and_then(|pins| pins.first())
+                        .map_or(1, |pin| self.circuit.net_width(pin.net))
+                } else {
+                    placed.properties().width()
+                };
+                let base = placed.properties().base.unwrap_or(default_base);
+                base.digits(bits) as f32 * per_char
+            })
+            .collect();
+        for (placed, room) in self.placed.iter_mut().zip(room) {
+            placed.set_readout(room);
+        }
+    }
+
     /// What the inspector needs to name each component and say how wide its
     /// pins are.
     ///
@@ -2037,10 +2087,20 @@ impl SimLogixApp {
             Ok(project) => {
                 // Loading a project resets everything else, but the
                 // language is a UI preference, not part of the circuit.
-                let preferences = (self.language, self.language_chosen, self.left_drag_pans);
+                let preferences = (
+                    self.language,
+                    self.language_chosen,
+                    self.left_drag_pans,
+                    self.base,
+                );
                 let recent = std::mem::take(&mut self.recent);
                 *self = Self::from_project(&project, 0);
-                (self.language, self.language_chosen, self.left_drag_pans) = preferences;
+                (
+                    self.language,
+                    self.language_chosen,
+                    self.left_drag_pans,
+                    self.base,
+                ) = preferences;
                 self.recent = recent;
                 self.refit_view = true;
                 self.name_library_after(&path);
@@ -2326,6 +2386,7 @@ impl SimLogixApp {
                 text.push_str(" · ");
                 text.push_str(&crate::placed_component::signal_text(
                     &self.circuit.signal_at(net),
+                    self.base,
                 ));
             }
         }
@@ -2524,6 +2585,7 @@ impl SimLogixApp {
             app.language = language;
         }
         app.left_drag_pans = settings.left_drag_pans;
+        app.base = settings.base;
         app.recent = settings.recent;
         app
     }
@@ -2539,6 +2601,7 @@ impl eframe::App for SimLogixApp {
                 // machine whose locale changes still follows it.
                 language: self.language_chosen.then_some(self.language),
                 left_drag_pans: self.left_drag_pans,
+                base: self.base,
                 recent: self.recent.clone(),
             },
         );
@@ -2563,6 +2626,10 @@ impl SimLogixApp {
         // makes egui keep calling this at all without new input; the
         // tradeoff is constant redraw (and CPU use) instead of only on
         // interaction, even for a circuit with no Clock in it.
+        // Before anything asks a component how big it is: a readout's room
+        // decides the box, and the box is read by the hover test, the
+        // marquee and the view framing alike.
+        self.refresh_readouts(ui);
         self.tick_budget += ui.ctx().input(|i| i.stable_dt) * TICKS_PER_SECOND * self.speed;
         let ticks_due = self.tick_budget.floor();
         if ticks_due > 0.0 {
@@ -3051,8 +3118,13 @@ impl SimLogixApp {
                             match selected {
                                 Some(placed) => {
                                     let mut edited = placed.properties().clone();
-                                    let outcome =
-                                        properties::show(ui, strings, &placed.kind(), &mut edited);
+                                    let outcome = properties::show(
+                                        ui,
+                                        strings,
+                                        &placed.kind(),
+                                        &mut edited,
+                                        self.base,
+                                    );
                                     if let Some(kind) = outcome.change_kind {
                                         pending_kind = Some((placed.id(), kind));
                                     }
@@ -3071,6 +3143,7 @@ impl SimLogixApp {
                                             strings,
                                             drive.get(),
                                             placed.width(),
+                                            placed.properties().base.unwrap_or(self.base),
                                         ) {
                                             drive.set(next);
                                             pending_drive = Some(placed.id());

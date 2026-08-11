@@ -8,6 +8,7 @@
 //! private to the rest of the crate.
 
 use crate::i18n::{Language, Strings};
+use crate::properties::NumberBase;
 
 use super::{PendingAction, SimLogixApp};
 
@@ -332,6 +333,22 @@ impl SimLogixApp {
                     ] {
                         if ui.radio(self.left_drag_pans == pans, label).clicked() {
                             self.left_drag_pans = pans;
+                        }
+                    }
+                    ui.separator();
+                    // The default every component follows until one is told
+                    // otherwise. A setting rather than a way of working —
+                    // unlike hiding the signal state, which sits with what
+                    // it affects because you flip it while drawing.
+                    ui.label(strings.settings_base);
+                    for (base, label) in [
+                        (NumberBase::Auto, strings.base_auto),
+                        (NumberBase::Binary, strings.base_binary),
+                        (NumberBase::Decimal, strings.base_decimal),
+                        (NumberBase::Hexadecimal, strings.base_hexadecimal),
+                    ] {
+                        if ui.radio(self.base == base, label).clicked() {
+                            self.base = base;
                         }
                     }
                     ui.separator();

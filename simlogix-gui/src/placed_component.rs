@@ -9,8 +9,12 @@ use simlogix_core::{Circuit, ComponentId, Level, NetId, PortDrive, PortHandles, 
 
 use crate::appearance::Appearance;
 use crate::canvas::{self, Rotation, BOX_SIZE, GRID_SPACING};
+
+/// The room a readout is given beyond the characters themselves — the body
+/// it sits in, and whatever the symbol draws beside it.
+const READOUT_MARGIN: f32 = GRID_SPACING * 3.0;
 use crate::palette::ComponentKind;
-use crate::properties::{Properties, DEFAULT_LED_COLOR};
+use crate::properties::{NumberBase, Properties, DEFAULT_LED_COLOR};
 use crate::symbol::{self, SymbolState};
 
 /// A flattened sub-circuit's ports, its own internal connections and how
@@ -52,6 +56,24 @@ pub struct InstancePort {
     /// list of pins to link to, because a net joining two ports and nothing
     /// else has no pins to offer — and that is exactly a pass-through.
     pub group: Option<usize>,
+}
+
+/// The box a component occupies, before rotation.
+///
+/// Wide enough for whatever readout it has to show, grown in whole grid
+/// steps so its pins keep landing on the dots, and about the centre so the
+/// symbol stays where it was put. A component with no readout — or a
+/// one-character one — is exactly `BOX_SIZE`, so nothing already drawn
+/// moves.
+///
+/// A free function because the hit area and *every draw arm* need it, and
+/// the arms have `self` destructured. One definition rather than two: the
+/// first version of this grew only `rect()`, so the box you could click
+/// grew while the symbol drawn inside it stayed put — the same fault as the
+/// rotated component that could not be clicked, made a second time.
+fn box_rect(center: Pos2, readout: f32) -> Rect {
+    let width = BOX_SIZE.x.max(canvas::snap_up(readout + READOUT_MARGIN));
+    Rect::from_center_size(center, egui::vec2(width, BOX_SIZE.y))
 }
 
 /// A splitter's box: one grid row per branch, never shorter than an ordinary
@@ -136,6 +158,9 @@ pub struct PlacedComponent {
     properties: Properties,
     /// What kind of thing it is, and whatever *that* needs to carry.
     shape: Shape,
+    /// How much room its readout needs, in points — see `set_readout`.
+    /// Zero for everything that shows no value.
+    readout: f32,
 }
 
 /// The part that actually varies between components.
@@ -228,6 +253,7 @@ impl PlacedComponent {
             rotation: Rotation::default(),
             properties: Properties::default(),
             shape,
+            readout: 0.0,
         }
     }
 
@@ -278,6 +304,17 @@ impl PlacedComponent {
         handles: Option<PortHandles>,
     ) -> Self {
         Self::new(id, center, Shape::HandSet { kind, handles })
+    }
+
+    /// How much room this component's readout needs, in points.
+    ///
+    /// Refreshed every frame from the net's width and the base in force,
+    /// rather than stored and kept in step: a base is a setting that can
+    /// change without the drawing changing, and a probe's width comes from
+    /// a net that is reallocated on every edit. The same bargain the wire
+    /// routes make — derived each frame, so it cannot go stale.
+    pub fn set_readout(&mut self, width: f32) {
+        self.readout = width;
     }
 
     pub fn constant(id: ComponentId, center: Pos2, handles: PortHandles) -> Self {
@@ -369,16 +406,19 @@ impl PlacedComponent {
                 self.rotation,
             );
         }
+        let box_rect = box_rect(self.center, self.readout);
+        if symbol::keeps_upright(&self.kind()) {
+            // A symbol that is mostly a readout keeps its body upright and
+            // moves only its pin, so its box does not turn either — turning
+            // it would leave a tall narrow hit area around a wide symbol.
+            return box_rect;
+        }
         // Turned too, and for the same reason: the box is not square, so a
         // component on its side occupies the other way round. This one still
         // covered its own centre, so it was a mis-shaped hit area rather than
         // an absent one — visible in what the selection outline drew and in
         // what a rubber band caught.
-        symbol::rotate_rect(
-            Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, BOX_SIZE.y)),
-            self.center,
-            self.rotation,
-        )
+        symbol::rotate_rect(box_rect, self.center, self.rotation)
     }
 
     pub fn splitter(id: ComponentId, center: Pos2) -> Self {
@@ -573,9 +613,14 @@ impl PlacedComponent {
         // False while the circuit is being watched rather than built:
         // nothing may be moved, and no pin may start a wire.
         movable: bool,
+        // The base to show a value in when this component doesn't name one
+        // of its own. Handed in rather than read here: it is a setting, and
+        // a component has no way to reach one.
+        default_base: NumberBase,
     ) -> FrameResult {
         let id = self.id();
         let kind = self.kind();
+        let base = self.properties.base.unwrap_or(default_base);
         // Destructured up front so the borrow of `center`/`rotation` and the
         // borrow of `shape` are disjoint -- matching on `self` while also
         // handing `&mut self.center` to `interact_box` wouldn't compile.
@@ -584,8 +629,12 @@ impl PlacedComponent {
             rotation,
             properties,
             shape,
+            readout,
             ..
         } = self;
+        // Named apart from the `readout` *string* one arm builds: this is
+        // the room it needs, not what it says.
+        let readout_room = *readout;
 
         let rect_id = Id::new(("placed", id));
         let mut input_changed = false;
@@ -606,7 +655,7 @@ impl PlacedComponent {
         // wrote is not a label the editor generated for you.
         if let Some(label) = properties.label() {
             text_layer.text(
-                Rect::from_center_size(*center, BOX_SIZE).center_bottom() + egui::vec2(0.0, 2.0),
+                box_rect(*center, readout_room).center_bottom() + egui::vec2(0.0, 2.0),
                 Align2::CENTER_TOP,
                 label,
                 11.0,
@@ -616,7 +665,7 @@ impl PlacedComponent {
 
         match shape {
             Shape::Button { pressed } => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -667,7 +716,7 @@ impl PlacedComponent {
                 }
             }
             Shape::Switch { on } => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -719,7 +768,7 @@ impl PlacedComponent {
                 } else {
                     off_color
                 };
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -749,7 +798,7 @@ impl PlacedComponent {
                 }
             }
             Shape::BusTransceiver(_) => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -879,7 +928,7 @@ impl PlacedComponent {
                     .first()
                     .map(|pin| circuit.signal_at(pin.net))
                     .unwrap_or_default();
-                let readout = signal_text(&signal);
+                let readout = signal_text(&signal, base);
                 // The readout follows the signal, the body doesn't: which way
                 // the value crosses the boundary is structure and shouldn't
                 // change colour as the circuit runs.
@@ -892,7 +941,7 @@ impl PlacedComponent {
                     readout_color = readout_color.gamma_multiply(canvas::WEAK_FADE);
                 }
 
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -941,7 +990,7 @@ impl PlacedComponent {
                 }
             }
             Shape::SrLatch => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1008,7 +1057,7 @@ impl PlacedComponent {
                 }
             }
             Shape::Transistor(_) => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1064,7 +1113,7 @@ impl PlacedComponent {
                 }
             }
             Shape::Rail(_) => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1097,10 +1146,12 @@ impl PlacedComponent {
                 // Its own value, not the net's: a constant is not reporting
                 // what it sees, it is saying what it puts there.
                 let label = crate::properties::format_value(
-                    properties.constant_value(),
+                    u128::from(properties.constant_value()),
                     properties.width(),
+                    base,
+                    false,
                 );
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1188,8 +1239,8 @@ impl PlacedComponent {
                 {
                     color = color.gamma_multiply(canvas::WEAK_FADE);
                 }
-                let label = signal_text(&signal);
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let label = signal_text(&signal, base);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1232,7 +1283,7 @@ impl PlacedComponent {
                 // rather than a lit/unlit one of its own — green while high,
                 // not red.
                 let color = canvas::bus_color(&signal, dark_mode);
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1262,7 +1313,7 @@ impl PlacedComponent {
                 }
             }
             Shape::TwoInputGate(_) => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1318,7 +1369,7 @@ impl PlacedComponent {
                 }
             }
             Shape::OneInputGate(_) => {
-                let rect = Rect::from_center_size(*center, BOX_SIZE);
+                let rect = box_rect(*center, readout_room);
                 let pin_positions = symbol::draw(
                     painter,
                     &kind,
@@ -1387,7 +1438,7 @@ impl PlacedComponent {
 /// is `Z`. Only once every bit is a definite level is there a *value* to
 /// show, and then it is shown in hex, least significant bit first being
 /// what `Signal` already promises.
-pub fn signal_text(signal: &Signal) -> String {
+pub fn signal_text(signal: &Signal, base: NumberBase) -> String {
     if signal.width() == 1 {
         return signal_letter(signal.only_level()).to_string();
     }
@@ -1417,7 +1468,9 @@ pub fn signal_text(signal: &Signal) -> String {
         .filter(|(_, &level)| level == Level::High)
         .map(|(bit, _)| 1u128 << bit.min(127))
         .sum();
-    format!("{value:X}")
+    // The same rule a typed value is written by, minus the prefix: a
+    // readout on a schematic is read, not retyped.
+    crate::properties::format_value(value, signal.width(), base, false)
 }
 
 fn signal_letter(signal: Level) -> &'static str {
@@ -1571,19 +1624,22 @@ mod tests {
         // on a bus, and quite wrong for a readout. A two-bit port sitting
         // there undriven showed a red `E`.
         let undriven = Signal::splat(Level::Unknown, 2);
-        assert_eq!(signal_text(&undriven), "?");
+        assert_eq!(signal_text(&undriven, NumberBase::Auto), "?");
 
         // Every bit definite is a *value*, in hex, bit 0 least significant.
         let five = Signal::from_levels(vec![Level::High, Level::Low, Level::High]);
-        assert_eq!(signal_text(&five), "5");
+        assert_eq!(signal_text(&five, NumberBase::Auto), "5");
 
         // And a fault anywhere still dominates, which is the order a
         // schematic is read in.
         let faulted = Signal::from_levels(vec![Level::High, Level::Error]);
-        assert_eq!(signal_text(&faulted), "E");
+        assert_eq!(signal_text(&faulted, NumberBase::Auto), "E");
 
         // A plain wire is untouched.
-        assert_eq!(signal_text(&Signal::bit(Level::High)), "1");
+        assert_eq!(
+            signal_text(&Signal::bit(Level::High), NumberBase::Auto),
+            "1"
+        );
     }
 
     fn port(kind: ComponentKind) -> InstancePort {

@@ -1001,3 +1001,59 @@ fn renaming_starts_with_the_name_selected() {
         .expect("still renaming");
     assert_eq!(typed, "X", "typed over {before:?} rather than into it");
 }
+
+#[test]
+fn a_wide_readout_grows_its_box_and_a_one_bit_one_does_not() {
+    // Romain's screenshot: a 32-bit value hanging out of both sides of a
+    // port and out of a probe. A symbol is one grid box whatever it shows,
+    // so the box has to follow the readout.
+    let mut harness = harness();
+    let port = harness
+        .state_mut()
+        .place(ComponentKind::InputPort, egui::pos2(0.0, 0.0));
+    step(&mut harness);
+
+    let narrow = harness.state().placed[0].rect().width();
+    assert_eq!(
+        narrow,
+        crate::canvas::BOX_SIZE.x,
+        "a one-bit port is the box it has always been"
+    );
+
+    harness.state_mut().set_component_properties(
+        port,
+        crate::properties::Properties {
+            width: Some(32),
+            ..Default::default()
+        },
+    );
+    step(&mut harness);
+
+    let wide = harness.state().placed[0].rect().width();
+    assert!(
+        wide > narrow,
+        "a 32-bit readout needs more room than a one-bit one: {wide} against {narrow}"
+    );
+    // And in whole grid steps, or the pins stop landing on the dots.
+    assert_eq!(
+        wide % crate::canvas::GRID_SPACING,
+        0.0,
+        "grown by whole grid steps, not by however many points the text took"
+    );
+
+    // Binary is wider still, since the same value takes four times the
+    // characters — the box follows the base as much as the width.
+    harness.state_mut().set_component_properties(
+        port,
+        crate::properties::Properties {
+            width: Some(32),
+            base: Some(crate::properties::NumberBase::Binary),
+            ..Default::default()
+        },
+    );
+    step(&mut harness);
+    assert!(
+        harness.state().placed[0].rect().width() > wide,
+        "binary takes four times the characters of hexadecimal"
+    );
+}

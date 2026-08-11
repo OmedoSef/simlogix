@@ -1043,6 +1043,7 @@ fn a_chosen_language_survives_a_round_trip() {
     let stored = Settings {
         language: Some(Language::French),
         left_drag_pans: true,
+        base: crate::properties::NumberBase::Hexadecimal,
         recent: vec![PathBuf::from("/tmp/alu.slgx")],
     };
 

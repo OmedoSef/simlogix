@@ -98,6 +98,7 @@ to do anything, and is written back as `.slgx` next time you save.
 | 12 | A component can declare how many bits its pins carry. |
 | 13 | A constant carries the value it puts on its wire. |
 | 14 | A splitter carries the width of each of its branches. |
+| 15 | A component can name the base it shows its value in. |
 
 ## Circuits
 

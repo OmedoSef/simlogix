@@ -146,6 +146,108 @@ pub struct SymbolState<'a> {
 
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
 /// returns where its pins ended up.
+/// Whether a kind keeps its body upright and moves only its pin when it is
+/// turned.
+///
+/// **Every symbol that is mostly a readout.** Text is never drawn rotated —
+/// it reads left to right on screen whatever the component does — so
+/// turning the body of one on its side leaves a tall narrow box with a wide
+/// value across it, which is not a symbol at all. Turning it a quarter and
+/// keeping the words upright would be worse still: the box and its contents
+/// would disagree about which way is up.
+///
+/// So they follow the rule the generic box has always followed — the body
+/// stays axis-aligned and *which edge carries the pin* is what turns. It is
+/// Romain's suggestion, and it is the same answer this project already gave
+/// once.
+pub fn keeps_upright(kind: &ComponentKind) -> bool {
+    crate::properties::Properties::has_base(kind)
+}
+
+/// Where a pin sits once the body has been left upright and only the pin
+/// moved around it.
+///
+/// `natural` is the edge it comes out of at rest, as a quarter-turn count
+/// clockwise from the right — a port's lead leaves rightwards, a probe's
+/// leftwards. Turning adds to that, so a quarter turn sends a port's pin to
+/// the bottom rather than mapping a point of an unrotated box onto nothing.
+fn pin_on_edge(rect: Rect, natural: usize, rotation: Rotation) -> Pos2 {
+    let c = rect.center();
+    match (natural + rotation.quarter_turns()) % 4 {
+        0 => pos2(rect.right(), c.y),
+        1 => pos2(c.x, rect.bottom()),
+        2 => pos2(rect.left(), c.y),
+        _ => pos2(c.x, rect.top()),
+    }
+}
+
+/// The point on `body` a lead to `pin` should start from — the middle of
+/// whichever of its edges faces that way.
+fn lead_from(body: Rect, pin: Pos2) -> Pos2 {
+    let c = body.center();
+    if (pin.x - c.x).abs() > (pin.y - c.y).abs() {
+        pos2(
+            if pin.x > c.x {
+                body.right()
+            } else {
+                body.left()
+            },
+            c.y,
+        )
+    } else {
+        pos2(
+            c.x,
+            if pin.y > c.y {
+                body.bottom()
+            } else {
+                body.top()
+            },
+        )
+    }
+}
+
+/// A length that is fixed on a real box and proportional on anything
+/// smaller.
+///
+/// A symbol is drawn both on the canvas, where its box grows with what it
+/// has to show, and as a palette icon a good deal smaller than one. A plain
+/// fraction stretches with the box; a plain constant swallows the icon. The
+/// cap is what lets one drawing serve both.
+fn fixed(width: f32, fraction: f32, at_most: f32) -> f32 {
+    (width * fraction).min(at_most)
+}
+
+/// The size every readout is drawn at.
+///
+/// One size for all of them, because the box is measured from it: a symbol
+/// drawing its value larger than it was measured is one that clips it.
+pub const READOUT_SIZE: f32 = 11.0;
+
+/// How wide the widest character a readout can show is, in the real font.
+///
+/// The **widest character**, not the string in front of you: what a box is
+/// sized by must not depend on the value, or the symbol would change size
+/// as the simulation ran and take its pins with it. Measured rather than
+/// estimated, since a box a little too narrow clips the value it exists to
+/// show — and one too wide leaves a gap that grows with every character.
+///
+/// Worked out once a frame and handed to every component, rather than
+/// sixteen layouts per readout.
+pub fn readout_char_width(ui: &egui::Ui) -> f32 {
+    let font = egui::FontId::proportional(READOUT_SIZE);
+    // Every character a readout can hold: the hex digits, and the letters
+    // that stand for a state rather than a value.
+    "0123456789ABCDEFZ?"
+        .chars()
+        .map(|glyph| {
+            ui.painter()
+                .layout_no_wrap(glyph.to_string(), font.clone(), egui::Color32::WHITE)
+                .rect
+                .width()
+        })
+        .fold(0.0_f32, f32::max)
+}
+
 /// What a symbol shows when there is no component behind it yet — in the
 /// palette, and under the pointer while placing one.
 ///
@@ -455,12 +557,29 @@ fn draw_constant(
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
 
-    let pin = pos2(rect.right(), c.y);
-    let (left, right) = (rect.left() + rect.width() * 0.1, c.x + rect.width() * 0.2);
+    let pin = pin_on_edge(rect, 0, rotation);
+    // Fixed lengths from the right rather than fractions of the box: the
+    // box grows with the value, and a fraction would stretch the point and
+    // the lead along with it.
     let half = rect.height() * 0.3;
-    let point = right + rect.width() * 0.12;
+    let point = rect.right() - fixed(rect.width(), 0.18, GRID_SPACING * 0.7);
+    let right = point - fixed(rect.width(), 0.12, 10.0);
+    let left = rect.left() + fixed(rect.width(), 0.1, 8.0);
+
+    // The point marks which way the value leaves, so it follows its pin
+    // when the pin is to one side. On the quarter turns there is no side to
+    // follow — a tag pointing downwards with its number written across it
+    // would be a shape at odds with its own contents — so it stays as it is
+    // and the lead simply leaves from the edge facing the pin.
+    let mirrored = pin.x < c.x;
+    let flip = |p: Pos2| {
+        if mirrored {
+            pos2(2.0 * c.x - p.x, p.y)
+        } else {
+            p
+        }
+    };
 
     let outline = [
         pos2(left, c.y - half),
@@ -470,21 +589,28 @@ fn draw_constant(
         pos2(left, c.y + half),
         pos2(left, c.y - half),
     ];
-    painter.line(outline.into_iter().map(r).collect(), stroke);
-    painter.line_segment([r(pos2(point, c.y)), r(pin)], stroke);
+    painter.line(outline.into_iter().map(flip).collect(), stroke);
+
+    // From the edge facing the pin, never from the point: leaving from the
+    // point regardless sent the lead diagonally across the tag on a quarter
+    // turn, and straight through the body of it on a half.
+    // `from_two_pos`, not `from_min_max`: mirroring swaps which corner is
+    // which, and an inverted rect reports its sides the wrong way round.
+    let tag = Rect::from_two_pos(flip(pos2(left, c.y - half)), flip(pos2(point, c.y + half)));
+    painter.line_segment([lead_from(tag, pin), pin], stroke);
 
     text_layer.text(
-        r(pos2((left + right) * 0.5, c.y)),
+        flip(pos2((left + right) * 0.5, c.y)),
         Align2::CENTER_CENTER,
         state.label,
-        11.0,
+        READOUT_SIZE,
         color,
     );
 
-    draw_pin(painter, r(pin), color);
+    draw_pin(painter, pin, color);
     PinPositions {
         inputs: vec![],
-        outputs: vec![r(pin)],
+        outputs: vec![pin],
     }
 }
 
@@ -584,9 +710,11 @@ fn draw_tri_state_source(
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    // Upright whatever the rotation, like every symbol that is mostly a
+    // readout: only the pin moves around it.
+    let r = |p: Pos2| p;
 
-    let pin = pos2(rect.right(), c.y);
+    let pin = pin_on_edge(rect, 0, rotation);
     let pivot = pos2(c.x + rect.width() * 0.14, c.y);
     let throw = rect.height() * 0.3;
     let contact_x = c.x - rect.width() * 0.06;
@@ -632,11 +760,14 @@ fn draw_tri_state_source(
     };
     painter.line_segment([r(pivot), r(tip)], stroke);
 
+    // Aligned to the body, for the same reason as a port's: centred on a
+    // point near the left edge, anything longer than a character hangs off
+    // the side of the symbol.
     text_layer.text(
-        r(pos2(rect.left() + 7.0, c.y)),
-        Align2::CENTER_CENTER,
+        pos2(rect.left() + 4.0, c.y),
+        Align2::LEFT_CENTER,
         state.label,
-        11.0,
+        READOUT_SIZE,
         state.label_color.unwrap_or(color),
     );
 
@@ -675,18 +806,23 @@ fn draw_port(
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    // Upright whatever the rotation: only the pin moves around it.
+    let r = |p: Pos2| p;
 
-    let pin = pos2(rect.right(), c.y);
+    let pin = pin_on_edge(rect, 0, rotation);
+    // The lead and the inset are *capped* lengths rather than fractions:
+    // the box grows with the readout, and a plain fraction would stretch
+    // the lead along with it until the pin sat a long way from the body.
+    // Capped rather than fixed because a palette icon is smaller than a
+    // box, and fixed insets swallowed it whole.
+    let inset = fixed(rect.width(), 0.14, 10.0);
+    let lead = fixed(rect.width(), 0.24, GRID_SPACING);
     let body = Rect::from_min_max(
-        pos2(rect.left() + rect.width() * 0.14, c.y - rect.height() * 0.3),
-        pos2(
-            rect.right() - rect.width() * 0.24,
-            c.y + rect.height() * 0.3,
-        ),
+        pos2(rect.left() + inset, c.y - rect.height() * 0.3),
+        pos2(rect.right() - lead, c.y + rect.height() * 0.3),
     );
 
-    painter.line_segment([r(pos2(body.right(), c.y)), r(pin)], stroke);
+    painter.line_segment([lead_from(body, pin), pin], stroke);
     let corners = [
         body.left_top(),
         body.right_top(),
@@ -698,15 +834,23 @@ fn draw_port(
 
     // Readout on the left, arrow on the right: the value changes constantly
     // and the arrow never does, so the eye should land on the value first.
+    //
+    // **Aligned to the body**, which it was not: centring it on a point 8
+    // points inside the left edge put anything longer than a character or
+    // two outside the body altogether, hanging off the side of the symbol.
     text_layer.text(
-        r(pos2(body.left() + 8.0, c.y)),
-        Align2::CENTER_CENTER,
+        pos2(body.left() + 5.0, c.y),
+        Align2::LEFT_CENTER,
         state.label,
-        11.0,
+        READOUT_SIZE,
         state.label_color.unwrap_or(color),
     );
 
-    let (left, right) = (body.left() + 17.0, body.right() - 5.0);
+    // The arrow keeps its own length against the right edge rather than
+    // spanning whatever is left, so it looks the same on a one-bit port and
+    // on a thirty-two-bit one.
+    let right = body.right() - fixed(rect.width(), 0.06, 5.0);
+    let left = (right - fixed(rect.width(), 0.28, 22.0)).max(body.left() + 5.0);
     let head = 4.0;
     let arrow = |tip: f32, towards: f32| {
         for side in [-1.0, 1.0] {
@@ -1468,18 +1612,36 @@ fn draw_probe(
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
     let radius = rect.height() * 0.4;
-    let bulb = pos2(c.x + radius * 0.2, c.y);
 
-    let pin = pos2(rect.left(), c.y);
-    painter.line_segment([r(pin), r(pos2(bulb.x - radius, c.y))], stroke);
-    painter.circle_stroke(r(bulb), radius, stroke);
-    text_layer.text(r(bulb), Align2::CENTER_CENTER, label, 13.0, color);
+    // A **stadium**, not a circle. A circle is only right while what is
+    // inside it is one character; past that the value runs out of both
+    // sides of it. Drawn as a rounded rectangle whose corners are half its
+    // height, so at one character it *is* the circle it always was.
+    let pin = pin_on_edge(rect, 2, rotation);
+    let body = Rect::from_min_max(
+        pos2(
+            rect.left() + fixed(rect.width(), 0.25, GRID_SPACING),
+            c.y - radius,
+        ),
+        pos2(rect.right() - fixed(rect.width(), 0.05, 4.0), c.y + radius),
+    );
+    painter.line_segment([pin, lead_from(body, pin)], stroke);
+    // Rotating a rounded rectangle is not something a painter will do, so
+    // the body is drawn from its own corners: a quarter turn maps the rect
+    // onto another axis-aligned one, which is all four rotations here.
+    painter.rect_stroke(body, radius, stroke, egui::StrokeKind::Middle);
+    text_layer.text(
+        body.center(),
+        Align2::CENTER_CENTER,
+        label,
+        READOUT_SIZE,
+        color,
+    );
 
-    draw_pin(painter, r(pin), color);
+    draw_pin(painter, pin, color);
     PinPositions {
-        inputs: vec![r(pin)],
+        inputs: vec![pin],
         outputs: vec![],
     }
 }
@@ -1713,5 +1875,89 @@ fn draw_triangle_gate(
     PinPositions {
         inputs: vec![r(pin_in)],
         outputs: vec![r(pin_out)],
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canvas::BOX_SIZE;
+
+    #[test]
+    fn turning_a_readout_moves_its_pin_around_an_upright_body() {
+        // Romain's: at a quarter turn everything fell apart, because the
+        // box turned with the symbol and left a wide value across a tall
+        // narrow body. Text is never drawn rotated, so the body stays put
+        // and the pin goes round it — which is the rule the generic box has
+        // followed since the beginning.
+        let rect = Rect::from_center_size(Pos2::ZERO, egui::vec2(160.0, 40.0));
+
+        // A port's lead leaves rightwards at rest, and works round
+        // clockwise: right, bottom, left, top.
+        let corners = [
+            (Rotation::Deg0, pos2(80.0, 0.0)),
+            (Rotation::Deg90, pos2(0.0, 20.0)),
+            (Rotation::Deg180, pos2(-80.0, 0.0)),
+            (Rotation::Deg270, pos2(0.0, -20.0)),
+        ];
+        for (rotation, expected) in corners {
+            assert_eq!(pin_on_edge(rect, 0, rotation), expected, "{rotation:?}");
+            // And it is on the box's own edge, not somewhere a rotated
+            // point of an unrotated box would have landed.
+            assert!(rect.contains(pin_on_edge(rect, 0, rotation)));
+        }
+
+        // A probe's leaves the other way, and turns from there.
+        assert_eq!(pin_on_edge(rect, 2, Rotation::Deg0), pos2(-80.0, 0.0));
+        assert_eq!(pin_on_edge(rect, 2, Rotation::Deg90), pos2(0.0, -20.0));
+    }
+
+    #[test]
+    fn a_lead_leaves_from_the_edge_facing_its_pin() {
+        // Romain's constant: the lead left from the tag's point whatever
+        // the rotation, so it ran diagonally across the tag on a quarter
+        // turn and straight through the body of it on a half.
+        let body = Rect::from_center_size(Pos2::ZERO, egui::vec2(80.0, 24.0));
+        for (pin, expected) in [
+            (pos2(100.0, 0.0), pos2(40.0, 0.0)),
+            (pos2(-100.0, 0.0), pos2(-40.0, 0.0)),
+            (pos2(0.0, 20.0), pos2(0.0, 12.0)),
+            (pos2(0.0, -20.0), pos2(0.0, -12.0)),
+        ] {
+            let from = lead_from(body, pin);
+            assert_eq!(from, expected, "for a pin at {pin:?}");
+            // Never across the middle: a lead that starts on the far side
+            // has to cross the symbol to reach its pin.
+            assert!(
+                (from - pin).length() < (body.center() - pin).length(),
+                "the lead started further from the pin than the centre is"
+            );
+        }
+    }
+
+    #[test]
+    fn a_capped_length_is_fixed_on_a_box_and_proportional_below_one() {
+        // The second half of a fault Romain saw: fixed insets made a symbol
+        // hold a wide readout and swallowed the palette icon, which is a
+        // good deal smaller than a box.
+        let icon = 28.0;
+        assert!(
+            fixed(icon, 0.24, GRID_SPACING) < icon * 0.5,
+            "an icon must keep most of its width for the symbol"
+        );
+        // At an ordinary box the cap does not bite at all, which is the
+        // point: everything already drawn is drawn exactly as it was.
+        assert_eq!(
+            fixed(BOX_SIZE.x, 0.24, GRID_SPACING),
+            BOX_SIZE.x * 0.24,
+            "a plain box keeps the proportions it always had"
+        );
+        // It bites past that, so a 32-bit port's lead is not four times a
+        // one-bit port's.
+        assert_eq!(fixed(BOX_SIZE.x * 8.0, 0.24, GRID_SPACING), GRID_SPACING);
     }
 }

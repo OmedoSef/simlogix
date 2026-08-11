@@ -59,6 +59,7 @@ ADDITIVE = {
     12: True,  # a component can declare how many bits its pins carry
     13: True,  # a constant carries the value it puts on its wire
     14: True,  # a splitter carries the width of each of its branches
+    15: True,  # a component can name the base it shows its value in
 }
 
 

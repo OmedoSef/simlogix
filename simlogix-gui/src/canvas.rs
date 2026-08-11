@@ -112,6 +112,15 @@ pub const GRID_SPACING: f32 = 20.0;
 /// dot, since `center` itself is always grid-snapped.
 pub const BOX_SIZE: Vec2 = egui::vec2(GRID_SPACING * 4.0, GRID_SPACING * 2.0);
 
+/// The next whole number of grid spaces at or above `size`.
+///
+/// A box that has to grow grows by whole steps, or its pins stop landing on
+/// the dots — the rule `BOX_SIZE` itself was built around, applied to a
+/// box whose width varies.
+pub fn snap_up(size: f32) -> f32 {
+    (size / GRID_SPACING).ceil().max(0.0) * GRID_SPACING
+}
+
 /// A component's orientation, applied to its whole symbol (shape and pins
 /// together — see `symbol::rotate`) as a clockwise quarter-turn count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -124,6 +133,16 @@ pub enum Rotation {
 }
 
 impl Rotation {
+    /// How many quarter-turns clockwise this is from upright.
+    pub fn quarter_turns(self) -> usize {
+        match self {
+            Rotation::Deg0 => 0,
+            Rotation::Deg90 => 1,
+            Rotation::Deg180 => 2,
+            Rotation::Deg270 => 3,
+        }
+    }
+
     /// The next quarter-turn clockwise.
     pub fn next_clockwise(self) -> Self {
         match self {
