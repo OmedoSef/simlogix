@@ -118,6 +118,18 @@ pub struct Properties {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<usize>,
 
+    /// `DFlipFlop` only — whether it has asynchronous set and reset pins.
+    /// Unset means it has not, which is what every flip-flop drawn before
+    /// this existed has.
+    ///
+    /// Opt-in rather than always present, and that is what settles what an
+    /// undriven one means: there isn't one. Present, they follow the rule
+    /// every control pin follows — undriven is `Unknown`, not "not
+    /// asserted" — and that costs nothing precisely because you add them
+    /// when you mean to wire them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub async_set_reset: Option<bool>,
+
     /// Which base this component shows its value in.
     ///
     /// Unset follows the setting, which itself defaults to `Auto` — so "I
@@ -163,6 +175,11 @@ impl Properties {
     /// How many bits this component's pins carry. One unless it says wider.
     pub fn width(&self) -> usize {
         self.width.unwrap_or(1).max(1)
+    }
+
+    /// Whether a flip-flop was given asynchronous set and reset pins.
+    pub fn async_set_reset(&self) -> bool {
+        self.async_set_reset.unwrap_or(false)
     }
 
     /// What a constant drives. Zero unless it says otherwise — the value a
@@ -243,6 +260,10 @@ impl Properties {
                 // All four pins alike: on a bus it is one latch per bit, so
                 // set, reset and both outputs are the same width.
                 | ComponentKind::SrLatch
+                // `D`, `Q` and `Q̄` widen together; the clock and the
+                // asynchronous inputs stay one bit, which `pin_width` says.
+                | ComponentKind::DFlipFlop
+                | ComponentKind::DFlipFlopFalling
         )
     }
 
@@ -274,12 +295,13 @@ impl Properties {
 /// one with a switch, the symbol is already drawn from the kind, and a saved
 /// `simlogix:PTransistor` says more than a `Transistor` with a flag beside
 /// it. All the panel adds is the ability to change your mind after placing.
-const VARIANTS: [[ComponentKind; 2]; 2] = [
+const VARIANTS: [[ComponentKind; 2]; 3] = [
     [ComponentKind::NTransistor, ComponentKind::PTransistor],
     [
         ComponentKind::BusTransceiver,
         ComponentKind::BusTransceiverOe,
     ],
+    [ComponentKind::DFlipFlop, ComponentKind::DFlipFlopFalling],
 ];
 
 /// Bounds on a label's size: small enough to annotate, large enough to
@@ -952,6 +974,18 @@ pub fn show(
         // only reads, so it has neither a resting value nor a say in how
         // many states the interface has — but it does have a width, which
         // is offered to all three below rather than here.
+        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling => {
+            ui.add_space(8.0);
+            let mut async_inputs = properties.async_set_reset();
+            if ui
+                .checkbox(&mut async_inputs, strings.property_async_set_reset)
+                .on_hover_text(strings.property_async_set_reset_hint)
+                .changed()
+            {
+                edit_started = true;
+                properties.async_set_reset = async_inputs.then_some(true);
+            }
+        }
         ComponentKind::InputPort | ComponentKind::InOutPort | ComponentKind::TriStateSource => {
             // A source has nothing to declare: three positions is what it
             // is. A port's count is a promise to whatever drives its pin
@@ -1279,6 +1313,7 @@ mod tests {
             tri_state: Some(true),
             initial: Some(PortSetting::High),
             width: Some(8),
+            async_set_reset: Some(true),
             base: Some(NumberBase::Binary),
             branches: Some(vec![4, 4]),
             value: Some(0xAB),
@@ -1294,7 +1329,7 @@ mod tests {
         // asserting: `PortLevel` became `PortSetting` on the strength of it.
         assert_eq!(
             json,
-            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"base":"Binary","branches":[4,4],"value":171}"#
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"async_set_reset":true,"base":"Binary","branches":[4,4],"value":171}"#
         );
     }
 

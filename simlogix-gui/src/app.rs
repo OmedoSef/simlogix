@@ -14,8 +14,8 @@ use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
-    Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortDrive, Probe,
-    Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    Component, ComponentId, DFlipFlop, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection,
+    PortDrive, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::appearance::Appearance;
@@ -1055,6 +1055,32 @@ impl SimLogixApp {
                 );
                 PlacedComponent::sr_latch(id, center)
             }
+            ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling => {
+                // How many pins it has is one of its properties, which is
+                // why this needs `place_with`: a built component's pins are
+                // fixed, so asking for the asynchronous inputs afterwards
+                // goes through the document and rebuilds — the same route a
+                // splitter's branch count takes.
+                let async_inputs = properties.async_set_reset();
+                let inputs = if async_inputs { 4 } else { 2 };
+                let pins: Vec<Pin> = (0..inputs + 2)
+                    .map(|index| Pin {
+                        direction: if index < inputs {
+                            PinDirection::Input
+                        } else {
+                            PinDirection::Output
+                        },
+                        net: self.circuit.add_net(),
+                    })
+                    .collect();
+                let component: Box<dyn Component> = if kind == ComponentKind::DFlipFlop {
+                    Box::new(DFlipFlop::rising())
+                } else {
+                    Box::new(DFlipFlop::falling())
+                };
+                let id = self.circuit.add_component(component, pins);
+                PlacedComponent::d_flip_flop(id, center, kind, async_inputs)
+            }
             ComponentKind::Not | ComponentKind::Buffer => {
                 let input = self.circuit.add_net();
                 let output = self.circuit.add_net();
@@ -2023,8 +2049,16 @@ impl SimLogixApp {
             .iter()
             .find(|placed| placed.id() == id)
             .is_some_and(|placed| {
-                placed.kind() == ComponentKind::Splitter
-                    && placed.properties().branch_widths().len() != edited.branch_widths().len()
+                let kind = placed.kind();
+                (kind == ComponentKind::Splitter
+                    && placed.properties().branch_widths().len() != edited.branch_widths().len())
+                    // Asking a flip-flop for its asynchronous inputs adds two
+                    // pins, which a built component cannot grow. Same route,
+                    // same reason.
+                    || (matches!(
+                        kind,
+                        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling
+                    ) && placed.properties().async_set_reset() != edited.async_set_reset())
             });
         if rebuild {
             let properties = edited.clone();

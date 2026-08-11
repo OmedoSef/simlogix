@@ -95,7 +95,7 @@ fn next_state(set: Level, reset: Level, held: Level) -> Level {
 /// `Q̄`, which is only a real complement once `Q` is a definite level —
 /// an unknown or faulted latch drives the same thing on both outputs
 /// rather than pretending one of them is good.
-fn complement(state: Level) -> Level {
+pub(crate) fn complement(state: Level) -> Level {
     match state {
         Level::High => Level::Low,
         Level::Low => Level::High,

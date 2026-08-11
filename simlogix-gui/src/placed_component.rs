@@ -255,6 +255,13 @@ enum Shape {
     /// (`Q`, `Q̄`) — the first component with more than one output, which is
     /// why it doesn't fit `TwoInputGate`.
     SrLatch,
+    /// A D flip-flop. `async_inputs` says whether it was given `S` and
+    /// `R`, which is what decides between four pins and six — a fact the
+    /// engine cannot report, since it only holds the opaque trait object.
+    DFlipFlop {
+        kind: ComponentKind,
+        async_inputs: bool,
+    },
 }
 
 impl PlacedComponent {
@@ -308,6 +315,15 @@ impl PlacedComponent {
 
     pub fn sr_latch(id: ComponentId, center: Pos2) -> Self {
         Self::new(id, center, Shape::SrLatch)
+    }
+
+    pub fn d_flip_flop(
+        id: ComponentId,
+        center: Pos2,
+        kind: ComponentKind,
+        async_inputs: bool,
+    ) -> Self {
+        Self::new(id, center, Shape::DFlipFlop { kind, async_inputs })
     }
 
     pub fn hand_set(
@@ -512,6 +528,14 @@ impl PlacedComponent {
             // either can do. A `Led` deliberately still says one bit —
             // wiring a one-bit device to a bus is a real mistake.
             Shape::Probe | Shape::Rail(_) => None,
+            // `D` at 0 and the two outputs widen; the clock at 1 and the
+            // asynchronous inputs at 2 and 3 are one wire each, the way a
+            // tri-state buffer's enable is.
+            Shape::DFlipFlop { async_inputs, .. } => Some(match index {
+                1 => 1,
+                2 | 3 if *async_inputs => 1,
+                _ => declared,
+            }),
             Shape::Instance { ports, .. } => Some(ports.get(index).map_or(1, |port| port.width)),
             // It shares `TwoInputGate`'s shape but not its pins: the enable
             // at index 1 is one bit whatever passes through.
@@ -601,6 +625,7 @@ impl PlacedComponent {
             Shape::Probe => ComponentKind::Probe,
             Shape::Clock => ComponentKind::Clock,
             Shape::SrLatch => ComponentKind::SrLatch,
+            Shape::DFlipFlop { kind, .. } => kind.clone(),
         }
     }
 
@@ -1039,6 +1064,52 @@ impl PlacedComponent {
                     toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
+                }
+            }
+            Shape::DFlipFlop { async_inputs, .. } => {
+                let rect = box_rect(*center, readout_room);
+                let pin_positions = symbol::draw(
+                    painter,
+                    &kind,
+                    rect,
+                    orientation,
+                    symbol_color,
+                    SymbolState {
+                        async_inputs: *async_inputs,
+                        ..SymbolState::default()
+                    },
+                    &text_layer,
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
+
+                // Built by walking the symbol's own pins rather than named
+                // one by one: there are four or six of them, and a list
+                // written out per case is a list that comes to disagree with
+                // the symbol about which pin is which.
+                let circuit_pins = circuit.pins(id);
+                let pins = pin_positions
+                    .inputs
+                    .iter()
+                    .chain(pin_positions.outputs.iter())
+                    .enumerate()
+                    .filter_map(|(index, &at)| {
+                        let net = circuit_pins.get(index)?.net;
+                        Some(pin_handle(ui, painter, id, index, at, net, movable))
+                    })
+                    .collect();
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins,
                 }
             }
             Shape::SrLatch => {

@@ -2478,3 +2478,108 @@ fn a_latch_on_a_bus_is_one_latch_per_bit() {
         "nothing asserted, so every bit holds"
     );
 }
+
+#[test]
+fn a_flip_flop_placed_from_the_palette_captures_on_the_edge() {
+    // The whole path: the kind places a component with the right pins, the
+    // wires reach them, and an edge on the clock moves the value.
+    let mut app = SimLogixApp::default();
+    let data = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let clock = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let ff = app.place(ComponentKind::DFlipFlop, egui::pos2(200.0, 80.0));
+    for (from, to) in [((data, 0), (ff, 0)), ((clock, 0), (ff, 1))] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    app.rebuild_nets();
+
+    let q = app.circuit.pins(ff)[2].net;
+    let pulse = |app: &mut SimLogixApp| {
+        for level in [1, 0] {
+            drive(app, clock, level);
+            app.advance_circuit(SETTLE_TICKS);
+        }
+    };
+
+    // Settle both sources low, so the clock has been *seen* low: a first
+    // rise from nothing is not a transition, and no flip-flop calls it one.
+    drive(&mut app, data, 0);
+    drive(&mut app, clock, 0);
+    app.advance_circuit(SETTLE_TICKS);
+
+    drive(&mut app, data, 1);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(q).levels(),
+        [Level::Unknown],
+        "D moved but the clock did not: a flip-flop is not a latch"
+    );
+
+    pulse(&mut app);
+    assert_eq!(app.circuit.signal_at(q).levels(), [Level::High]);
+
+    drive(&mut app, data, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(q).levels(),
+        [Level::High],
+        "still held between edges"
+    );
+    pulse(&mut app);
+    assert_eq!(app.circuit.signal_at(q).levels(), [Level::Low]);
+}
+
+#[test]
+fn asking_a_flip_flop_for_its_asynchronous_inputs_grows_its_pins() {
+    // A built component's pins are fixed, so this goes through the document
+    // and rebuilds — the route a splitter's branch count already takes. The
+    // ids are handed out afresh by that rebuild, hence looking the component
+    // up again by position.
+    let mut app = SimLogixApp::default();
+    let at = egui::pos2(200.0, 80.0);
+    let ff = app.place(ComponentKind::DFlipFlop, at);
+    assert_eq!(app.circuit.pins(ff).len(), 4, "D, clock, Q and Q-bar");
+
+    let mut edited = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == ff)
+        .expect("placed")
+        .properties()
+        .clone();
+    edited.async_set_reset = Some(true);
+    app.set_component_properties(ff, edited);
+
+    let ff = app
+        .placed
+        .iter()
+        .find(|placed| placed.center() == at)
+        .expect("still there")
+        .id();
+    assert_eq!(app.circuit.pins(ff).len(), 6, "S and R joined them");
+
+    // And the clock and the asynchronous inputs stay one wire while the data
+    // widens, which is what makes it a register rather than four flip-flops
+    // needing four clocks.
+    let mut edited = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == ff)
+        .expect("placed")
+        .properties()
+        .clone();
+    edited.width = Some(4);
+    app.set_component_properties(ff, edited);
+    let placed = app
+        .placed
+        .iter()
+        .find(|placed| placed.center() == at)
+        .expect("still there");
+    assert_eq!(
+        (0..6).map(|i| placed.pin_width(i)).collect::<Vec<_>>(),
+        vec![Some(4), Some(1), Some(1), Some(1), Some(4), Some(4)],
+    );
+}

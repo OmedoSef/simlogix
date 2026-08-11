@@ -142,6 +142,11 @@ pub struct SymbolState<'a> {
     /// palette and under the pointer, where there is no component yet — the
     /// symbol then draws a representative two-branch shape.
     pub branches: &'a [usize],
+    /// `DFlipFlop`: whether it was given asynchronous set and reset, which
+    /// adds a pin to the top edge and one to the bottom. False in the palette
+    /// and under the pointer, where the plain four-pin form is what a
+    /// freshly placed one has.
+    pub async_inputs: bool,
 }
 
 /// Draws `kind`'s icon within `rect`, oriented by `rotation`, in `color`, and
@@ -338,6 +343,15 @@ pub fn draw(
             draw_splitter(painter, rect, orientation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, orientation, stroke, text_layer),
+        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling => draw_d_flip_flop(
+            painter,
+            rect,
+            orientation,
+            stroke,
+            text_layer,
+            kind == &ComponentKind::DFlipFlopFalling,
+            state.async_inputs,
+        ),
         // A circuit instance draws its own generated box, not a fixed symbol.
         ComponentKind::Circuit(_) => PinPositions::default(),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, orientation, stroke),
@@ -938,6 +952,137 @@ fn draw_port(
 /// Both outputs are lettered `Q`, and the **bubble** on the lower one is
 /// what says which is the complement — a mark rather than a glyph, so
 /// nothing has to be in a font for it to appear.
+/// A D flip-flop: the same body as an [`draw_sr_latch`], with the clock's
+/// triangle on its lower-left input and, when it was given them, an
+/// asynchronous set on the top edge and a reset on the bottom.
+///
+/// That placement is the recognisable one — `PRE` above and `CLR` below on
+/// a 74x74 — and it happens to be the only one that keeps every pin on the
+/// grid: the corners and the mid-points of a box whose half-extents are
+/// whole grid steps are all dots.
+#[allow(clippy::too_many_arguments)]
+fn draw_d_flip_flop(
+    painter: &Painter,
+    rect: Rect,
+    orientation: Orientation,
+    stroke: Stroke,
+    text_layer: &TextLayer,
+    falling: bool,
+    async_inputs: bool,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| orientation.place(p, c);
+    let color = stroke.color;
+
+    let inset = rect.width() * 0.2;
+    let body = Rect::from_min_max(
+        pos2(rect.left() + inset, rect.top()),
+        pos2(rect.right() - inset, rect.bottom()),
+    );
+
+    let data = pos2(rect.left(), rect.top());
+    let clock = pos2(rect.left(), rect.bottom());
+    let q = pos2(rect.right(), rect.top());
+    let q_bar = pos2(rect.right(), rect.bottom());
+    let set = pos2(rect.center().x, rect.top());
+    let reset = pos2(rect.center().x, rect.bottom());
+
+    painter.line_segment([r(data), r(pos2(body.left(), body.top()))], stroke);
+    painter.line_segment([r(q), r(pos2(body.right(), body.top()))], stroke);
+    // Same bubble as the SR latch's, and for the same reason: it is the mark
+    // that says inverted, and it needs nothing to be in a font.
+    let inverted = bubble_end(painter, pos2(body.right(), body.bottom()), r, stroke);
+    painter.line_segment([r(q_bar), r(inverted)], stroke);
+
+    // The clock's lead carries a bubble on the falling variant — the entire
+    // visible difference between the two kinds, which is why the edge is a
+    // kind rather than a flag nothing would draw.
+    if falling {
+        let past = bubble_end(painter, pos2(body.left(), body.bottom()), r, stroke);
+        painter.line_segment([r(clock), r(past)], stroke);
+    } else {
+        painter.line_segment([r(clock), r(pos2(body.left(), body.bottom()))], stroke);
+    }
+
+    let corners = [
+        pos2(body.left(), body.top()),
+        pos2(body.right(), body.top()),
+        pos2(body.right(), body.bottom()),
+        pos2(body.left(), body.bottom()),
+        pos2(body.left(), body.top()),
+    ];
+    painter.line(corners.into_iter().map(r).collect(), stroke);
+
+    // The clock triangle, inside the body against its edge. It is the one
+    // mark that says "edge-triggered" rather than "level", so it is drawn
+    // rather than written.
+    let tip = 6.0_f32;
+    let middle = body.bottom() - tip;
+    painter.line(
+        [
+            pos2(body.left(), middle - tip),
+            pos2(body.left() + tip * 1.4, middle),
+            pos2(body.left(), middle + tip),
+        ]
+        .into_iter()
+        .map(r)
+        .collect(),
+        stroke,
+    );
+
+    let pad = 4.0;
+    let label = |at: Pos2, align: Align2, text: &str| {
+        text_layer.text(r(at), align, text, 9.0, color);
+    };
+    label(
+        pos2(body.left() + pad, body.top() + pad + 3.0),
+        Align2::LEFT_CENTER,
+        "D",
+    );
+    label(
+        pos2(body.right() - pad, body.top() + pad + 3.0),
+        Align2::RIGHT_CENTER,
+        "Q",
+    );
+    label(
+        pos2(body.right() - pad, body.bottom() - pad - 3.0),
+        Align2::RIGHT_CENTER,
+        "Q",
+    );
+
+    let mut inputs = vec![r(data), r(clock)];
+    if async_inputs {
+        painter.line_segment([r(set), r(pos2(set.x, body.top() + pad * 2.0))], stroke);
+        painter.line_segment(
+            [r(reset), r(pos2(reset.x, body.bottom() - pad * 2.0))],
+            stroke,
+        );
+        label(
+            pos2(set.x, body.top() + pad + 3.0),
+            Align2::CENTER_CENTER,
+            "S",
+        );
+        label(
+            pos2(reset.x, body.bottom() - pad - 3.0),
+            Align2::CENTER_CENTER,
+            "R",
+        );
+        inputs.push(r(set));
+        inputs.push(r(reset));
+        draw_pin(painter, r(set), color);
+        draw_pin(painter, r(reset), color);
+    }
+
+    for pin in [data, clock, q, q_bar] {
+        draw_pin(painter, r(pin), color);
+    }
+
+    PinPositions {
+        inputs,
+        outputs: vec![r(q), r(q_bar)],
+    }
+}
+
 fn draw_sr_latch(
     painter: &Painter,
     rect: Rect,
