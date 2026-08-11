@@ -1253,3 +1253,45 @@ fn shift_r_mirrors_the_selection_and_the_project_remembers_it() {
     let app = SimLogixApp::from_project(&project, 0);
     assert!(app.placed[0].is_mirrored(), "and the file remembered it");
 }
+
+#[test]
+fn a_turned_splitters_pins_land_inside_its_own_box() {
+    // The drawing was handed the *turned* box and turned its contents
+    // again, so at a quarter turn it laid its branch rows out inside a box
+    // only as tall as the width it was meant to have — and the pins came
+    // out past the edge of what could be clicked.
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::Splitter, at);
+    harness.state_mut().set_component_properties(
+        id,
+        crate::properties::Properties {
+            width: Some(4),
+            ..Default::default()
+        },
+    );
+    step(&mut harness);
+
+    for rotation in [
+        crate::canvas::Rotation::Deg0,
+        crate::canvas::Rotation::Deg90,
+        crate::canvas::Rotation::Deg180,
+        crate::canvas::Rotation::Deg270,
+    ] {
+        harness.state_mut().placed[0].set_rotation(rotation);
+        step(&mut harness);
+
+        let app = harness.state();
+        let placed = &app.placed[0];
+        let box_rect = placed.rect();
+        // Every pin the engine knows about, where the drawing put it.
+        let pins = app.pin_positions.get(&placed.id()).expect("drawn");
+        assert_eq!(pins.len(), 5, "a four-bit bus and one branch per bit");
+        for pin in pins {
+            assert!(
+                box_rect.expand(0.5).contains(*pin),
+                "at {rotation:?} a pin sat at {pin:?}, outside {box_rect:?}"
+            );
+        }
+    }
+}

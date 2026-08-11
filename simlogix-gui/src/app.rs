@@ -583,6 +583,15 @@ pub struct SimLogixApp {
     /// out where the labels sit in egui's ordering.
     #[cfg(test)]
     canvas_layer: Option<egui::LayerId>,
+    /// Where each component's pins were drawn last frame, in canvas
+    /// coordinates.
+    ///
+    /// Test-only for the same reason as the two above: the application
+    /// reads its pins from the frame it drew them in, and a symbol's
+    /// geometry is otherwise not observable from outside — which is how a
+    /// splitter came to draw its pins outside its own box.
+    #[cfg(test)]
+    pin_positions: std::collections::HashMap<ComponentId, Vec<egui::Pos2>>,
     /// The camera belonging to the view that *isn't* showing. Swapped on
     /// switch: the two views look at unrelated places, so carrying one
     /// camera between them would drop you somewhere arbitrary.
@@ -654,6 +663,8 @@ impl Default for SimLogixApp {
             scene_rect: egui::Rect::ZERO,
             #[cfg(test)]
             canvas_to_screen: egui::emath::TSTransform::IDENTITY,
+            #[cfg(test)]
+            pin_positions: std::collections::HashMap::new(),
             #[cfg(test)]
             canvas_layer: None,
             view: toolbar::View::default(),

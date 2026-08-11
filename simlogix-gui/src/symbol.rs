@@ -711,18 +711,28 @@ fn draw_splitter(
 
 /// Where branch `index` of `count` sits, vertically.
 ///
-/// One grid row each, and **every one on a grid dot** — which is what a
-/// centred layout cannot give for an even count: four rows spread about a
-/// centre land at half a step either side of it, so not one of them meets a
-/// dot and no wire can be drawn to them squarely.
+/// One grid row each, **every one on a grid dot**, and the block **centred
+/// on the bus**. Those three cannot all hold with the rows packed together:
+/// a dot every step means the bus lead is always level with *some* row, and
+/// for an even count no row is in the middle — so a centred block puts them
+/// all half a step off, and a packed one puts the bus on the second branch,
+/// where its lead runs straight through that branch's own and reads as
+/// joining the two.
 ///
-/// So the block is placed from a whole number of steps above the centre
-/// instead. An odd count comes out exactly centred, as it always did; an
-/// even one hangs half a step low, which is the price of the pins being
-/// somewhere a wire can reach.
+/// So an even count **leaves the middle row empty**, and the bus arrives in
+/// that gap. It costs one grid row of height, and it is the only
+/// arrangement where the bus meets the spine squarely in the middle without
+/// a branch lying under it.
 fn splitter_row(centre_y: f32, index: usize, count: usize) -> f32 {
-    let above = (count.saturating_sub(1) / 2) as f32;
-    centre_y + GRID_SPACING * (index as f32 - above)
+    let (index, count) = (index as i32, count as i32);
+    let steps = if count % 2 == 1 {
+        index - (count - 1) / 2
+    } else {
+        // Below the middle it counts up to -1, above it starts again at +1.
+        let offset = index - count / 2;
+        offset + i32::from(offset >= 0)
+    };
+    centre_y + GRID_SPACING * steps as f32
 }
 
 /// How a branch says which bits it carries: `3` for one, `4-7` for several.
@@ -2025,32 +2035,50 @@ mod tests {
     }
 
     #[test]
-    fn every_splitter_branch_lands_on_a_grid_dot() {
-        // Romain's: an even number of branches spread about the centre put
-        // every one of them half a step off, so no wire could be drawn to
-        // them squarely. A pin that is not on a dot is not a pin.
+    fn a_splitter_lays_its_branches_out_on_the_grid_around_its_bus() {
+        // Three properties that have to hold together, and the third is the
+        // one Romain saw missing: every branch on a grid dot, in order, and
+        // none of them level with the bus — where a lead through a branch's
+        // own reads as joining the two rather than tapping the spine.
         for count in 1..=8 {
-            for index in 0..count {
-                let offset = splitter_row(0.0, index, count);
+            let rows: Vec<f32> = (0..count).map(|i| splitter_row(0.0, i, count)).collect();
+
+            for (index, row) in rows.iter().enumerate() {
                 assert_eq!(
-                    offset % GRID_SPACING,
+                    row % GRID_SPACING,
                     0.0,
-                    "branch {index} of {count} sat at {offset}"
+                    "branch {index} of {count} at {row}"
                 );
             }
-            // And they are still a row apart, in order, top to bottom.
-            for index in 1..count {
-                assert_eq!(
-                    splitter_row(0.0, index, count) - splitter_row(0.0, index - 1, count),
-                    GRID_SPACING,
-                );
-            }
+            assert!(
+                rows.windows(2).all(|pair| pair[1] > pair[0]),
+                "branches of {count} are out of order: {rows:?}"
+            );
+            // An odd count has a middle row and the bus meets it there,
+            // which is the classic drawing and is what it always did. An
+            // even count has none, so the gap is where the bus goes.
+            assert_eq!(
+                rows.contains(&0.0),
+                count % 2 == 1,
+                "branches of {count}: {rows:?}"
+            );
+            // And centred on the bus, so it meets the spine in the middle.
+            assert_eq!(
+                rows[0] + rows[count - 1],
+                0.0,
+                "branches of {count} are not centred: {rows:?}"
+            );
         }
 
-        // An odd count is exactly centred, as it always was — the bus lead
-        // meets the middle branch.
-        assert_eq!(splitter_row(0.0, 1, 3), 0.0);
+        // A lone branch is the one that *does* sit on the bus: there is
+        // nothing to be off-centre from, and a gap would be a splitter
+        // splitting into nothing.
         assert_eq!(splitter_row(0.0, 0, 1), 0.0);
+        // An odd count keeps the middle row it always had.
+        assert_eq!(splitter_row(0.0, 1, 3), 0.0);
+        // An even one leaves it empty, and straddles it.
+        assert_eq!(splitter_row(0.0, 1, 4), -GRID_SPACING);
+        assert_eq!(splitter_row(0.0, 2, 4), GRID_SPACING);
     }
 
     #[test]

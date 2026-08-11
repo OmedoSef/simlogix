@@ -250,6 +250,11 @@ impl SimLogixApp {
                             group_settled |= is_selected;
                             self.pending_attach = Some(placed.id());
                         }
+                        #[cfg(test)]
+                        self.pin_positions.insert(
+                            placed.id(),
+                            frame.pins.iter().map(|pin| pin.position).collect(),
+                        );
                         pin_handles.extend(frame.pins);
                     }
 

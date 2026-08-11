@@ -83,14 +83,18 @@ fn box_rect(center: Pos2, readout: f32) -> Rect {
 /// the draw arm has `self` destructured. One definition rather than two —
 /// which is the whole lesson of the rotated component that could not be
 /// clicked: the box and the drawing agreed until they didn't.
-fn splitter_rect(center: Pos2, rotation: Rotation, properties: &Properties) -> Rect {
+/// **Before rotation**, like `box_rect` and for the same reason: a symbol is
+/// handed its upright box and turns its own contents.
+///
+/// Handing the *turned* one to the drawing instead — which is what it did —
+/// made it lay its branch rows out inside a box only as tall as the width it
+/// was meant to have, so at a quarter turn the pins came out past the edge
+/// of what could be clicked. The third time a box computed in two places has
+/// come apart here, and the answer is the same: there is one place.
+fn splitter_box(center: Pos2, properties: &Properties) -> Rect {
     let rows = properties.branch_widths().len().max(1) as f32;
     let height = (GRID_SPACING * (rows + 1.0)).max(BOX_SIZE.y);
-    symbol::rotate_rect(
-        Rect::from_center_size(center, egui::vec2(BOX_SIZE.x, height)),
-        center,
-        rotation,
-    )
+    Rect::from_center_size(center, egui::vec2(BOX_SIZE.x, height))
 }
 
 /// A pin's on-canvas hit target this frame: which component/pin it is, where
@@ -406,11 +410,10 @@ impl PlacedComponent {
         if matches!(self.shape, Shape::Splitter) {
             // One grid row per branch, and never shorter than a box: the
             // pins are laid out on that step, so the extent has to follow
-            // however many there are.
-            let rows = self.properties.branch_widths().len().max(1) as f32;
-            let height = (GRID_SPACING * (rows + 1.0)).max(BOX_SIZE.y);
+            // however many there are. Turned here and only here — the
+            // drawing gets the upright one.
             return symbol::rotate_rect(
-                Rect::from_center_size(self.center, egui::vec2(BOX_SIZE.x, height)),
+                splitter_box(self.center, &self.properties),
                 self.center,
                 self.rotation,
             );
@@ -1227,7 +1230,7 @@ impl PlacedComponent {
                 }
             }
             Shape::Splitter => {
-                let rect = splitter_rect(*center, *rotation, properties);
+                let rect = splitter_box(*center, properties);
                 let branches = properties.branch_widths();
                 let pin_positions = symbol::draw(
                     painter,
