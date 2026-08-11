@@ -12,7 +12,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::component::{scalar_eval, Component};
+use crate::component::Component;
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -215,7 +215,9 @@ pub struct CircuitOutput;
 
 impl Component for CircuitOutput {
     fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
-        scalar_eval(_inputs, |_inputs| Vec::new())
+        // Drives nothing: a pure sink, whose value is read off the net
+        // its pin sits on rather than computed here.
+        Vec::new()
     }
 }
 

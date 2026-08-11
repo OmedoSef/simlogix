@@ -2423,3 +2423,58 @@ fn a_rail_drives_as_wide_as_the_wire_it_is_tied_to() {
     assert_eq!(app.circuit.net_width(net), 1);
     assert_eq!(app.circuit.signal_at(net).levels(), [Level::Low]);
 }
+
+#[test]
+fn a_latch_on_a_bus_is_one_latch_per_bit() {
+    let mut app = SimLogixApp::default();
+    let set = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let reset = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let latch = app.place(ComponentKind::SrLatch, egui::pos2(200.0, 80.0));
+    let out = app.place(ComponentKind::OutputPort, egui::pos2(360.0, 40.0));
+    for (from, to) in [
+        ((set, 0), (latch, 0)),
+        ((reset, 0), (latch, 1)),
+        ((latch, 2), (out, 0)),
+    ] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    widen(&mut app, &[set, reset, latch, out], 4);
+
+    let net = app.circuit.pins(out)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4);
+
+    // Clear it, then set two bits.
+    drive(&mut app, reset, 0b1111);
+    drive(&mut app, set, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    drive(&mut app, reset, 0);
+    drive(&mut app, set, 0b0101);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::High, Level::Low, Level::High, Level::Low],
+    );
+
+    // Reset bit 0 alone. Bit 2 has to hold — the whole claim, and the one a
+    // single shared state could not make.
+    drive(&mut app, set, 0);
+    drive(&mut app, reset, 0b0001);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Low, Level::Low, Level::High, Level::Low],
+    );
+
+    // Neither asserted: every bit keeps what it had.
+    drive(&mut app, reset, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Low, Level::Low, Level::High, Level::Low],
+        "nothing asserted, so every bit holds"
+    );
+}

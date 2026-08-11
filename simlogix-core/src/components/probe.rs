@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::Component;
 use crate::signal::Signal;
 
 /// A read-only measurement point: a single input pin and no outputs, used to
@@ -13,7 +13,9 @@ pub struct Probe;
 
 impl Component for Probe {
     fn eval(&self, _inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
-        scalar_eval(_inputs, |_inputs| Vec::new())
+        // Drives nothing: a pure sink, whose value is read off the net
+        // its pin sits on rather than computed here.
+        Vec::new()
     }
 }
 

@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::component::{scalar_eval, Component};
+use crate::component::{across_bits, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -17,23 +17,25 @@ use crate::signal::Signal;
 /// between evaluations — `Component::eval` takes `&self`, so the state lives
 /// behind a `Cell`.
 ///
+/// # On a bus it is a register
+///
+/// One latch per bit, side by side: each bit sets, resets and *holds* on its
+/// own, which is the whole of what a latch on a bus means. A single shared
+/// state could not say it — resetting bit 0 must leave bit 2 where it was.
+///
 /// Both inputs high is the invalid combination. It drives [`Level::Error`]
 /// on both outputs rather than picking a value: that state has no defined
 /// answer, and `Error` exists precisely so a fault shows up instead of
 /// being quietly resolved into a plausible one.
+#[derive(Default)]
 pub struct SrLatch {
-    /// What `Q` currently is. `Q̄` is derived from it.
-    state: Cell<Level>,
-}
-
-impl Default for SrLatch {
-    fn default() -> Self {
-        Self {
-            // Nothing has set or reset it yet, and inventing a power-on value
-            // would be a lie about hardware that genuinely comes up either way.
-            state: Cell::new(Level::Unknown),
-        }
-    }
+    /// What `Q` currently is, one level per bit. `Q̄` is derived from it.
+    ///
+    /// Empty until the first evaluation, which is not a value but the
+    /// absence of one: every bit then starts `Unknown`, since inventing a
+    /// power-on value would be a lie about hardware that genuinely comes up
+    /// either way.
+    state: Cell<Signal>,
 }
 
 impl SrLatch {
@@ -44,14 +46,32 @@ impl SrLatch {
 
 impl Component for SrLatch {
     fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| {
-            let next = match inputs {
-                [set, reset] => next_state(*set, *reset, self.state.get()),
-                _ => Level::Unknown,
-            };
-            self.state.set(next);
-            vec![next, complement(next)]
-        })
+        let [set, reset] = inputs else {
+            return vec![Signal::bit(Level::Unknown), Signal::bit(Level::Unknown)];
+        };
+        // What it was holding, brought to the width being asked about. A
+        // latch that has just been widened does not know its new bits, and
+        // nothing says the old ones line up with them — `Unknown` is what
+        // "no value here yet" means, and carrying bit 0 over would be a
+        // guess. `across_bits` refuses a ragged set anyway; this makes the
+        // refusal a stated rule rather than an accident of the adapter.
+        let width = set.width().max(reset.width());
+        let held = self.state.take();
+        let held = if held.width() == width {
+            held
+        } else {
+            Signal::splat(Level::Unknown, width)
+        };
+
+        let outputs = across_bits(&[set, reset, &held], |bits| match bits {
+            [set, reset, held] => {
+                let next = next_state(*set, *reset, *held);
+                vec![next, complement(next)]
+            }
+            _ => vec![Level::Unknown, Level::Unknown],
+        });
+        self.state.set(outputs.first().cloned().unwrap_or_default());
+        outputs
     }
 }
 
@@ -173,5 +193,65 @@ mod tests {
             drive(&latch, Level::Error, Level::Low),
             vec![Level::Error, Level::Error]
         );
+    }
+
+    /// `Q`, for a latch driven bit by bit.
+    fn q(latch: &SrLatch, set: &[Level], reset: &[Level]) -> Vec<Level> {
+        let inputs = [
+            Signal::from_levels(set.to_vec()),
+            Signal::from_levels(reset.to_vec()),
+        ];
+        latch.eval(&inputs, &[]).first().unwrap().levels().to_vec()
+    }
+
+    #[test]
+    fn on_a_bus_it_is_one_latch_per_bit() {
+        use Level::{High, Low, Unknown};
+        let latch = SrLatch::new();
+
+        // Every bit starts out holding nothing, not holding `Low`: a bit
+        // never told anything has no value to keep.
+        assert_eq!(q(&latch, &[Low; 4], &[Low; 4]), vec![Unknown; 4]);
+        assert_eq!(q(&latch, &[Low; 4], &[High; 4]), vec![Low; 4]);
+
+        // Set bits 0 and 2, leave 1 and 3 alone.
+        assert_eq!(
+            q(&latch, &[High, Low, High, Low], &[Low; 4]),
+            vec![High, Low, High, Low]
+        );
+
+        // Reset bit 0 only. Bit 2 has to *hold* — which is the whole claim,
+        // and the one a single shared state could not make.
+        assert_eq!(
+            q(&latch, &[Low; 4], &[High, Low, Low, Low]),
+            vec![Low, Low, High, Low]
+        );
+
+        // Neither asserted anywhere: every bit holds.
+        assert_eq!(q(&latch, &[Low; 4], &[Low; 4]), vec![Low, Low, High, Low]);
+    }
+
+    #[test]
+    fn each_bit_faults_on_its_own() {
+        use Level::{Error, High, Low};
+        let latch = SrLatch::new();
+        q(&latch, &[Low; 4], &[High; 4]);
+        // Both asserted on bit 1 alone: that bit is invalid and the others
+        // are not, so a single answer for the whole bus would be a lie
+        // either way round.
+        assert_eq!(
+            q(&latch, &[High, High, Low, Low], &[Low, High, Low, Low]),
+            vec![High, Error, Low, Low]
+        );
+    }
+
+    #[test]
+    fn a_latch_that_has_just_been_widened_does_not_know_its_new_bits() {
+        use Level::{High, Low, Unknown};
+        let latch = SrLatch::new();
+        assert_eq!(q(&latch, &[High], &[Low]), vec![High]);
+        // Holding on a wider bus: bit 0's old value is not carried over,
+        // because nothing says the new bits line up with the old ones.
+        assert_eq!(q(&latch, &[Low; 4], &[Low; 4]), vec![Unknown; 4]);
     }
 }

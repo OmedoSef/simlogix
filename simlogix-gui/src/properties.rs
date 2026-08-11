@@ -240,6 +240,9 @@ impl Properties {
                 // Its bus pin. Its branches carry their own widths, which
                 // are the other half of the same setting.
                 | ComponentKind::Splitter
+                // All four pins alike: on a bus it is one latch per bit, so
+                // set, reset and both outputs are the same width.
+                | ComponentKind::SrLatch
         )
     }
 
