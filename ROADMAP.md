@@ -121,6 +121,30 @@ better at the thing it's for.
   is a note and not a decision: if a click on a switch ever changes one that
   was only meant to be selected, this is the answer.
 
+- [ ] **Two faults, two messages**
+
+  A splitter loop that contradicts itself — one that would put a bit in two
+  places at once — is reported today by joining the width faults, so it is
+  ringed in red and counted by a sentence that says *"disagree about width
+  with what they are wired to"*. That is not what happened, and the two are
+  fixed by different things: a width is fixed by changing a property, a
+  contradiction by redrawing.
+
+  This file already records the principle, from when width faults were first
+  told apart from `Error`: *two messages, not one*. It was right then and it
+  is being broken now, by me, for the convenience of one list.
+
+- [ ] **Which bits a pin occupies, in the inspector**
+
+  The engine-state window says a pin reads "1 bits". Since a splitter became
+  connectivity that is half the answer: what you want to know is *which* —
+  bits 4 to 4 of an eight-bit conductor, not merely one of them. The
+  contributions have the same gap.
+
+  It is the window whose whole reason for existing is answering "why is this
+  wrong", and offsets are now the commonest thing to be wrong about.
+  `Circuit::pin_slice` already returns both halves; only the row is missing.
+
 - [ ] **Getting to a width fault**
 
   The status bar says how many pins disagree with their net, and each is

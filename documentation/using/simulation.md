@@ -176,19 +176,20 @@ document, so flipping one is an edit and works in either view.
 
 ## When two widths meet
 
-A net takes the **widest** width declared by anything on it. Anything
-narrower is then wrong about the wire it is attached to, and that pin is
-**ringed in red** on the schematic, with the status bar saying how many
-there are.
+Pins joined **by wire** are the same conductor, so they carry the same bits
+and must agree on how many. When they don't, the widest wins and the
+narrower one is **ringed in red** on the schematic, with the status bar
+saying how many there are.
 
 The fault is put on the **pin**, not on the net: the net is fine, and one
 thing attached to it is mistaken about how wide it is. Saying which is the
 whole point — blaming the wire would leave you staring at something that is
 doing nothing wrong.
 
-A narrower pin that *drives* also faults the net itself, every bit of it,
-since it is contributing a width the net does not have. Padding it out or
-cutting it short would be inventing bits nobody asked for.
+Being *narrower than its net* is not itself a mistake. A splitter's branch
+is exactly that — two bits of an eight-bit conductor — which is why the
+test is agreement with what a pin is **wired** to, rather than with the net
+it ends up part of.
 
 It clears the moment the drawing agrees again.
 
