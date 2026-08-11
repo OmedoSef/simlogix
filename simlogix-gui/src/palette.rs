@@ -3,7 +3,6 @@
 use egui::{pos2, Align2, FontId, Rect, Sense, Ui};
 use serde::{Deserialize, Serialize};
 
-use crate::canvas::Rotation;
 use crate::i18n::Strings;
 use crate::symbol;
 use crate::toolbar::Tool;
@@ -325,7 +324,7 @@ fn palette_row(ui: &mut Ui, kind: Option<&ComponentKind>, name: &str, is_active:
                     ui.painter(),
                     kind,
                     icon_rect,
-                    Rotation::Deg0,
+                    symbol::Orientation::default(),
                     visuals.fg_stroke.color,
                     symbol::SymbolState {
                         label: symbol::preview_label(kind),

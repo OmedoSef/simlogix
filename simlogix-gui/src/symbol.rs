@@ -267,7 +267,7 @@ pub fn draw(
     painter: &Painter,
     kind: &ComponentKind,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     color: Color32,
     state: SymbolState<'_>,
     text_layer: &TextLayer,
@@ -275,52 +275,77 @@ pub fn draw(
     let stroke = Stroke::new(1.6, color);
     let label = state.label;
     match kind {
-        ComponentKind::Button => draw_button(painter, rect, rotation, stroke, color, state.pressed),
-        ComponentKind::Switch => draw_switch(painter, rect, rotation, stroke, color, state.pressed),
-        ComponentKind::Led => draw_led(painter, rect, rotation, stroke, color),
-        ComponentKind::NTransistor => draw_transistor(painter, rect, rotation, stroke, true),
-        ComponentKind::PTransistor => draw_transistor(painter, rect, rotation, stroke, false),
-        ComponentKind::Ground => draw_ground(painter, rect, rotation, stroke),
-        ComponentKind::Power => draw_power(painter, rect, rotation, stroke, color),
+        ComponentKind::Button => {
+            draw_button(painter, rect, orientation, stroke, color, state.pressed)
+        }
+        ComponentKind::Switch => {
+            draw_switch(painter, rect, orientation, stroke, color, state.pressed)
+        }
+        ComponentKind::Led => draw_led(painter, rect, orientation, stroke, color),
+        ComponentKind::NTransistor => draw_transistor(painter, rect, orientation, stroke, true),
+        ComponentKind::PTransistor => draw_transistor(painter, rect, orientation, stroke, false),
+        ComponentKind::Ground => draw_ground(painter, rect, orientation, stroke),
+        ComponentKind::Power => draw_power(painter, rect, orientation, stroke, color),
         ComponentKind::Probe => {
-            draw_probe(painter, rect, rotation, stroke, color, label, text_layer)
+            draw_probe(painter, rect, orientation, stroke, color, label, text_layer)
         }
-        ComponentKind::Clock => draw_clock(painter, rect, rotation, stroke),
-        ComponentKind::And => draw_and_gate(painter, rect, rotation, stroke, false),
-        ComponentKind::Nand => draw_and_gate(painter, rect, rotation, stroke, true),
-        ComponentKind::Or => draw_or_gate(painter, rect, rotation, stroke, false, false),
-        ComponentKind::Nor => draw_or_gate(painter, rect, rotation, stroke, false, true),
-        ComponentKind::Xor => draw_or_gate(painter, rect, rotation, stroke, true, false),
-        ComponentKind::Xnor => draw_or_gate(painter, rect, rotation, stroke, true, true),
-        ComponentKind::Buffer => draw_triangle_gate(painter, rect, rotation, stroke, false),
-        ComponentKind::Not => draw_triangle_gate(painter, rect, rotation, stroke, true),
-        ComponentKind::InputPort => {
-            draw_port(painter, rect, rotation, stroke, color, 1, state, text_layer)
-        }
-        ComponentKind::OutputPort => draw_port(
-            painter, rect, rotation, stroke, color, -1, state, text_layer,
+        ComponentKind::Clock => draw_clock(painter, rect, orientation, stroke),
+        ComponentKind::And => draw_and_gate(painter, rect, orientation, stroke, false),
+        ComponentKind::Nand => draw_and_gate(painter, rect, orientation, stroke, true),
+        ComponentKind::Or => draw_or_gate(painter, rect, orientation, stroke, false, false),
+        ComponentKind::Nor => draw_or_gate(painter, rect, orientation, stroke, false, true),
+        ComponentKind::Xor => draw_or_gate(painter, rect, orientation, stroke, true, false),
+        ComponentKind::Xnor => draw_or_gate(painter, rect, orientation, stroke, true, true),
+        ComponentKind::Buffer => draw_triangle_gate(painter, rect, orientation, stroke, false),
+        ComponentKind::Not => draw_triangle_gate(painter, rect, orientation, stroke, true),
+        ComponentKind::InputPort => draw_port(
+            painter,
+            rect,
+            orientation,
+            stroke,
+            color,
+            1,
+            state,
+            text_layer,
         ),
-        ComponentKind::InOutPort => {
-            draw_port(painter, rect, rotation, stroke, color, 0, state, text_layer)
-        }
+        ComponentKind::OutputPort => draw_port(
+            painter,
+            rect,
+            orientation,
+            stroke,
+            color,
+            -1,
+            state,
+            text_layer,
+        ),
+        ComponentKind::InOutPort => draw_port(
+            painter,
+            rect,
+            orientation,
+            stroke,
+            color,
+            0,
+            state,
+            text_layer,
+        ),
         ComponentKind::TriStateSource => {
-            draw_tri_state_source(painter, rect, rotation, stroke, color, state, text_layer)
+            draw_tri_state_source(painter, rect, orientation, stroke, color, state, text_layer)
         }
         ComponentKind::Constant => {
-            draw_constant(painter, rect, rotation, stroke, color, state, text_layer)
+            draw_constant(painter, rect, orientation, stroke, color, state, text_layer)
         }
         ComponentKind::Splitter => {
-            draw_splitter(painter, rect, rotation, stroke, color, state, text_layer)
+            draw_splitter(painter, rect, orientation, stroke, color, state, text_layer)
         }
-        ComponentKind::SrLatch => draw_sr_latch(painter, rect, rotation, stroke, text_layer),
+        ComponentKind::SrLatch => draw_sr_latch(painter, rect, orientation, stroke, text_layer),
         // A circuit instance draws its own generated box, not a fixed symbol.
         ComponentKind::Circuit(_) => PinPositions::default(),
-        ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, rotation, stroke),
+        ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, orientation, stroke),
         ComponentKind::BusTransceiver => {
-            draw_bus_transceiver(painter, rect, rotation, stroke, false, text_layer)
+            draw_bus_transceiver(painter, rect, orientation, stroke, false, text_layer)
         }
         ComponentKind::BusTransceiverOe => {
-            draw_bus_transceiver(painter, rect, rotation, stroke, true, text_layer)
+            draw_bus_transceiver(painter, rect, orientation, stroke, true, text_layer)
         }
     }
 }
@@ -341,13 +366,13 @@ pub fn draw(
 fn draw_bus_transceiver(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     active_low: bool,
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let inset = rect.width() * 0.2;
@@ -438,11 +463,11 @@ fn draw_bus_transceiver(
 fn draw_tri_state_buffer(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let back_x = rect.left() + rect.width() * 0.1;
@@ -492,13 +517,13 @@ fn draw_tri_state_buffer(
 fn draw_switch(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     on: bool,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
 
     let pin = pos2(rect.right(), c.y);
     let pivot = pos2(c.x - rect.width() * 0.22, c.y);
@@ -550,7 +575,7 @@ fn draw_switch(
 fn draw_constant(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     state: SymbolState<'_>,
@@ -558,7 +583,7 @@ fn draw_constant(
 ) -> PinPositions {
     let c = rect.center();
 
-    let pin = pin_on_edge(rect, 0, rotation);
+    let pin = pin_on_edge(rect, 0, orientation.rotation);
     // Fixed lengths from the right rather than fractions of the box: the
     // box grows with the value, and a fraction would stretch the point and
     // the lead along with it.
@@ -627,14 +652,14 @@ fn draw_constant(
 fn draw_splitter(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     state: SymbolState<'_>,
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     // With no component behind it — the palette, the placement ghost — a
     // representative two-branch shape, the same idea as `preview_label`.
     let widths: Vec<usize> = if state.branches.is_empty() {
@@ -715,7 +740,7 @@ pub fn bit_range(from: usize, width: usize) -> String {
 fn draw_tri_state_source(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     state: SymbolState<'_>,
@@ -726,7 +751,7 @@ fn draw_tri_state_source(
     // readout: only the pin moves around it.
     let r = |p: Pos2| p;
 
-    let pin = pin_on_edge(rect, 0, rotation);
+    let pin = pin_on_edge(rect, 0, orientation.rotation);
     let pivot = pos2(c.x + rect.width() * 0.14, c.y);
     let throw = rect.height() * 0.3;
     let contact_x = c.x - rect.width() * 0.06;
@@ -810,7 +835,7 @@ fn draw_tri_state_source(
 fn draw_port(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     flow: i32,
@@ -821,7 +846,7 @@ fn draw_port(
     // Upright whatever the rotation: only the pin moves around it.
     let r = |p: Pos2| p;
 
-    let pin = pin_on_edge(rect, 0, rotation);
+    let pin = pin_on_edge(rect, 0, orientation.rotation);
     // The lead and the inset are *capped* lengths rather than fractions:
     // the box grows with the readout, and a plain fraction would stretch
     // the lead along with it until the pin sat a long way from the body.
@@ -906,12 +931,12 @@ fn draw_port(
 fn draw_sr_latch(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     text_layer: &TextLayer,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     // Inset horizontally only: the pins have to land on the rect's corners
@@ -1181,7 +1206,7 @@ pub fn draw_pan_tool(painter: &Painter, rect: Rect, color: Color32) {
 pub fn draw_instance(
     painter: &Painter,
     center: Pos2,
-    rotation: Rotation,
+    orientation: Orientation,
     color: Color32,
     name: &str,
     ports: &[crate::placed_component::InstancePort],
@@ -1194,7 +1219,7 @@ pub fn draw_instance(
     // off, once the shape says what the name used to have to.
     if appearance.show_name {
         text_layer.text(
-            rotate(appearance.name_anchor(center), center, rotation),
+            orientation.place(appearance.name_anchor(center), center),
             Align2::CENTER_BOTTOM,
             name,
             10.0,
@@ -1203,7 +1228,7 @@ pub fn draw_instance(
     }
 
     let names: Vec<&str> = ports.iter().map(|port| port.name.as_str()).collect();
-    let positions = appearance.draw(painter, center, rotation, color, &names, text_layer);
+    let positions = appearance.draw(painter, center, orientation, color, &names, text_layer);
 
     // All in `inputs`, in port order: the caller maps pin *index* to anchor
     // pin, and splitting them by side here would only make it re-merge them.
@@ -1324,6 +1349,44 @@ pub fn draw_select_tool(painter: &Painter, rect: Rect, color: Color32) {
     );
 }
 
+/// How a symbol is placed: turned, and possibly reflected.
+///
+/// A **mirror is not a rotation**, and no amount of turning stands in for
+/// one. Four quarter-turns give four orientations, all of them preserving
+/// the order of a symbol's pins; a splitter used as a merger wants to face
+/// the other way *without* its branches ending up bottom to top, which is
+/// exactly what a half turn does to them.
+///
+/// Mirrored first, in the symbol's own frame, then turned — so the two
+/// compose the way a schematic reads them: "this symbol, reflected, placed
+/// that way round".
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Orientation {
+    pub rotation: Rotation,
+    pub mirrored: bool,
+}
+
+impl Orientation {
+    pub fn new(rotation: Rotation, mirrored: bool) -> Self {
+        Self { rotation, mirrored }
+    }
+
+    /// Where `point` ends up, given `center` as the symbol's own origin.
+    ///
+    /// **Only geometry passes through here.** Text never does: glyphs are
+    /// not drawn reversed, so a mirror moves *where* a label sits and
+    /// leaves the label itself readable — the same rule the readouts follow
+    /// under rotation.
+    pub fn place(self, point: Pos2, center: Pos2) -> Pos2 {
+        let point = if self.mirrored {
+            pos2(2.0 * center.x - point.x, point.y)
+        } else {
+            point
+        };
+        rotate(point, center, self.rotation)
+    }
+}
+
 /// Rotates `point` clockwise around `center` by `rotation`'s quarter-turns —
 /// the same clockwise convention the old edge-based layout used (a point on
 /// the left ends up on top after one quarter-turn, and so on), so a symbol's
@@ -1432,13 +1495,13 @@ fn bubble_end(
 fn draw_button(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     pressed: bool,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
 
     let pin = pos2(rect.right(), c.y);
     let cap_radius = rect.height() * 0.22;
@@ -1467,12 +1530,12 @@ fn draw_button(
 fn draw_led(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let radius = rect.height() * 0.34;
     let bulb = pos2(c.x + radius * 0.2, c.y);
 
@@ -1495,12 +1558,12 @@ fn draw_led(
 fn draw_transistor(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     is_n_type: bool,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let gate_x = c.x - rect.width() * 0.12;
@@ -1555,9 +1618,14 @@ fn draw_transistor(
 
 /// The classic ground symbol: a lead down into a stack of shrinking bars. Its
 /// one output pin sits at the lead's far end.
-fn draw_ground(painter: &Painter, rect: Rect, rotation: Rotation, stroke: Stroke) -> PinPositions {
+fn draw_ground(
+    painter: &Painter,
+    rect: Rect,
+    orientation: Orientation,
+    stroke: Stroke,
+) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let pin = pos2(c.x, rect.top());
@@ -1581,12 +1649,12 @@ fn draw_ground(painter: &Painter, rect: Rect, rotation: Rotation, stroke: Stroke
 fn draw_power(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
 
     let pin = pos2(c.x, rect.bottom());
     let base_y = c.y + rect.height() * 0.12;
@@ -1617,7 +1685,7 @@ fn draw_power(
 fn draw_probe(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     color: Color32,
     label: &str,
@@ -1630,7 +1698,7 @@ fn draw_probe(
     // inside it is one character; past that the value runs out of both
     // sides of it. Drawn as a rounded rectangle whose corners are half its
     // height, so at one character it *is* the circle it always was.
-    let pin = pin_on_edge(rect, 2, rotation);
+    let pin = pin_on_edge(rect, 2, orientation.rotation);
     let body = Rect::from_min_max(
         pos2(
             rect.left() + fixed(rect.width(), 0.25, GRID_SPACING),
@@ -1660,9 +1728,14 @@ fn draw_probe(
 
 /// A clock/oscillator, Logisim-style: a small chip-like box framing the
 /// square-wave icon, with a lead reaching its one output pin.
-fn draw_clock(painter: &Painter, rect: Rect, rotation: Rotation, stroke: Stroke) -> PinPositions {
+fn draw_clock(
+    painter: &Painter,
+    rect: Rect,
+    orientation: Orientation,
+    stroke: Stroke,
+) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let box_half_w = rect.width() * 0.32;
@@ -1712,12 +1785,12 @@ fn draw_clock(painter: &Painter, rect: Rect, rotation: Rotation, stroke: Stroke)
 fn draw_and_gate(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     invert: bool,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let half_h = rect.height() / 2.0;
@@ -1770,13 +1843,13 @@ fn draw_and_gate(
 fn draw_or_gate(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     xor: bool,
     invert: bool,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let half_h = rect.height() / 2.0;
@@ -1849,12 +1922,12 @@ fn draw_or_gate(
 fn draw_triangle_gate(
     painter: &Painter,
     rect: Rect,
-    rotation: Rotation,
+    orientation: Orientation,
     stroke: Stroke,
     invert: bool,
 ) -> PinPositions {
     let c = rect.center();
-    let r = |p: Pos2| rotate(p, c, rotation);
+    let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
 
     let half_h = rect.height() * 0.4;
@@ -1978,6 +2051,46 @@ mod tests {
         // meets the middle branch.
         assert_eq!(splitter_row(0.0, 1, 3), 0.0);
         assert_eq!(splitter_row(0.0, 0, 1), 0.0);
+    }
+
+    #[test]
+    fn a_mirror_faces_the_other_way_without_reversing_the_pins() {
+        // The whole reason a mirror exists: Romain's splitter used as a
+        // merger has to face left with branch 0 still at the top, and a
+        // half turn — the only way to face left before this — puts it at
+        // the bottom instead.
+        let c = Pos2::ZERO;
+        let top = pos2(40.0, -20.0);
+
+        let half_turn = Orientation::new(Rotation::Deg180, false);
+        let mirror = Orientation::new(Rotation::Deg0, true);
+
+        // Both send a pin on the right over to the left.
+        assert_eq!(half_turn.place(top, c).x, -40.0);
+        assert_eq!(mirror.place(top, c).x, -40.0);
+
+        // Only the half turn takes it to the bottom with it.
+        assert_eq!(half_turn.place(top, c).y, 20.0, "a half turn also flips");
+        assert_eq!(mirror.place(top, c).y, -20.0, "a mirror leaves it on top");
+    }
+
+    #[test]
+    fn mirroring_is_done_in_the_symbols_own_frame_then_turned() {
+        // So the two compose the way a schematic reads them, rather than
+        // the reflection axis following whatever the rotation happens to
+        // be. Mirrored and turned a quarter, a point out to the right ends
+        // up where the left-hand one would have.
+        let c = Pos2::ZERO;
+        let right = pos2(40.0, 0.0);
+        let turned = Orientation::new(Rotation::Deg90, false);
+        let both = Orientation::new(Rotation::Deg90, true);
+
+        assert_eq!(both.place(right, c), turned.place(pos2(-40.0, 0.0), c));
+        // And with nothing to reflect it is exactly the rotation it was.
+        assert_eq!(
+            Orientation::new(Rotation::Deg90, false).place(right, c),
+            rotate(right, c, Rotation::Deg90)
+        );
     }
 
     #[test]

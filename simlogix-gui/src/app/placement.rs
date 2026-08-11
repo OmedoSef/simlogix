@@ -48,7 +48,7 @@ impl SimLogixApp {
             crate::symbol::draw_instance(
                 painter,
                 at,
-                self.place_rotation,
+                crate::symbol::Orientation::new(self.place_rotation, self.place_mirrored),
                 faint,
                 path,
                 &ports,
@@ -62,7 +62,7 @@ impl SimLogixApp {
             painter,
             kind,
             egui::Rect::from_center_size(at, BOX_SIZE),
-            self.place_rotation,
+            crate::symbol::Orientation::new(self.place_rotation, self.place_mirrored),
             faint,
             crate::symbol::SymbolState {
                 label: crate::symbol::preview_label(kind),

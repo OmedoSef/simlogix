@@ -66,6 +66,11 @@ The circuit tree above it is a palette too — of your own circuits. See
   pins included. Each turns on **its own** centre rather than the group's:
   pins have to land on the grid, and turning the group as one body would put
   them between dots.
+- **Mirror** — `Shift+R` reflects them left to right. That is *not* the same
+  as turning one half way round: a half turn also flips top to bottom, so a
+  splitter's branches come out in reverse order. A mirror makes a symbol face
+  the other way and leaves its pins in the order they were, which is what a
+  splitter used as a merger wants.
 - **Delete** — `Delete` or `Backspace` removes everything selected.
 - **Copy and paste** — `Ctrl+C` and `Ctrl+V`, or the Edit menu. The copy
   lands one grid step down and right, and *it* becomes the selection, so a
@@ -131,6 +136,7 @@ and gestures**.
 | Key | Action |
 |---|---|
 | `R` | Rotate the selected components |
+| `Shift+R` | Mirror them left to right |
 | `Delete` / `Backspace` | Delete the selection |
 | `Ctrl+C` / `Ctrl+V` | Copy / paste the selection |
 | `Shift`+click | Add to or remove from the selection |
@@ -160,6 +166,7 @@ project file.
 |---|---|---|
 | **Name** | every component | Drawn under the symbol, as your own annotation. |
 | **Type** | transistors, transceivers | Switches between the pair — the symbol follows. |
+| **Mirrored** | everything but the readouts | Reflected left to right. `Shift+R` does the same. |
 | **Pressed at rest** | Button | The button rests pressed, so clicking it *releases* it. |
 | **Closed at rest** | Switch | Where the switch sits when the project opens. |
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |

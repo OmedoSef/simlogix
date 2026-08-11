@@ -55,12 +55,13 @@ use crate::properties::Properties;
 /// - `13` — a constant carries the value it puts on its wire.
 /// - `14` — a splitter carries the width of each of its branches.
 /// - `15` — a component can name the base it shows its value in.
+/// - `16` — a component can be mirrored, beside the rotation it is placed at.
 ///
 /// From `7` on, every bump has only *added* optional fields: absent means
 /// the behaviour that was there before, so none of them needed a migration
 /// and the number only signals capability. `scripts/set-format-version.py`
 /// holds that same table, and a test here keeps the two in step.
-pub const CURRENT_VERSION: u32 = 15;
+pub const CURRENT_VERSION: u32 = 16;
 
 /// What a project is saved as.
 pub const PROJECT_EXTENSION: &str = "slgx";
@@ -149,6 +150,11 @@ pub struct SavedComponent {
     pub x: f32,
     pub y: f32,
     pub rotation: Rotation,
+    /// Reflected left-to-right, before being turned. Beside the rotation
+    /// because it is the same kind of fact — where the symbol is put — and
+    /// left out of the file when it is false, as every optional thing is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mirrored: bool,
     /// What the user has set on this one. Left out of the file entirely
     /// when nothing has been — see [`Properties`].
     #[serde(default, skip_serializing_if = "Properties::is_empty")]
@@ -704,6 +710,7 @@ mod tests {
                 folder: String::new(),
                 components: vec![SavedComponent {
                     kind: ComponentKind::Button,
+                    mirrored: false,
                     x: 40.0,
                     y: 60.0,
                     rotation: Rotation::Deg90,
@@ -853,6 +860,7 @@ mod tests {
             folder: String::new(),
             components: vec![SavedComponent {
                 kind: ComponentKind::Button,
+                mirrored: false,
                 x: 20.0,
                 y: 40.0,
                 rotation: Rotation::Deg0,

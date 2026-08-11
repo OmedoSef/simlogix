@@ -60,6 +60,7 @@ ADDITIVE = {
     13: True,  # a constant carries the value it puts on its wire
     14: True,  # a splitter carries the width of each of its branches
     15: True,  # a component can name the base it shows its value in
+    16: True,  # a component can be mirrored, beside its rotation
 }
 
 

@@ -1267,6 +1267,7 @@ fn a_switch_saved_closed_is_closed_when_the_project_is_opened() {
     let mut project = SimLogixApp::default().to_project();
     project.circuits[0].components.push(SavedComponent {
         kind: ComponentKind::Switch,
+        mirrored: false,
         x: 0.0,
         y: 0.0,
         rotation: canvas::Rotation::Deg0,
@@ -1293,6 +1294,7 @@ fn a_switch_saved_open_is_open_when_the_project_is_opened() {
     let mut project = SimLogixApp::default().to_project();
     project.circuits[0].components.push(SavedComponent {
         kind: ComponentKind::Switch,
+        mirrored: false,
         x: 0.0,
         y: 0.0,
         rotation: canvas::Rotation::Deg0,

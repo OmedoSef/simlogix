@@ -510,6 +510,9 @@ pub struct SimLogixApp {
     /// being dropped repeatedly: having turned a gate once, the next one you
     /// place almost certainly wants the same orientation.
     place_rotation: canvas::Rotation,
+    /// And whether it will be reflected, which `Shift+R` sets the same way
+    /// `R` sets the rotation above.
+    place_mirrored: bool,
     /// Set when the view should be re-framed on what the open circuit
     /// actually contains: opening a project, or switching circuits.
     ///
@@ -640,6 +643,7 @@ impl Default for SimLogixApp {
             folders: Vec::new(),
             active: 0,
             place_rotation: canvas::Rotation::default(),
+            place_mirrored: false,
             refit_view: false,
             reveal_active: false,
             flattening: Vec::new(),
@@ -1076,6 +1080,7 @@ impl SimLogixApp {
         );
         if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
             placed.set_rotation(saved.rotation);
+            placed.set_mirrored(saved.mirrored);
             placed.set_properties(saved.properties.clone());
         }
         self.circuit.schedule_now(id);
@@ -1153,6 +1158,7 @@ impl SimLogixApp {
                     x: center.x,
                     y: center.y,
                     rotation: placed.rotation(),
+                    mirrored: placed.is_mirrored(),
                     properties: placed.properties().clone(),
                 }
             })
@@ -1755,6 +1761,7 @@ impl SimLogixApp {
                     x: center.x,
                     y: center.y,
                     rotation: placed.rotation(),
+                    mirrored: placed.is_mirrored(),
                     properties: placed.properties().clone(),
                 }
             })
@@ -2931,6 +2938,7 @@ impl SimLogixApp {
                             // were placing, not to the palette.
                             if self.tool != tool {
                                 self.place_rotation = canvas::Rotation::default();
+                                self.place_mirrored = false;
                             }
                             self.tool = if self.tool == tool {
                                 Tool::Select
@@ -3006,6 +3014,7 @@ impl SimLogixApp {
         // borrowed by the panel. So the edit is carried back out and applied
         // below, snapshot first.
         let mut pending_properties: Option<(ComponentId, Properties, bool)> = None;
+        let mut pending_mirror: Option<(ComponentId, bool)> = None;
         let mut pending_wire_color: Option<(u64, Option<[u8; 3]>)> = None;
         // A port whose live value was just changed, so it can be told to
         // re-evaluate. Runtime state, so nothing else about it is recorded.
@@ -3134,12 +3143,16 @@ impl SimLogixApp {
                                                 strings,
                                                 &placed.kind(),
                                                 &mut edited,
+                                                placed.is_mirrored(),
                                                 self.base,
                                             )
                                         })
                                         .inner;
                                     if let Some(kind) = outcome.change_kind {
                                         pending_kind = Some((placed.id(), kind));
+                                    }
+                                    if let Some(mirrored) = outcome.mirrored {
+                                        pending_mirror = Some((placed.id(), mirrored));
                                     }
                                     if outcome.edit_started || edited != *placed.properties() {
                                         pending_properties =
@@ -3231,6 +3244,16 @@ impl SimLogixApp {
         if let Some(id) = pending_drive {
             self.circuit.schedule_now(id);
             self.advance_circuit(SETTLE_TICKS);
+        }
+
+        if let Some((id, mirrored)) = pending_mirror {
+            // Placement, not a property, so it is applied straight to the
+            // component — but it is an edit to the drawing all the same.
+            self.record_edit();
+            if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
+                placed.set_mirrored(mirrored);
+            }
+            self.dirty = true;
         }
 
         if let Some((id, edited, started)) = pending_properties {

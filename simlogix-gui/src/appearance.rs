@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use crate::canvas::{self, Rotation};
 use crate::palette::ComponentKind;
 use crate::placed_component::{instance_height, InstancePort};
-use crate::symbol::{self, draw_pin, rotate, rotate_rect, TextLayer};
+use crate::symbol::{self, draw_pin, rotate_rect, Orientation, TextLayer};
 
 /// How wide the generated box's body is, as a fraction of the box.
 ///
@@ -323,7 +323,7 @@ impl Appearance {
         &self,
         painter: &Painter,
         center: Pos2,
-        rotation: Rotation,
+        orientation: Orientation,
         color: Color32,
         port_names: &[&str],
         text_layer: &TextLayer,
@@ -331,7 +331,7 @@ impl Appearance {
         let stroke = Stroke::new(STROKE_WIDTH, color);
         // Symbol coordinates are centre-relative, so placing and rotating
         // are the same step.
-        let at = |(x, y): (f32, f32)| rotate(pos2(center.x + x, center.y + y), center, rotation);
+        let at = |(x, y): (f32, f32)| orientation.place(pos2(center.x + x, center.y + y), center);
 
         for shape in &self.shapes {
             match shape {

@@ -136,9 +136,45 @@ impl SimLogixApp {
                     // its own centre rather than the group's: a component's
                     // pins have to land on the grid, and turning the group as
                     // one body would put them between dots.
-                    let rotate_pressed = editing
-                        && !ui.ctx().text_edit_focused()
-                        && ui.ctx().input(|i| i.key_pressed(egui::Key::R));
+                    // `Shift+R` reflects instead of turning, and is tested
+                    // first: egui matches modifiers exactly, so the two can
+                    // never both fire, but the order says which wins if
+                    // that ever stops holding.
+                    //
+                    // A mirror is not a rotation. Four quarter-turns all
+                    // preserve the order of a symbol's pins; a splitter used
+                    // as a merger wants to face the other way *without* its
+                    // branches ending up bottom to top, which is exactly
+                    // what a half turn does to them.
+                    let reading_keys = editing && !ui.ctx().text_edit_focused();
+                    // `consume_key` matches the modifiers exactly and takes
+                    // the event, so a `Shift+R` cannot also read as a plain
+                    // `R` below — and the chord is read off the event
+                    // rather than the modifier state, which is how every
+                    // other shortcut here is matched.
+                    let mirror_pressed = reading_keys
+                        && ui
+                            .ctx()
+                            .input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::R));
+                    let rotate_pressed =
+                        reading_keys && ui.ctx().input(|i| i.key_pressed(egui::Key::R));
+
+                    if mirror_pressed && matches!(self.tool, Tool::Place(_)) {
+                        self.place_mirrored = !self.place_mirrored;
+                    } else if mirror_pressed && !self.selection.components.is_empty() {
+                        self.record_edit();
+                        let chosen = self.selection.components.clone();
+                        for placed in &mut self.placed {
+                            if chosen.contains(&placed.id()) {
+                                // Each about its own centre, as rotation
+                                // is: reflecting the group as a body would
+                                // move every pin off the grid.
+                                let now = !placed.is_mirrored();
+                                placed.set_mirrored(now);
+                            }
+                        }
+                        self.dirty = true;
+                    }
 
                     // While something is queued for placement, `R` turns
                     // *that* rather than the selection: it is the thing under

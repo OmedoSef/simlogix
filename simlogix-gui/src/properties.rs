@@ -299,6 +299,16 @@ fn siblings(kind: &ComponentKind) -> Option<[ComponentKind; 2]> {
     VARIANTS.into_iter().find(|pair| pair.contains(kind))
 }
 
+/// Whether reflecting this kind means anything.
+///
+/// **Not** the symbols that keep their body upright: a port, a probe, a
+/// constant or a source has one pin, which already goes round the box by
+/// rotation, so a mirror there would be a control that does nothing. Every
+/// other symbol has a direction a schematic can want the other way round.
+pub fn has_mirror(kind: &ComponentKind) -> bool {
+    !crate::symbol::keeps_upright(kind)
+}
+
 /// What the panel wants done, beyond the properties it edited in place.
 #[derive(Default)]
 pub struct PanelResult {
@@ -307,6 +317,10 @@ pub struct PanelResult {
     pub edit_started: bool,
     /// Turn this component into its sibling kind.
     pub change_kind: Option<ComponentKind>,
+    /// Reflect it, or stop. Outside `Properties` because a mirror is
+    /// placement, like the rotation it sits beside — not something the
+    /// component is *set* to.
+    pub mirrored: Option<bool>,
 }
 
 /// The **value** panel: what a port is driving right now.
@@ -841,6 +855,7 @@ pub fn show(
     strings: &Strings,
     kind: &ComponentKind,
     properties: &mut Properties,
+    mirrored: bool,
     default_base: NumberBase,
 ) -> PanelResult {
     let mut result = PanelResult::default();
@@ -1043,6 +1058,19 @@ pub fn show(
             ui.label(RichText::new(strings.value_bases).weak());
         }
         _ => {}
+    }
+
+    if has_mirror(kind) {
+        ui.add_space(8.0);
+        let mut now = mirrored;
+        if ui
+            .checkbox(&mut now, strings.property_mirrored)
+            .on_hover_text(strings.property_mirrored_hint)
+            .changed()
+        {
+            edit_started = true;
+            result.mirrored = Some(now);
+        }
     }
 
     // Outside the match for the same reason the width is: several kinds

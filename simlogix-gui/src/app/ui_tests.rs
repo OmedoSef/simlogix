@@ -1216,3 +1216,40 @@ fn flipping_a_switch_is_not_an_edit_but_its_resting_position_is() {
         "setting the resting position is an edit"
     );
 }
+
+#[test]
+fn shift_r_mirrors_the_selection_and_the_project_remembers_it() {
+    let mut harness = harness();
+    let id = harness
+        .state_mut()
+        .place(ComponentKind::Splitter, egui::pos2(200.0, 200.0));
+    harness.state_mut().selection.pick_component(id, false);
+    step(&mut harness);
+    assert!(!harness.state().placed[0].is_mirrored());
+
+    press_with(&mut harness, egui::Key::R, egui::Modifiers::SHIFT);
+    step(&mut harness);
+    assert!(
+        harness.state().placed[0].is_mirrored(),
+        "Shift+R reflected it"
+    );
+    // And plain `R` still turns rather than reflecting, so the two chords
+    // never stand in for one another.
+    let before = harness.state().placed[0].rotation();
+    press(&mut harness, egui::Key::R);
+    step(&mut harness);
+    assert_ne!(
+        harness.state().placed[0].rotation(),
+        before,
+        "R still turns"
+    );
+    assert!(
+        harness.state().placed[0].is_mirrored(),
+        "and left the mirror"
+    );
+
+    // Placement is saved beside the rotation, so it survives a round trip.
+    let project = harness.state().to_project();
+    let app = SimLogixApp::from_project(&project, 0);
+    assert!(app.placed[0].is_mirrored(), "and the file remembered it");
+}

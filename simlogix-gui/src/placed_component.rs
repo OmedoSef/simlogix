@@ -153,6 +153,14 @@ pub struct PlacedComponent {
     id: ComponentId,
     center: Pos2,
     rotation: Rotation,
+    /// Reflected left-to-right, before being turned.
+    ///
+    /// Beside `rotation` rather than in `properties`, because it is the
+    /// same kind of fact: where the symbol is put, not what it is set to.
+    /// A mirror is not a rotation and no amount of turning stands in for
+    /// one — a half turn also reverses the order of a symbol's pins, which
+    /// is what a splitter used as a merger must not do.
+    mirrored: bool,
     /// What the user has set on this one; absent values mean the behaviour
     /// this component has always had. See `properties.rs`.
     properties: Properties,
@@ -251,6 +259,7 @@ impl PlacedComponent {
             id,
             center,
             rotation: Rotation::default(),
+            mirrored: false,
             properties: Properties::default(),
             shape,
             readout: 0.0,
@@ -598,6 +607,17 @@ impl PlacedComponent {
         self.center = canvas::snap_to_grid(self.center);
     }
 
+    /// Whether it is reflected left-to-right.
+    pub fn is_mirrored(&self) -> bool {
+        self.mirrored
+    }
+
+    /// Reflects it, or stops. Nothing else moves: a mirror about the
+    /// centre maps the box onto itself, so the hit area is untouched.
+    pub fn set_mirrored(&mut self, mirrored: bool) {
+        self.mirrored = mirrored;
+    }
+
     /// Sets this component's rotation directly (used when loading a project).
     pub fn set_rotation(&mut self, new_rotation: Rotation) {
         self.rotation = new_rotation;
@@ -640,11 +660,13 @@ impl PlacedComponent {
         let PlacedComponent {
             center,
             rotation,
+            mirrored,
             properties,
             shape,
             readout,
             ..
         } = self;
+        let orientation = symbol::Orientation::new(*rotation, *mirrored);
         // Named apart from the `readout` *string* one arm builds: this is
         // the room it needs, not what it says.
         let readout_room = *readout;
@@ -683,7 +705,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState {
                         pressed: pressed.get(),
@@ -734,7 +756,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState {
                         pressed: on.get(),
@@ -786,7 +808,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     color,
                     SymbolState::default(),
                     &text_layer,
@@ -816,7 +838,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState::default(),
                     &text_layer,
@@ -889,7 +911,7 @@ impl PlacedComponent {
                 let pin_positions = symbol::draw_instance(
                     painter,
                     *center,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     path,
                     ports,
@@ -959,7 +981,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState {
                         label: &readout,
@@ -1017,7 +1039,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState::default(),
                     &text_layer,
@@ -1084,7 +1106,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState::default(),
                     &text_layer,
@@ -1140,7 +1162,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState::default(),
                     &text_layer,
@@ -1178,7 +1200,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState {
                         label: &label,
@@ -1211,7 +1233,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState {
                         branches: &branches,
@@ -1267,7 +1289,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     color,
                     SymbolState {
                         label: &label,
@@ -1310,7 +1332,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     color,
                     SymbolState::default(),
                     &text_layer,
@@ -1340,7 +1362,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState::default(),
                     &text_layer,
@@ -1396,7 +1418,7 @@ impl PlacedComponent {
                     painter,
                     &kind,
                     rect,
-                    *rotation,
+                    orientation,
                     symbol_color,
                     SymbolState::default(),
                     &text_layer,

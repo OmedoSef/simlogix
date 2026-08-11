@@ -55,7 +55,7 @@ impl SimLogixApp {
         let pin_positions = appearance.draw(
             painter,
             center,
-            canvas::Rotation::Deg0,
+            crate::symbol::Orientation::default(),
             ui.visuals().strong_text_color(),
             &names,
             &crate::symbol::TextLayer::for_ui(ui),
