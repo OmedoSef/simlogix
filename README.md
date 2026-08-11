@@ -73,12 +73,15 @@ cargo run -p simlogix-gui --bin write-licenses -- THIRD-PARTY.md assets/third-pa
 
 ## Installing
 
-Each release carries portable archives for Linux, Windows and macOS, a
-`.deb` for Debian and Ubuntu, and an `.msi` installer for Windows — see the
-[releases page](https://github.com/OmedoSef/simlogix/releases).
+Each release carries a portable archive and a `.deb` for Debian and Ubuntu
+— see the [releases page](https://github.com/OmedoSef/simlogix/releases).
 
-Neither the macOS nor the Windows artefacts are signed, so both systems will
-warn on first run.
+**Linux only, for now.** The Windows and macOS builds are switched off
+rather than removed: nobody here has either machine, so nothing they
+produced could be *tried* before it reached you, and an artefact nobody has
+run is a promise made on the strength of it having compiled. They come back
+the day there is a way to test what comes out. Building from source works on
+all three in the meantime.
 
 ## Documentation
 

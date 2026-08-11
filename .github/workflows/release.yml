@@ -28,22 +28,38 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
-          - label: Windows (x86_64)
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: zip
+          # -------------------------------------------------------------
+          # Windows and macOS are switched off, not removed.
+          #
+          # Romain has neither machine, so nothing produced here could be
+          # *tried* before it reached someone — and an artefact nobody has
+          # run is a promise made on the strength of it having compiled.
+          # Building them every release spent runner minutes to keep that
+          # promise standing.
+          #
+          # Uncomment these three entries and the `windows-installer` job
+          # below, and put that job back in `publish`'s `needs`, on the day
+          # there is a way to test what comes out. Everything else they need
+          # — `wix/main.wxs`, the cross-compile targets, the staging step's
+          # Windows branch — is still here and still correct.
+          #
           # macOS runners are Apple silicon now, so the Intel build is a
-          # cross-compile. Both are shipped: an Intel Mac cannot run the
+          # cross-compile. Both were shipped: an Intel Mac cannot run the
           # arm64 binary, and Rosetta is not something to make a user find
           # out about from a crash.
-          - label: macOS (Apple silicon)
-            os: macos-latest
-            target: aarch64-apple-darwin
-            archive: tar.gz
-          - label: macOS (Intel)
-            os: macos-latest
-            target: x86_64-apple-darwin
-            archive: tar.gz
+          # -------------------------------------------------------------
+          # - label: Windows (x86_64)
+          #   os: windows-latest
+          #   target: x86_64-pc-windows-msvc
+          #   archive: zip
+          # - label: macOS (Apple silicon)
+          #   os: macos-latest
+          #   target: aarch64-apple-darwin
+          #   archive: tar.gz
+          # - label: macOS (Intel)
+          #   os: macos-latest
+          #   target: x86_64-apple-darwin
+          #   archive: tar.gz
     steps:
       - uses: actions/checkout@v7
 
@@ -138,46 +154,53 @@ jobs:
           path: simlogix.deb
           if-no-files-found: error
 
-  windows-installer:
-    name: Windows installer
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: wix
-      - run: cargo install cargo-wix --locked
+  # The Windows installer, switched off with the Windows build above — see
+  # the note in the matrix. `wix/main.wxs` stays checked in and stays
+  # correct; only the job that runs it is asleep.
+  #
+  # windows-installer:
+  #   name: Windows installer
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: Swatinem/rust-cache@v2
+  #       with:
+  #         key: wix
+  #     - run: cargo install cargo-wix --locked
 
-      # Both settings are needed, and they answer different complaints.
-      #
-      # `--package` is demanded outright: cargo-wix refuses to guess once it
-      # sees a workspace. The working directory is the other half — every
-      # source path inside main.wxs is resolved against the *process* cwd,
-      # not against the package it was told to build. Running from the
-      # workspace root with `--package` alone is what made the first attempt
-      # fail to find `wix\License.rtf`, the path the generated template
-      # writes for itself; that failure is also the evidence that cargo-wix
-      # does not change directory on its own.
-      #
-      # `wix/main.wxs` is checked in, edited away from that template: one
-      # binary instead of three, a Start Menu shortcut, an icon, and no PATH
-      # entry. `cargo wix init` would overwrite all of it, so it is
-      # deliberately not run here.
-      - run: cargo wix --package simlogix-gui --nocapture --output simlogix.msi
-        working-directory: simlogix-gui
+  #     # Both settings are needed, and they answer different complaints.
+  #     #
+  #     # `--package` is demanded outright: cargo-wix refuses to guess once it
+  #     # sees a workspace. The working directory is the other half — every
+  #     # source path inside main.wxs is resolved against the *process* cwd,
+  #     # not against the package it was told to build. Running from the
+  #     # workspace root with `--package` alone is what made the first attempt
+  #     # fail to find `wix\License.rtf`, the path the generated template
+  #     # writes for itself; that failure is also the evidence that cargo-wix
+  #     # does not change directory on its own.
+  #     #
+  #     # `wix/main.wxs` is checked in, edited away from that template: one
+  #     # binary instead of three, a Start Menu shortcut, an icon, and no PATH
+  #     # entry. `cargo wix init` would overwrite all of it, so it is
+  #     # deliberately not run here.
+  #     - run: cargo wix --package simlogix-gui --nocapture --output simlogix.msi
+  #       working-directory: simlogix-gui
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: archive-windows-installer
-          path: simlogix-gui/simlogix.msi
-          if-no-files-found: error
+  #     - uses: actions/upload-artifact@v7
+  #       with:
+  #         name: archive-windows-installer
+  #         path: simlogix-gui/simlogix.msi
+  #         if-no-files-found: error
 
   publish:
     name: Publish the release
     # Only a tag is a decision to publish; a manual run just proves the
     # pipeline works.
     if: github.ref_type == 'tag'
-    needs: [build, debian, windows-installer]
+    # `windows-installer` is not here because that job is switched off
+    # above. Leaving it would have made every release wait for a job that
+    # never runs.
+    needs: [build, debian]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -4,7 +4,7 @@
 
 | Workflow | When | What it does |
 |---|---|---|
-| [CI](../../.github/workflows/ci.yml) | Every push to `main`, every pull request | `fmt --check` and `clippy -D warnings` on Linux; `cargo test` and a full build on Linux, Windows and macOS. |
+| [CI](../../.github/workflows/ci.yml) | Every push to `main`, every pull request | `fmt --check` and `clippy -D warnings`, then `cargo test` and a full build. Linux only — see below. |
 | [Audit](../../.github/workflows/audit.yml) | Weekly, and whenever a manifest or the lockfile changes | `cargo audit` against the RustSec advisory database. |
 | [Release](../../.github/workflows/release.yml) | Pushing a `v*` tag | Builds every artefact and publishes a GitHub release. Can also be run by hand, which builds without publishing. |
 
@@ -101,14 +101,36 @@ itself, so the notes are one thing decided in one place.
 | Artefact | Platform |
 |---|---|
 | `simlogix-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` | Linux, portable |
-| `simlogix-vX.Y.Z-x86_64-pc-windows-msvc.zip` | Windows, portable |
-| `simlogix-vX.Y.Z-aarch64-apple-darwin.tar.gz` | macOS, Apple silicon |
-| `simlogix-vX.Y.Z-x86_64-apple-darwin.tar.gz` | macOS, Intel |
 | `simlogix.deb` | Debian, Ubuntu |
-| `simlogix.msi` | Windows, installer |
 
-Both macOS builds are shipped because an Intel Mac cannot run the arm64
-binary, and Rosetta is not something a user should discover from a crash.
+### Windows and macOS are switched off
+
+They were shipped until v0.6.0 — a portable archive for Windows, one for
+each macOS architecture, and an `.msi`. Nobody here has either machine, so
+nothing they produced could be *tried* before it reached someone, and an
+artefact nobody has run is a promise made on the strength of it having
+compiled. Every release spent runner minutes keeping that promise standing.
+
+**They are commented out, not deleted.** The matrix entries in
+[`release.yml`](../../.github/workflows/release.yml) and the whole
+`windows-installer` job are there, and so is everything they need:
+`wix/main.wxs`, the archive step's Windows branch, both Apple targets. To
+bring them back, uncomment the three matrix entries and that job, and put
+`windows-installer` back in `publish`'s `needs` — it was taken out because a
+release would otherwise wait forever on a job that never runs.
+
+**CI is Linux-only too**, switched off the same way and in the same commit.
+It was a separate question and worth asking on its own: building on three
+platforms is a check that the code still *compiles* everywhere, which is not
+the same as promising an artefact. What settled it is that nothing is being
+shipped for those platforms any more, so the check was guarding a promise
+that is no longer made — and it was three runners on every push, where a
+release is rare.
+
+The cost is real and worth naming: code that stops compiling off Linux will
+now surface on the day those releases come back, rather than on the push that
+caused it. Put the two entries back on the `os:` line and the check returns
+exactly as it was.
 
 Every archive carries `LICENSE` and `THIRD-PARTY.md` alongside the binary.
 The notices are compiled into the application as well, but an archive is a
@@ -181,6 +203,10 @@ template writes for itself — cannot be found.
 
 ## Known gaps
 
+The first four are about Windows and macOS, which are **switched off** — so
+they are the shape of the work waiting the day those come back, rather than
+something anyone downloading a release meets today.
+
 **Neither macOS artefact is signed or notarised.** An unsigned application
 downloaded on a recent macOS is refused by Gatekeeper until the user clears it
 by hand. Signing needs a paid Apple developer account, so this is a decision
@@ -198,7 +224,11 @@ show a generic one — the Start Menu shortcut has the right icon because the
 installer sets it there. Embedding one into the executable needs a build
 script and a build-dependency, which is a decision to take on its own.
 
-**None of the Windows or macOS paths have been run.** They were written on a
-Linux machine, and the first real evidence will be the first workflow run.
-The Linux ones were exercised: the Debian package was built, installed,
-listed and removed, and its desktop entry validated.
+**Nobody has ever run what the Windows or macOS paths produced.** They built
+on every release up to v0.6.0 — publishing waited on them, so a failure
+would have stopped it — but building is not running, and there is no machine
+here to try the result on. That is the whole reason they are switched off:
+the artefacts were a promise made on the strength of having compiled.
+
+The Linux ones were exercised properly: the Debian package was built,
+installed, listed and removed, and its desktop entry validated.

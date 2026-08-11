@@ -61,7 +61,18 @@ jobs:
       # One platform failing is a fact worth having about the others too.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Linux alone for now, with the other two switched off rather than
+        # forgotten: the releases for Windows and macOS are off too — see
+        # the note in `release.yml` — so nothing is being shipped that this
+        # would be guarding, and it was three runners on every push.
+        #
+        # What it *did* catch is code that stops compiling off Linux, which
+        # is a real thing to lose. The trade is deliberate: that fault now
+        # surfaces on the day those releases come back, rather than on the
+        # push that caused it. Put the two back on the line below and the
+        # check returns exactly as it was.
+        os: [ubuntu-latest]
+        # os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
 
