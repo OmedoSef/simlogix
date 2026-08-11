@@ -70,6 +70,14 @@ pub struct Circuit {
     /// one — a plain wire, which is what a net is until something declares
     /// otherwise.
     widths: HashMap<NetId, usize>,
+    /// Which bits of its net each pin occupies, when it is not all of them.
+    ///
+    /// Absent means the whole net from bit zero, which is what a conductor
+    /// means and what every pin was before a splitter could say otherwise.
+    /// Keyed by pin rather than stored on `Pin` for the same reason the
+    /// widths are keyed by net: `rewire` owns the whole mapping and
+    /// rewrites it in one go, so there is nowhere for a stale copy to hide.
+    slices: HashMap<(ComponentId, usize), (usize, usize)>,
     clock: u64,
     events: BinaryHeap<Reverse<ScheduledEvent>>,
     /// Components that reschedule themselves forever after every evaluation
@@ -157,13 +165,18 @@ impl Circuit {
         // One fresh net per group, then one each for the pins left over.
         let mut assignment: HashMap<(ComponentId, usize), NetId> = HashMap::new();
         self.widths.clear();
+        self.slices.clear();
         for group in groups {
             let net = self.add_net();
             if group.width != 1 {
                 self.widths.insert(net, group.width);
             }
-            for &pin in &group.pins {
-                assignment.insert(pin, net);
+            for member in &group.members {
+                assignment.insert(member.key(), net);
+                if member.offset != 0 || member.width.is_some_and(|w| w != group.width) {
+                    let width = member.width.unwrap_or(group.width - member.offset);
+                    self.slices.insert(member.key(), (member.offset, width));
+                }
             }
         }
         let unassigned: Vec<(ComponentId, usize)> = self
@@ -215,7 +228,7 @@ impl Circuit {
             let resolved = self
                 .drivers
                 .get(&net)
-                .map(|drivers| Self::resolve(width, drivers))
+                .map(|drivers| self.resolve(net, drivers))
                 // Nothing driving it yet, but the drawing has still said how
                 // wide it is: a component reading an undriven bus sees that
                 // many unknown bits, not one.
@@ -515,13 +528,24 @@ impl Circuit {
             .reads_own_contribution();
         let inputs: Vec<Signal> = pins
             .iter()
-            .filter(|pin| pin.direction != PinDirection::Output)
-            .map(|pin| {
-                if hears_itself {
+            .enumerate()
+            // Numbered *before* the filter: the slice is keyed by the pin's
+            // own index, and counting after it would number the inputs
+            // instead — so a component with an output before an input would
+            // read the wrong pin's bits.
+            .filter(|(_, pin)| pin.direction != PinDirection::Output)
+            .map(|(index, pin)| {
+                let whole = if hears_itself {
                     self.signal_at(pin.net)
                 } else {
                     self.signal_excluding(component, pin.net)
-                }
+                };
+                // Its own bits, not the whole conductor: a pin occupying
+                // part of a net reads that part. Everything is the whole
+                // net until a splitter says otherwise, so this is what it
+                // always was for a plain wire.
+                let (offset, width) = self.pin_slice((component, index), pin.net);
+                whole.slice(offset, width)
             })
             .collect();
 
@@ -537,7 +561,7 @@ impl Circuit {
                 .entry(pin.net)
                 .or_default()
                 .insert((component, index), signal);
-            let resolved = Self::resolve(self.net_width(pin.net), &self.drivers[&pin.net]);
+            let resolved = self.resolve(pin.net, &self.drivers[&pin.net]);
             let previous = self.settled.get(&pin.net).cloned().unwrap_or_default();
 
             if resolved == previous {
@@ -574,7 +598,7 @@ impl Circuit {
         let resolved = self
             .drivers
             .get(&net)
-            .map(|drivers| Self::resolve(width, drivers))
+            .map(|drivers| self.resolve(net, drivers))
             .unwrap_or_else(|| Signal::splat(Level::Unknown, width));
         let previous = self.settled.get(&net).cloned().unwrap_or_default();
         if resolved == previous {
@@ -615,6 +639,18 @@ impl Circuit {
         self.widths.get(&net).copied().unwrap_or(1)
     }
 
+    /// Which bits of its net a pin occupies: where its bit zero sits, and
+    /// how many it takes.
+    ///
+    /// The whole net unless a splitter put it somewhere else — see
+    /// [`crate::Member`].
+    pub fn pin_slice(&self, pin: (ComponentId, usize), net: NetId) -> (usize, usize) {
+        self.slices
+            .get(&pin)
+            .copied()
+            .unwrap_or((0, self.net_width(net)))
+    }
+
     /// What a net carries, from everything driving it.
     ///
     /// Bit by bit: a bus is resolved one position at a time by exactly the
@@ -626,26 +662,44 @@ impl Circuit {
     /// levels — every bit comes out `Error`, which is what makes a
     /// mismatched net visible on the wire rather than quietly padded or
     /// truncated.
-    fn resolve(width: usize, drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
-        Self::resolve_from(width, drivers.values())
+    fn resolve(&self, net: NetId, drivers: &HashMap<(ComponentId, usize), Signal>) -> Signal {
+        self.resolve_from(net, drivers.iter().map(|(&pin, signal)| (pin, signal)))
     }
 
     /// [`Circuit::resolve`] over any set of contributions, so a caller can
     /// leave some out — which is what a relay needs (see
     /// [`Component::reads_own_contribution`]).
-    fn resolve_from<'a>(width: usize, drivers: impl Iterator<Item = &'a Signal> + Clone) -> Signal {
-        let ragged = drivers.clone().any(|signal| signal.width() != width);
+    ///
+    /// Each contribution lands at **its pin's offset**, so a driver on part
+    /// of a net reaches only the bits it occupies. Everything is at offset
+    /// zero across the whole width until a splitter says otherwise, which is
+    /// why this reads as it always did for a plain conductor.
+    fn resolve_from<'a>(
+        &self,
+        net: NetId,
+        drivers: impl Iterator<Item = ((ComponentId, usize), &'a Signal)> + Clone,
+    ) -> Signal {
+        let width = self.net_width(net);
+        // A contribution that does not fill exactly the bits its pin
+        // occupies is a fault in the drawing rather than in the levels: a
+        // component saying it is eight bits wide and supplying one is
+        // lying about its own contract, and every bit comes out `Error` so
+        // that shows on the wire rather than being quietly padded.
+        let ragged = drivers.clone().any(|(pin, signal)| {
+            let (offset, slice) = self.pin_slice(pin, net);
+            signal.width() != slice || offset + slice > width
+        });
         Signal::from_levels(
             (0..width)
                 .map(|bit| {
                     if ragged {
                         return Level::Error;
                     }
-                    Self::resolve_bit(
-                        drivers
-                            .clone()
-                            .filter_map(|signal| signal.levels().get(bit).copied()),
-                    )
+                    Self::resolve_bit(drivers.clone().filter_map(|(pin, signal)| {
+                        let (offset, _) = self.pin_slice(pin, net);
+                        bit.checked_sub(offset)
+                            .and_then(|local| signal.levels().get(local).copied())
+                    }))
                 })
                 .collect(),
         )
@@ -660,12 +714,12 @@ impl Circuit {
     fn signal_excluding(&self, component: ComponentId, net: NetId) -> Signal {
         let width = self.net_width(net);
         match self.drivers.get(&net) {
-            Some(drivers) => Self::resolve_from(
-                width,
+            Some(drivers) => self.resolve_from(
+                net,
                 drivers
                     .iter()
                     .filter(move |((driver, _), _)| *driver != component)
-                    .map(|(_, signal)| signal),
+                    .map(|(&pin, signal)| (pin, signal)),
             ),
             None => Signal::splat(Level::Unknown, width),
         }

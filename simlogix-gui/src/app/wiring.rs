@@ -658,10 +658,8 @@ impl SimLogixApp {
             .iter()
             .flat_map(|group| {
                 group
-                    .pins
-                    .iter()
+                    .pins()
                     .filter(|pin| declared(pin).is_some_and(|width| width != group.width))
-                    .copied()
             })
             .collect();
 

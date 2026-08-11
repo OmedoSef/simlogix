@@ -55,6 +55,21 @@ impl Signal {
         }
     }
 
+    /// `width` bits starting at `offset`, padded with `Unknown` where the
+    /// signal does not reach.
+    ///
+    /// What a pin reads when it occupies part of a net rather than all of
+    /// it. Padding rather than refusing: a slice reaching past the end is a
+    /// fault the drawing reports, and answering `Unknown` there says "not
+    /// driven" rather than inventing a level.
+    pub fn slice(&self, offset: usize, width: usize) -> Self {
+        Self(
+            (offset..offset + width)
+                .map(|bit| self.0.get(bit).copied().unwrap_or(Level::Unknown))
+                .collect(),
+        )
+    }
+
     /// The same signal with `f` applied to every bit — a gate on a bus is
     /// the same gate applied bit by bit.
     pub fn map(&self, f: impl Fn(Level) -> Level) -> Self {
