@@ -42,6 +42,50 @@ better at the thing it's for.
 
 ## Next
 
+- [ ] **A file format that stops going out from under you**
+
+  Romain's, and the way he put it is sharper than "we bump too often": the
+  number rising costs nobody anything — **it rising in *his* files** does.
+  Opening a v10 project with a v16 build and saving rewrites it as v16, and
+  the other machine can no longer read it. That is what
+  `scripts/set-format-version.py` exists to work around.
+
+  This is the promise a 1.0 rests on, so it comes before more components,
+  not after. Three parts, in the order they are worth doing:
+
+  - **Write the lowest version that can express the document**, computed
+    from what is in it rather than from the build. "≥16 because something
+    is mirrored, else ≥15 because something names its base, else…" — one
+    rule per bump, kept honest by a test, which is the bargain `SAVED_NAMES`
+    and the downgrade script's own table already make. A pleasant
+    consequence: the version can go **down** — delete the mirrored
+    component and the file is readable by the old build again.
+  - **An unknown component must not cost the file.** Today
+    `ComponentKind`'s deserialiser fails on a name it doesn't know, and one
+    such component refuses the whole project. Warning is the smaller half of
+    the fix: the real one is **keeping it**. Held verbatim — its type
+    string, its raw properties, its place in the list — it saves back
+    intact and the wires that reference it by index stay valid. Without
+    that, opening and saving *destroys* what wasn't understood, which is
+    worse than refusing to open.
+  - **Two numbers, not one.** The additive-or-structural distinction already
+    exists but lives in a table beside the code (`ADDITIVE` in the downgrade
+    script); a table can drift, a number cannot. `major.minor`, and a reader
+    that says *"I know major 2, I take any minor, and I ignore what I don't
+    recognise"*.
+
+    **Two, not three.** A third would separate "ignoring this loses an
+    annotation" from "ignoring this draws a circuit that means something
+    else" — a mirror being the second kind. But that judgement would be made
+    at every bump and getting it wrong is *silent*. Better to hand it to the
+    reader: opening says *"3 components carry a `mirrored` setting this
+    build does not know"*, and the person decides.
+
+  **What it does not do**, said plainly: it cannot rescue what is already
+  written. A build at 0.7.0 or earlier refuses a newer file because *it* is
+  the one refusing. This fixes the future — which is the argument for doing
+  it before the format changes again, rather than after.
+
 - [ ] **The splitter as connectivity, not a component**
 
   The one that ships today is a **relay**: it reads what is on one side and
@@ -246,12 +290,6 @@ better at the thing it's for.
   fit on screen.
 - [ ] **Reading a net's identity** on hover — today, telling two nets apart
   means following wires by eye.
-- [ ] **Reading a project written by a newer build** when the difference is
-  only fields it doesn't know. The version check is all or nothing, so a
-  format that gained an optional field refuses to open at all, and
-  `scripts/set-format-version.py` exists to work around exactly that. The
-  table that script keeps — which versions only *added* — is the same
-  judgement the reader would have to make, so it is already written down.
 - [ ] **VHDL or FPGA export.** A long way off, and only worth it if the
   intent is to run these circuits on real hardware.
 - [ ] **Collaboration.** Named here only so it's clear it isn't forgotten; it
