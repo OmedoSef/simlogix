@@ -50,17 +50,56 @@ pub fn scalar_eval(inputs: &[Signal], eval: impl Fn(&[Level]) -> Vec<Level>) -> 
 /// claim it can rather than quietly answering about the bits that happen to
 /// line up.
 pub fn bitwise_eval(inputs: &[Signal], bit: impl Fn(&[Level]) -> Level) -> Vec<Signal> {
-    let width = inputs.iter().map(Signal::width).max().unwrap_or(1);
-    if inputs.iter().any(|input| input.width() != width) {
-        return vec![Signal::splat(Level::Error, width)];
+    let buses: Vec<&Signal> = inputs.iter().collect();
+    across_bits(&buses, |levels| vec![bit(levels)])
+}
+
+/// Adapts a component whose **data** pins are buses while its **control**
+/// pins are single wires: `bit` is handed one level per data pin and answers
+/// one level per output, the controls having been read and closed over by
+/// the caller.
+///
+/// This is the shape of anything that gates or steers a bus — a tri-state
+/// buffer, a transceiver — and [`bitwise_eval`] cannot express it, since it
+/// requires every input to be the same width and a control pin is precisely
+/// the input that is not. A control read with [`Signal::only_level`] answers
+/// `Error` if it is itself a bus, which every truth table here dominates on,
+/// so a wide enable needs no rule of its own.
+///
+/// **Buses of differing widths have no bit-by-bit answer**, and every output
+/// is `Error` on every bit of the widest — the same loud refusal
+/// [`bitwise_eval`] makes, for the same reason: the schematic already rings
+/// a pin whose declared width disagrees with its net, so what matters is
+/// that this makes the loudest claim it can rather than quietly answering
+/// about the bits that happen to line up. The table is consulted there only
+/// for *how many* outputs there are, which is the one thing it knows and
+/// this does not.
+pub fn across_bits(buses: &[&Signal], bit: impl Fn(&[Level]) -> Vec<Level>) -> Vec<Signal> {
+    let width = buses.iter().map(|bus| bus.width()).max().unwrap_or(0);
+    if width == 0 || buses.iter().any(|bus| bus.width() != width) {
+        let faulted = vec![Level::Error; buses.len()];
+        return bit(&faulted)
+            .into_iter()
+            .map(|_| Signal::splat(Level::Error, width))
+            .collect();
     }
-    let levels = (0..width)
+    let per_bit: Vec<Vec<Level>> = (0..width)
         .map(|index| {
-            let bits: Vec<Level> = inputs.iter().map(|input| input.levels()[index]).collect();
-            bit(&bits)
+            let levels: Vec<Level> = buses.iter().map(|bus| bus.levels()[index]).collect();
+            bit(&levels)
         })
         .collect();
-    vec![Signal::from_levels(levels)]
+    let outputs = per_bit.first().map_or(0, Vec::len);
+    (0..outputs)
+        .map(|output| {
+            Signal::from_levels(
+                per_bit
+                    .iter()
+                    .map(|levels| levels.get(output).copied().unwrap_or(Level::Error))
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 /// Evaluates a component that is scalar on both sides, in levels.

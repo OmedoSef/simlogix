@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{across_bits, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -19,10 +19,18 @@ pub struct TriStateBuffer;
 
 impl Component for TriStateBuffer {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [data, enable] => vec![gated(*data, *enable)],
-            _ => vec![Level::Unknown],
-        })
+        match inputs {
+            [data, enable] => {
+                // One enable governs the whole bus, however wide it is: the
+                // buffer passes each bit through or lets go of all of them.
+                let enable = enable.only_level();
+                across_bits(&[data], |bits| match bits {
+                    [data] => vec![gated(*data, enable)],
+                    _ => vec![Level::Unknown],
+                })
+            }
+            _ => vec![Signal::bit(Level::Unknown)],
+        }
     }
 }
 
@@ -100,6 +108,53 @@ mod tests {
         assert_eq!(
             eval_levels(&TriStateBuffer, &[Level::Error, Level::High]),
             vec![Level::Error]
+        );
+    }
+
+    #[test]
+    fn it_passes_a_bus_through_bit_by_bit() {
+        // Mixed bits on purpose: all-alike values would pass just as well
+        // against a buffer that only ever looked at bit 0.
+        let data = Signal::from_levels(vec![Level::Low, Level::High, Level::High, Level::Low]);
+        assert_eq!(
+            TriStateBuffer.eval(&[data.clone(), Signal::bit(Level::High)]),
+            vec![data]
+        );
+    }
+
+    #[test]
+    fn a_disabled_buffer_lets_go_of_every_bit() {
+        assert_eq!(
+            TriStateBuffer.eval(&[Signal::splat(Level::High, 4), Signal::bit(Level::Low)]),
+            vec![Signal::splat(Level::HighZ, 4)]
+        );
+    }
+
+    #[test]
+    fn one_enable_governs_the_whole_bus() {
+        // The enable is one wire whatever the data is wide, which is the
+        // shape `bitwise_eval` cannot express: it wants every input the
+        // same width.
+        for enable in [Level::Unknown, Level::HighZ] {
+            assert_eq!(
+                TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::bit(enable)]),
+                vec![Signal::splat(Level::Unknown, 3)],
+                "an enable that is merely {enable:?} leaves every bit unknown"
+            );
+        }
+        assert_eq!(
+            TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::bit(Level::Error)]),
+            vec![Signal::splat(Level::Error, 3)]
+        );
+    }
+
+    #[test]
+    fn an_enable_that_is_itself_a_bus_faults_the_whole_output() {
+        // Nothing about a wide enable says which bit switches the buffer on,
+        // and `only_level` is what refuses to guess.
+        assert_eq!(
+            TriStateBuffer.eval(&[Signal::splat(Level::High, 3), Signal::splat(Level::High, 3)]),
+            vec![Signal::splat(Level::Error, 3)]
         );
     }
 }

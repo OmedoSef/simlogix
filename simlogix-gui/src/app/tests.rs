@@ -1649,6 +1649,122 @@ fn a_gate_told_it_is_wide_answers_bit_by_bit() {
     );
 }
 
+/// Gives `ids` a width of `width` bits, leaving everything else alone.
+fn widen(app: &mut SimLogixApp, ids: &[ComponentId], width: usize) {
+    let wide = Properties {
+        width: Some(width),
+        ..Default::default()
+    };
+    for id in ids {
+        if let Some(placed) = app.placed.iter_mut().find(|placed| placed.id() == *id) {
+            placed.set_properties(wide.clone());
+        }
+    }
+    app.rebuild_nets();
+}
+
+/// Drives `value` onto a port and wakes it up.
+fn drive(app: &mut SimLogixApp, id: ComponentId, value: u64) {
+    app.placed
+        .iter()
+        .find(|placed| placed.id() == id)
+        .and_then(|placed| placed.hand_set_level())
+        .expect("a driving port has a level")
+        .set(PortDrive::Driving(value));
+    app.circuit.schedule_now(id);
+}
+
+#[test]
+fn a_tri_state_buffer_told_it_is_wide_gates_every_bit() {
+    // The end-to-end claim, and the shape `bitwise_eval` cannot express: the
+    // data pin widens with the property while the enable stays one wire, and
+    // that single wire governs the whole bus.
+    let mut app = SimLogixApp::default();
+    let data = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let enable = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let buffer = app.place(ComponentKind::TriStateBuffer, egui::pos2(200.0, 80.0));
+    let out = app.place(ComponentKind::OutputPort, egui::pos2(360.0, 80.0));
+    for (from, to) in [
+        ((data, 0), (buffer, 0)),
+        ((enable, 0), (buffer, 1)),
+        ((buffer, 2), (out, 0)),
+    ] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    // Deliberately not the enable port: its net has to stay one bit, or the
+    // buffer would be reading a bus for the level that switches it on.
+    widen(&mut app, &[data, buffer, out], 4);
+
+    drive(&mut app, data, 0b1010);
+    drive(&mut app, enable, 1);
+    app.advance_circuit(SETTLE_TICKS);
+
+    let net = app.circuit.pins(out)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4, "the net carries the width");
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Low, Level::High, Level::Low, Level::High],
+        "0b1010, least significant bit first"
+    );
+
+    drive(&mut app, enable, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Unknown; 4],
+        "disabled, it lets go of every bit and nothing else drives the bus"
+    );
+}
+
+#[test]
+fn a_bus_transceiver_told_it_is_wide_carries_every_bit_across() {
+    let mut app = SimLogixApp::default();
+    let source = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let dir = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let enable = app.place(ComponentKind::InputPort, egui::pos2(40.0, 200.0));
+    let part = app.place(ComponentKind::BusTransceiver, egui::pos2(200.0, 80.0));
+    let out = app.place(ComponentKind::OutputPort, egui::pos2(360.0, 80.0));
+    for (from, to) in [
+        ((source, 0), (part, 0)),
+        ((dir, 0), (part, 2)),
+        ((enable, 0), (part, 3)),
+        ((part, 1), (out, 0)),
+    ] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    // `A` and `B` widen together; `Dir` and the enable are left alone.
+    widen(&mut app, &[source, part, out], 4);
+
+    drive(&mut app, source, 0b1001);
+    drive(&mut app, dir, 1);
+    drive(&mut app, enable, 1);
+    app.advance_circuit(SETTLE_TICKS);
+
+    let net = app.circuit.pins(out)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::High, Level::Low, Level::Low, Level::High],
+        "0b1001 arrives on B, least significant bit first"
+    );
+
+    drive(&mut app, enable, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(net).levels(),
+        [Level::Unknown; 4],
+        "disabled, it lets go of every bit of both sides"
+    );
+}
+
 #[test]
 fn a_constant_drives_the_value_it_was_given() {
     let mut app = SimLogixApp::default();

@@ -1,4 +1,4 @@
-use crate::component::{scalar_eval, Component};
+use crate::component::{across_bits, Component};
 use crate::level::Level;
 use crate::signal::Signal;
 
@@ -65,10 +65,20 @@ impl BusTransceiver {
 
 impl Component for BusTransceiver {
     fn eval(&self, inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(inputs, |inputs| match inputs {
-            [a, b, dir, enable] => drive(*a, *b, *dir, self.asserted(*enable)),
-            _ => vec![Level::Unknown, Level::Unknown],
-        })
+        match inputs {
+            [a, b, dir, enable] => {
+                // `Dir` and the enable are one wire each whatever the two
+                // sides are wide: they pick a direction for the bus, not for
+                // one of its bits.
+                let dir = dir.only_level();
+                let enabled = self.asserted(enable.only_level());
+                across_bits(&[a, b], |bits| match bits {
+                    [a, b] => drive(*a, *b, dir, enabled),
+                    _ => vec![Level::Unknown, Level::Unknown],
+                })
+            }
+            _ => vec![Signal::bit(Level::Unknown), Signal::bit(Level::Unknown)],
+        }
     }
 }
 
@@ -215,5 +225,63 @@ mod tests {
                 "an undriven enable"
             );
         }
+    }
+
+    #[test]
+    fn it_carries_a_bus_across_bit_by_bit() {
+        // Mixed bits, so a transceiver that only ever looked at bit 0 would
+        // fail rather than pass by luck.
+        let value = Signal::from_levels(vec![Level::High, Level::Low, Level::Low, Level::High]);
+        for part in both_variants() {
+            assert_eq!(
+                part.eval(&[
+                    value.clone(),
+                    Signal::splat(Level::Unknown, 4),
+                    Signal::bit(Level::High),
+                    Signal::bit(on(part)),
+                ]),
+                vec![Signal::splat(Level::HighZ, 4), value.clone()],
+                "A drives B, and the listening side lets go of every bit"
+            );
+        }
+    }
+
+    #[test]
+    fn the_direction_and_the_enable_stay_one_wire_whatever_the_bus() {
+        let part = BusTransceiver::active_high();
+        let wide = || Signal::splat(Level::High, 4);
+        assert_eq!(
+            part.eval(&[
+                wide(),
+                wide(),
+                Signal::bit(Level::Low),
+                Signal::bit(Level::Low)
+            ]),
+            vec![
+                Signal::splat(Level::HighZ, 4),
+                Signal::splat(Level::HighZ, 4)
+            ],
+            "disabled, it lets go of every bit of both sides"
+        );
+    }
+
+    #[test]
+    fn two_sides_of_different_widths_have_no_bit_by_bit_answer() {
+        // The same loud refusal a gate makes: the drawing already rings a pin
+        // that disagrees with its net, so the claim here is the loudest one
+        // available rather than an answer about the bits that line up.
+        let part = BusTransceiver::active_high();
+        assert_eq!(
+            part.eval(&[
+                Signal::splat(Level::High, 2),
+                Signal::splat(Level::High, 4),
+                Signal::bit(Level::High),
+                Signal::bit(Level::High),
+            ]),
+            vec![
+                Signal::splat(Level::Error, 4),
+                Signal::splat(Level::Error, 4)
+            ]
+        );
     }
 }
