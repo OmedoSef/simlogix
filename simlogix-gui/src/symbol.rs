@@ -647,11 +647,7 @@ fn draw_splitter(
     let spine_x = c.x - rect.width() * 0.12;
     let branch_x = rect.right();
 
-    // One branch per grid row, centred on the box: the rect was sized for
-    // exactly this many, so they land on grid dots.
-    let step = GRID_SPACING;
-    let top = c.y - step * (widths.len() as f32 - 1.0) / 2.0;
-    let branch_y = |index: usize| top + step * index as f32;
+    let branch_y = |index: usize| splitter_row(c.y, index, widths.len());
 
     let spine = Stroke::new(stroke.width * 2.0, stroke.color);
     painter.line_segment([r(bus), r(pos2(spine_x, c.y))], spine);
@@ -686,6 +682,22 @@ fn draw_splitter(
         inputs: vec![r(bus)],
         outputs,
     }
+}
+
+/// Where branch `index` of `count` sits, vertically.
+///
+/// One grid row each, and **every one on a grid dot** — which is what a
+/// centred layout cannot give for an even count: four rows spread about a
+/// centre land at half a step either side of it, so not one of them meets a
+/// dot and no wire can be drawn to them squarely.
+///
+/// So the block is placed from a whole number of steps above the centre
+/// instead. An odd count comes out exactly centred, as it always did; an
+/// even one hangs half a step low, which is the price of the pins being
+/// somewhere a wire can reach.
+fn splitter_row(centre_y: f32, index: usize, count: usize) -> f32 {
+    let above = (count.saturating_sub(1) / 2) as f32;
+    centre_y + GRID_SPACING * (index as f32 - above)
 }
 
 /// How a branch says which bits it carries: `3` for one, `4-7` for several.
@@ -1937,6 +1949,35 @@ mod tests {
                 "the lead started further from the pin than the centre is"
             );
         }
+    }
+
+    #[test]
+    fn every_splitter_branch_lands_on_a_grid_dot() {
+        // Romain's: an even number of branches spread about the centre put
+        // every one of them half a step off, so no wire could be drawn to
+        // them squarely. A pin that is not on a dot is not a pin.
+        for count in 1..=8 {
+            for index in 0..count {
+                let offset = splitter_row(0.0, index, count);
+                assert_eq!(
+                    offset % GRID_SPACING,
+                    0.0,
+                    "branch {index} of {count} sat at {offset}"
+                );
+            }
+            // And they are still a row apart, in order, top to bottom.
+            for index in 1..count {
+                assert_eq!(
+                    splitter_row(0.0, index, count) - splitter_row(0.0, index - 1, count),
+                    GRID_SPACING,
+                );
+            }
+        }
+
+        // An odd count is exactly centred, as it always was — the bus lead
+        // meets the middle branch.
+        assert_eq!(splitter_row(0.0, 1, 3), 0.0);
+        assert_eq!(splitter_row(0.0, 0, 1), 0.0);
     }
 
     #[test]
