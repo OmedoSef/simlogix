@@ -25,7 +25,7 @@ pub(super) struct ResolvedRoute {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Node {
+pub(super) enum Node {
     Pin(ComponentId, usize),
     Wire(u64),
     /// One of an instance's internal nets, which has no pin of this
@@ -753,6 +753,13 @@ impl SimLogixApp {
             (base, width)
         };
 
+        // Where each group starts, kept before the map below consumes it: a
+        // wire needs it to know which of its conductor's bits it carries.
+        let bases: HashMap<Node, isize> = groups
+            .iter()
+            .map(|(&root, group)| (root, group.iter().map(|(_, at)| *at).min().unwrap_or(0)))
+            .collect();
+
         // A lone pin is its own net anyway, which `rewire` already does for
         // anything it isn't told about — but only at one bit, so a wide pin
         // on its own has to be named.
@@ -811,23 +818,37 @@ impl SimLogixApp {
         // resolved: picking one of the two would leave half the drawing
         // reading bits it does not have, silently.
         self.width_faults.extend(contradictions);
-        self.wire_widths = self
+        // Where each wire sits on its conductor, and how much of it it
+        // carries. **Both are needed and neither comes from the net**: a
+        // branch off an eight-bit bus is two bits at offset four, and
+        // reading the net would give it eight bits starting at zero — which
+        // is what made a one-bit branch draw itself in the neutral colour a
+        // bus of mixed bits takes.
+        self.wire_slices = self
             .wires
             .iter()
             .map(|wire| {
-                let (root, _) = find(&mut plain, Node::Wire(wire.id));
-                (wire.id, wire_width.get(&root).copied().unwrap_or(1))
+                let (plain_root, _) = find(&mut plain, Node::Wire(wire.id));
+                let width = wire_width.get(&plain_root).copied().unwrap_or(1);
+                let (root, at) = find(&mut parent, Node::Wire(wire.id));
+                let offset = (at - bases.get(&root).copied().unwrap_or(0)).max(0) as usize;
+                (wire.id, (offset, width))
             })
             .collect();
 
-        self.circuit.rewire(&groups);
-
+        // What a **colour** spreads over: the wires, not the net. Once a
+        // splitter joins branches to their bus they are one conductor, so
+        // colouring a branch would repaint the bus and every other branch —
+        // which is not what "this wire" means to the person clicking it.
         let mut wire_groups: HashMap<Node, Vec<u64>> = HashMap::new();
         for wire in &self.wires {
-            let (root, _) = find(&mut parent, Node::Wire(wire.id));
+            let (root, _) = find(&mut plain, Node::Wire(wire.id));
             wire_groups.entry(root).or_default().push(wire.id);
         }
+        self.wire_colour_groups = wire_groups.clone();
         self.inherit_wire_colors(wire_groups.into_values());
+
+        self.circuit.rewire(&groups);
     }
 
     /// Gives a wire the colour of the net it has just joined.
@@ -856,29 +877,22 @@ impl SimLogixApp {
         }
     }
 
-    /// Paints every wire of one net, which is what "colour a wire" means:
-    /// the wires of a net are one conductor, so they get one colour.
+    /// Paints every wire joined to this one **by wire**, which is what
+    /// "colour a wire" means: those are one conductor and get one colour.
+    ///
+    /// Not every wire of the *net*. A splitter makes its branches parts of
+    /// its bus, so they share a net — and colouring a branch to tell it
+    /// apart would repaint the bus and its seven siblings, which is the
+    /// opposite of telling it apart.
     pub(super) fn color_net(&mut self, wire_id: u64, color: Option<[u8; 3]>) {
-        let Some(net) = self
-            .wires
-            .iter()
-            .find(|wire| wire.id == wire_id)
-            .and_then(|wire| self.wire_net(wire))
-        else {
-            // A wire with both ends loose carries no net; it's still a wire
-            // on screen, so it takes the colour on its own.
-            if let Some(wire) = self.wires.iter_mut().find(|wire| wire.id == wire_id) {
-                wire.color = color;
-            }
-            return;
-        };
-
         let members: Vec<u64> = self
-            .wires
-            .iter()
-            .filter(|wire| self.wire_net(wire) == Some(net))
-            .map(|wire| wire.id)
-            .collect();
+            .wire_colour_groups
+            .values()
+            .find(|group| group.contains(&wire_id))
+            .cloned()
+            // A wire the rebuild has not seen yet — one just drawn — takes
+            // the colour on its own.
+            .unwrap_or_else(|| vec![wire_id]);
         for wire in self.wires.iter_mut().filter(|w| members.contains(&w.id)) {
             wire.color = color;
         }

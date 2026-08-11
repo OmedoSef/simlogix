@@ -2185,3 +2185,89 @@ fn a_probe_on_a_branch_reads_that_branch_and_not_the_rest_of_the_bus() {
         assert_eq!(reading.levels(), [expected], "branch {branch} of 0xAA");
     }
 }
+
+/// A four-bit constant into a four-branch splitter, one probe on branch 2.
+fn split_bus() -> (SimLogixApp, ComponentId, Vec<u64>) {
+    let mut app = SimLogixApp::default();
+    app.place(ComponentKind::Constant, egui::pos2(40.0, 200.0));
+    app.place(ComponentKind::Splitter, egui::pos2(200.0, 200.0));
+    let ids: Vec<ComponentId> = app.placed.iter().map(|placed| placed.id()).collect();
+    let (source, splitter) = (ids[0], ids[1]);
+    app.set_component_properties(
+        source,
+        Properties {
+            width: Some(4),
+            // 0b0100: only bit 2 is high.
+            value: Some(0b0100),
+            ..Default::default()
+        },
+    );
+    app.set_component_properties(
+        splitter,
+        Properties {
+            width: Some(4),
+            ..Default::default()
+        },
+    );
+    let ids: Vec<ComponentId> = app.placed.iter().map(|placed| placed.id()).collect();
+    let (source, splitter) = (ids[0], ids[1]);
+
+    let bus = app.add_wire(
+        WireEndpoint::Pin(source, 0),
+        WireEndpoint::Pin(splitter, 0),
+        Vec::new(),
+    );
+    let branches: Vec<u64> = (0..4)
+        .map(|branch| {
+            app.add_wire(
+                WireEndpoint::Pin(splitter, branch + 1),
+                WireEndpoint::Free(egui::pos2(400.0, 40.0 * branch as f32)),
+                Vec::new(),
+            )
+        })
+        .collect();
+    app.rebuild_nets();
+    app.advance_circuit(SETTLE_TICKS);
+    let mut wires = vec![bus];
+    wires.extend(branches);
+    (app, splitter, wires)
+}
+
+#[test]
+fn a_branch_wire_carries_its_own_level_not_the_buses() {
+    // Romain's: a one-bit branch was drawn in the neutral colour a bus of
+    // mixed bits takes, because it read the whole conductor. A bus has no
+    // single level — each of its wires does — so what a wire shows has to
+    // be *its* bits.
+    let (app, _, wires) = split_bus();
+    let net = app
+        .wires
+        .iter()
+        .find(|wire| wire.id == wires[0])
+        .and_then(|wire| app.wire_net(wire));
+
+    assert_eq!(app.wire_signal(wires[0], net).width(), 4, "the bus");
+    for (branch, wire) in wires[1..].iter().enumerate() {
+        let carried = app.wire_signal(*wire, net);
+        assert_eq!(carried.width(), 1, "branch {branch} carries one bit");
+        let expected = if branch == 2 { Level::High } else { Level::Low };
+        assert_eq!(carried.levels(), [expected], "branch {branch} of 0b0100");
+    }
+}
+
+#[test]
+fn colouring_a_branch_leaves_its_bus_and_its_siblings_alone() {
+    // The other half of the same fault. A splitter makes its branches parts
+    // of its bus, so they share a net — and a colour that spread over the
+    // net would repaint all of them, which is the opposite of telling one
+    // apart.
+    let (mut app, _, wires) = split_bus();
+    app.color_net(wires[3], Some([200, 30, 30]));
+
+    let colour = |id: u64| app.wires.iter().find(|w| w.id == id).unwrap().color;
+    assert_eq!(colour(wires[3]), Some([200, 30, 30]), "the one clicked");
+    assert_eq!(colour(wires[0]), None, "not its bus");
+    for other in [1, 2, 4] {
+        assert_eq!(colour(wires[other]), None, "nor branch {other}");
+    }
+}

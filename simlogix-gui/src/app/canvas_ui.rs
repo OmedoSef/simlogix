@@ -462,8 +462,13 @@ impl SimLogixApp {
                         let color = if self.show_signal_state {
                             match net {
                                 Some(net) => {
+                                    // **Its own bits.** A branch off a bus
+                                    // shares the net, so reading that would
+                                    // paint a one-bit wire in the neutral
+                                    // colour a bus of mixed bits takes —
+                                    // and it would never show its level.
                                     let level = canvas::bus_color(
-                                        &self.circuit.signal_at(net),
+                                        &self.wire_signal(wire_id, Some(net)),
                                         ui.visuals().dark_mode,
                                     );
                                     // Faded when nothing but a pass
@@ -517,6 +522,7 @@ impl SimLogixApp {
                                 self.show_bus_hint(
                                     ui,
                                     crate::i18n::Strings::for_language(self.language),
+                                    wire_id,
                                     width,
                                     net,
                                 );

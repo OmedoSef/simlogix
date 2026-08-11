@@ -485,7 +485,10 @@ pub struct SimLogixApp {
     /// branch wire's net is as wide as the whole bus. Drawing it that way
     /// would say something false about it: thick, and reporting a value it
     /// does not hold.
-    wire_widths: HashMap<u64, usize>,
+    wire_slices: HashMap<u64, (usize, usize)>,
+    /// Which wires are joined to which **by wire alone** — what a colour
+    /// spreads over, and what stops a branch's colour repainting its bus.
+    wire_colour_groups: HashMap<wiring::Node, Vec<u64>>,
     /// The net that refused to settle, if the engine reported one. Set only
     /// alongside `running = false`: a fault pauses rather than crashing or
     /// silently looping, and stays on screen until the user resumes.
@@ -641,7 +644,8 @@ impl Default for SimLogixApp {
             pending_attach: None,
             net_fingerprint: 0,
             width_faults: Vec::new(),
-            wire_widths: HashMap::new(),
+            wire_slices: HashMap::new(),
+            wire_colour_groups: HashMap::new(),
             running: true,
             clock_source_index: None,
             free_running_source: false,
@@ -1958,9 +1962,24 @@ impl SimLogixApp {
         }
     }
 
-    /// How many bits a wire carries — see `wire_widths`.
+    /// Which bits of its conductor a wire carries: where its bit zero sits,
+    /// and how many it takes.
+    pub(crate) fn wire_slice(&self, wire: u64) -> (usize, usize) {
+        self.wire_slices.get(&wire).copied().unwrap_or((0, 1))
+    }
+
+    /// How many bits a wire carries.
     pub(crate) fn wire_width(&self, wire: u64) -> usize {
-        self.wire_widths.get(&wire).copied().unwrap_or(1)
+        self.wire_slice(wire).1
+    }
+
+    /// What a wire carries — **its own bits**, not its whole conductor.
+    pub(crate) fn wire_signal(&self, wire: u64, net: Option<NetId>) -> simlogix_core::Signal {
+        let (offset, width) = self.wire_slice(wire);
+        match net {
+            Some(net) => self.circuit.signal_at(net).slice(offset, width),
+            None => simlogix_core::Signal::splat(simlogix_core::Level::Unknown, width),
+        }
     }
 
     /// What the inspector needs to name each component and say how wide its
@@ -2420,7 +2439,14 @@ impl SimLogixApp {
     /// The value is left out while the signal state is hidden: that mode
     /// exists to stop levels changing under you, and a readout that went on
     /// reporting them would be arguing with it.
-    fn show_bus_hint(&self, ui: &egui::Ui, strings: &Strings, width: usize, net: Option<NetId>) {
+    fn show_bus_hint(
+        &self,
+        ui: &egui::Ui,
+        strings: &Strings,
+        wire: u64,
+        width: usize,
+        net: Option<NetId>,
+    ) {
         let Some(at) = ui.ctx().pointer_latest_pos() else {
             return;
         };
@@ -2428,8 +2454,11 @@ impl SimLogixApp {
         if self.show_signal_state {
             if let Some(net) = net {
                 text.push_str(" · ");
+                // The wire's own bits, not its whole conductor: a branch
+                // shares a net with its bus and carries a slice of it.
+                let _ = net;
                 text.push_str(&crate::placed_component::signal_text(
-                    &self.circuit.signal_at(net),
+                    &self.wire_signal(wire, Some(net)),
                     self.base,
                 ));
             }
