@@ -15,6 +15,7 @@ pub mod probe;
 pub mod rail;
 pub mod sr_latch;
 pub mod storage;
+pub mod t_flip_flop;
 pub mod transistor;
 pub mod tri_state_buffer;
 pub mod xnor;

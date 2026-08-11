@@ -22,7 +22,10 @@ impl Component for Xor {
     }
 }
 
-fn xor(a: Level, b: Level) -> Level {
+/// Shared with [`crate::TFlipFlop`], whose whole behaviour is this applied
+/// to what it sampled and what it held: a second copy of a truth table is
+/// the copy that comes to disagree.
+pub(crate) fn xor(a: Level, b: Level) -> Level {
     match (a, b) {
         (Level::Error, _) | (_, Level::Error) => Level::Error,
         (Level::High, Level::High) | (Level::Low, Level::Low) => Level::Low,

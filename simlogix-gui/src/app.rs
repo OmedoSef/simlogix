@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
     Component, ComponentId, DFlipFlop, DLatch, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection,
-    PortDrive, Probe, Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    PortDrive, Probe, Rail, SrLatch, TFlipFlop, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::appearance::Appearance;
@@ -1055,13 +1055,17 @@ impl SimLogixApp {
                 );
                 PlacedComponent::sr_latch(id, center)
             }
-            ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
+            ComponentKind::DFlipFlop
+            | ComponentKind::DFlipFlopFalling
+            | ComponentKind::DLatch
+            | ComponentKind::TFlipFlop
+            | ComponentKind::TFlipFlopFalling => {
                 // How many pins it has is one of its properties, which is
                 // why this needs `place_with`: a built component's pins are
                 // fixed, so asking for the asynchronous inputs afterwards
                 // goes through the document and rebuilds — the same route a
                 // splitter's branch count takes.
-                let async_inputs = properties.async_set_reset();
+                let async_inputs = properties.async_set_reset(&kind);
                 let inputs = if async_inputs { 4 } else { 2 };
                 let pins: Vec<Pin> = (0..inputs + 2)
                     .map(|index| Pin {
@@ -1076,6 +1080,8 @@ impl SimLogixApp {
                 let component: Box<dyn Component> = match kind {
                     ComponentKind::DFlipFlop => Box::new(DFlipFlop::rising()),
                     ComponentKind::DFlipFlopFalling => Box::new(DFlipFlop::falling()),
+                    ComponentKind::TFlipFlop => Box::new(TFlipFlop::rising()),
+                    ComponentKind::TFlipFlopFalling => Box::new(TFlipFlop::falling()),
                     _ => Box::new(DLatch::new()),
                 };
                 let id = self.circuit.add_component(component, pins);
@@ -2060,7 +2066,10 @@ impl SimLogixApp {
                         ComponentKind::DFlipFlop
                             | ComponentKind::DFlipFlopFalling
                             | ComponentKind::DLatch
-                    ) && placed.properties().async_set_reset() != edited.async_set_reset())
+                            | ComponentKind::TFlipFlop
+                            | ComponentKind::TFlipFlopFalling
+                    ) && placed.properties().async_set_reset(&kind)
+                        != edited.async_set_reset(&kind))
             });
         if rebuild {
             let properties = edited.clone();

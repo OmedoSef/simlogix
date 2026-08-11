@@ -343,17 +343,19 @@ pub fn draw(
             draw_splitter(painter, rect, orientation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, orientation, stroke, text_layer),
-        ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
-            draw_storage(
-                painter,
-                rect,
-                orientation,
-                stroke,
-                text_layer,
-                kind,
-                state.async_inputs,
-            )
-        }
+        ComponentKind::DFlipFlop
+        | ComponentKind::DFlipFlopFalling
+        | ComponentKind::DLatch
+        | ComponentKind::TFlipFlop
+        | ComponentKind::TFlipFlopFalling => draw_storage(
+            painter,
+            rect,
+            orientation,
+            stroke,
+            text_layer,
+            kind,
+            state.async_inputs,
+        ),
         // A circuit instance draws its own generated box, not a fixed symbol.
         ComponentKind::Circuit(_) => PinPositions::default(),
         ComponentKind::TriStateBuffer => draw_tri_state_buffer(painter, rect, orientation, stroke),
@@ -977,8 +979,21 @@ fn draw_storage(
     kind: &ComponentKind,
     async_inputs: bool,
 ) -> PinPositions {
-    let falling = kind == &ComponentKind::DFlipFlopFalling;
+    let falling = matches!(
+        kind,
+        ComponentKind::DFlipFlopFalling | ComponentKind::TFlipFlopFalling
+    );
     let edge_triggered = kind != &ComponentKind::DLatch;
+    // The data pin's letter is the whole of what a reader needs: `D` stores
+    // what it finds there, `T` flips when it is high.
+    let data_label = if matches!(
+        kind,
+        ComponentKind::TFlipFlop | ComponentKind::TFlipFlopFalling
+    ) {
+        "T"
+    } else {
+        "D"
+    };
     let c = rect.center();
     let r = |p: Pos2| orientation.place(p, c);
     let color = stroke.color;
@@ -1047,7 +1062,7 @@ fn draw_storage(
     label(
         pos2(body.left() + pad, body.top() + pad + 3.0),
         Align2::LEFT_CENTER,
-        "D",
+        data_label,
     );
     if !edge_triggered {
         label(

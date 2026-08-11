@@ -395,9 +395,9 @@ that is what's wanted.
 - [ ] Adder
 - [ ] Multiplexer
 - [ ] Demultiplexer
-- [ ] D latch
-- [ ] D flip-flop, triggered on the rising or the falling edge
-- [ ] T flip-flop
+- [x] D latch
+- [x] D flip-flop, triggered on the rising or the falling edge
+- [x] T flip-flop
 - [ ] Counter
 
 **Every one of these wants a width**, now that a wire can carry more than

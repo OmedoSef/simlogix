@@ -2631,3 +2631,95 @@ fn a_latch_is_transparent_where_a_flip_flop_is_not() {
         "disabled, it holds what it had"
     );
 }
+
+#[test]
+fn a_t_flip_flop_toggles_on_the_edge_and_holds_when_told_to() {
+    let mut app = SimLogixApp::default();
+    let t = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let clock = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let reset = app.place(ComponentKind::InputPort, egui::pos2(40.0, 200.0));
+    let set = app.place(ComponentKind::InputPort, egui::pos2(40.0, 280.0));
+    let ff = app.place(ComponentKind::TFlipFlop, egui::pos2(200.0, 80.0));
+
+    // Ask for the asynchronous inputs first: it is what lets the test start
+    // from a known state rather than from "nothing has been told to it".
+    let mut edited = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == ff)
+        .expect("placed")
+        .properties()
+        .clone();
+    edited.async_set_reset = Some(true);
+    app.set_component_properties(ff, edited);
+    let ff = app
+        .placed
+        .iter()
+        .find(|placed| placed.center() == egui::pos2(200.0, 80.0))
+        .expect("still there")
+        .id();
+
+    for (from, to) in [
+        ((t, 0), (ff, 0)),
+        ((clock, 0), (ff, 1)),
+        ((set, 0), (ff, 2)),
+        ((reset, 0), (ff, 3)),
+    ] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    app.rebuild_nets();
+
+    let q = app.circuit.pins(ff)[4].net;
+    for (id, value) in [(set, 0), (clock, 0), (t, 1), (reset, 1)] {
+        drive(&mut app, id, value);
+    }
+    app.advance_circuit(SETTLE_TICKS);
+    drive(&mut app, reset, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(app.circuit.signal_at(q).levels(), [Level::Low], "cleared");
+
+    let pulse = |app: &mut SimLogixApp| {
+        for level in [1, 0] {
+            drive(app, clock, level);
+            app.advance_circuit(SETTLE_TICKS);
+        }
+    };
+    for expected in [Level::High, Level::Low, Level::High] {
+        pulse(&mut app);
+        assert_eq!(app.circuit.signal_at(q).levels(), [expected], "it toggles");
+    }
+
+    // `T` low, and the edges stop mattering — which is the difference from a
+    // flip-flop that always toggles.
+    drive(&mut app, t, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    for _ in 0..3 {
+        pulse(&mut app);
+        assert_eq!(app.circuit.signal_at(q).levels(), [Level::High], "held");
+    }
+}
+
+#[test]
+fn a_t_flip_flop_always_has_a_way_in() {
+    // It has no data path — it only transforms what it already holds — and
+    // it starts holding nothing, so `Unknown` toggled is still `Unknown`.
+    // Without asynchronous inputs it could never leave the unknown state,
+    // which is why they are not a choice here as they are on a D.
+    let mut app = SimLogixApp::default();
+    for kind in [ComponentKind::TFlipFlop, ComponentKind::TFlipFlopFalling] {
+        let id = app.place(kind, egui::pos2(200.0, 80.0));
+        assert_eq!(
+            app.circuit.pins(id).len(),
+            6,
+            "T, clock, S, R, Q and Q-bar, with nothing asked for"
+        );
+    }
+    // And a D is the other way round: `D` puts a value in, so its pins stay
+    // opt-in and it arrives with four.
+    let id = app.place(ComponentKind::DFlipFlop, egui::pos2(400.0, 80.0));
+    assert_eq!(app.circuit.pins(id).len(), 4);
+}

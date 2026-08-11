@@ -1,8 +1,5 @@
-use std::cell::Cell;
-
-use crate::component::{across_bits, Component};
-use crate::components::storage::{complement, forced, resize};
-use crate::level::Level;
+use crate::component::Component;
+use crate::components::storage::EdgeTriggered;
 use crate::signal::Signal;
 
 /// An edge-triggered D flip-flop: on the chosen clock edge it captures
@@ -31,20 +28,10 @@ use crate::signal::Signal;
 ///
 /// # It captures the value `D` had *before* the edge
 ///
-/// Not the one it has at the instant of it, which is what a setup time
-/// means on a real part — and here it is load-bearing rather than a nicety.
-/// A chain of flip-flops on one clock is evaluated within the same tick, and
-/// a component's output is visible to the next one straight away, so
-/// sampling `D` as it stands would shift a value down the whole chain in one
-/// edge. That is the classic race, and a shift register is where it shows.
-///
-/// **The engine was deliberately not changed instead.** Committing every
-/// output at the end of a tick — the delta cycle of a Verilog simulator —
-/// would fix this and break something already relied on: an SR latch
-/// released from its forbidden state settles here *because* the tie is
-/// broken by the order the two gates happen to be evaluated in. Commit them
-/// together and it oscillates for ever. So the sampling rule lives where the
-/// physics puts it, in the part that has a setup time.
+/// Not the one it has at the instant of it, which is what a setup time means
+/// on a real part — and here it is load-bearing rather than a nicety. See
+/// [`crate::components::storage::EdgeTriggered`] for why, and for why the
+/// engine was deliberately not changed instead.
 ///
 /// # On a bus it is a register
 ///
@@ -52,25 +39,7 @@ use crate::signal::Signal;
 /// one clock. There is nothing per-bit to decide — every bit is captured at
 /// the same instant, which is the point of a register.
 pub struct DFlipFlop {
-    /// Which edge captures: `true` for low-to-high.
-    rising: bool,
-    /// What `Q` currently is, one level per bit. `Q̄` is derived from it.
-    ///
-    /// Empty until the first evaluation, which is the absence of a value
-    /// rather than one: inventing a power-on state would misrepresent
-    /// hardware that genuinely comes up either way.
-    state: Cell<Signal>,
-    /// The clock level at the previous evaluation, which is the only way to
-    /// know an edge happened at all.
-    ///
-    /// Starts `Unknown`, so the first evaluation sees no edge however the
-    /// clock stands: an edge is a *transition*, and nothing that was never
-    /// observed low can be said to have risen.
-    previous_clock: Cell<Level>,
-    /// What `D` carried at the previous evaluation — the value an edge
-    /// captures. See the type's own note on why it is this one and not the
-    /// value `D` has at the instant of the edge.
-    previous_data: Cell<Signal>,
+    inner: EdgeTriggered,
 }
 
 impl DFlipFlop {
@@ -87,77 +56,17 @@ impl DFlipFlop {
 
     fn new(rising: bool) -> Self {
         Self {
-            rising,
-            state: Cell::default(),
-            previous_clock: Cell::new(Level::Unknown),
-            previous_data: Cell::default(),
+            inner: EdgeTriggered::new(rising),
         }
-    }
-
-    /// Whether the clock just made the transition this flip-flop triggers on.
-    ///
-    /// Both levels have to be definite. A clock that was `Unknown` and is now
-    /// `High` may or may not have risen — the honest answer is that nothing
-    /// is known about it, which [`DFlipFlop::forced`] turns into an unknown
-    /// stored value rather than a silent hold — see `storage::forced`.
-    fn edge(&self, clock: Level) -> bool {
-        let (before, after) = if self.rising {
-            (Level::Low, Level::High)
-        } else {
-            (Level::High, Level::Low)
-        };
-        self.previous_clock.get() == before && clock == after
     }
 }
 
 impl Component for DFlipFlop {
     fn eval(&self, inputs: &[Signal], _widths: &[usize]) -> Vec<Signal> {
-        let (data, clock, set, reset) = match inputs {
-            [data, clock] => (data, clock.only_level(), None, None),
-            [data, clock, set, reset] => (
-                data,
-                clock.only_level(),
-                Some(set.only_level()),
-                Some(reset.only_level()),
-            ),
-            _ => {
-                return vec![Signal::bit(Level::Unknown), Signal::bit(Level::Unknown)];
-            }
-        };
-
-        // What it was holding, brought to the width being asked about. A
-        // register just widened does not know its new bits: nothing says they
-        // line up with the old ones, so carrying bit 0 across would be a
-        // guess. Same rule as `SrLatch`.
-        let held = resize(self.state.take(), data.width());
-
-        // What `D` carried before this evaluation, brought to the same width
-        // for the same reason the held value is.
-        let sampled = resize(self.previous_data.take(), data.width());
-
-        let forced = forced(clock, set, reset);
-        let capture = self.edge(clock);
-        let outputs = across_bits(&[&sampled, &held], |bits| match bits {
-            [sampled, held] => {
-                let next = match (forced, capture) {
-                    (Some(level), _) => level,
-                    (None, true) => *sampled,
-                    (None, false) => *held,
-                };
-                vec![next, complement(next)]
-            }
-            _ => vec![Level::Unknown, Level::Unknown],
-        });
-
-        // Recorded after the edge has been read, and every time rather than
-        // only on a transition: they are "the inputs as they were last seen",
-        // and copies updated only sometimes would report an edge that had
-        // already been acted on, or sample a value from further back than the
-        // one edge being answered.
-        self.previous_clock.set(clock);
-        self.previous_data.set(data.clone());
-        self.state.set(outputs.first().cloned().unwrap_or_default());
-        outputs
+        // What an edge stores: what was on `D`. That one line is the whole
+        // of what a D flip-flop is, once the edge and the sampling are the
+        // shared machinery's business.
+        self.inner.eval(inputs, |sampled, _held| sampled)
     }
 }
 
@@ -168,6 +77,7 @@ impl Component for DFlipFlop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::level::Level;
 
     /// `Q`, for a flip-flop with no asynchronous inputs.
     fn tick(part: &DFlipFlop, data: Level, clock: Level) -> Vec<Level> {

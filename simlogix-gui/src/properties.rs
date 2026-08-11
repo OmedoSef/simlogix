@@ -177,9 +177,24 @@ impl Properties {
         self.width.unwrap_or(1).max(1)
     }
 
-    /// Whether a flip-flop was given asynchronous set and reset pins.
-    pub fn async_set_reset(&self) -> bool {
-        self.async_set_reset.unwrap_or(false)
+    /// Whether this component has asynchronous set and reset pins.
+    ///
+    /// **A T flip-flop always does, and it is not a choice.** It has no data
+    /// path — it only ever transforms what it already holds — and it starts
+    /// holding nothing, so `Unknown` toggled is still `Unknown`: without a
+    /// way to force a definite value in, one could never leave the unknown
+    /// state at all. Offering a setting whose other position is a component
+    /// that can do nothing is worse than not offering it.
+    ///
+    /// A D flip-flop and a D latch are the other way round: `D` puts a value
+    /// in, so they work perfectly well without, and the pins stay opt-in —
+    /// which is what keeps "an undriven control is `Unknown`" from costing
+    /// two ground rails on every one you draw.
+    pub fn async_set_reset(&self, kind: &ComponentKind) -> bool {
+        matches!(
+            kind,
+            ComponentKind::TFlipFlop | ComponentKind::TFlipFlopFalling
+        ) || self.async_set_reset.unwrap_or(false)
     }
 
     /// What a constant drives. Zero unless it says otherwise — the value a
@@ -265,6 +280,8 @@ impl Properties {
                 | ComponentKind::DFlipFlop
                 | ComponentKind::DFlipFlopFalling
                 | ComponentKind::DLatch
+                | ComponentKind::TFlipFlop
+                | ComponentKind::TFlipFlopFalling
         )
     }
 
@@ -296,13 +313,14 @@ impl Properties {
 /// one with a switch, the symbol is already drawn from the kind, and a saved
 /// `simlogix:PTransistor` says more than a `Transistor` with a flag beside
 /// it. All the panel adds is the ability to change your mind after placing.
-const VARIANTS: [[ComponentKind; 2]; 3] = [
+const VARIANTS: [[ComponentKind; 2]; 4] = [
     [ComponentKind::NTransistor, ComponentKind::PTransistor],
     [
         ComponentKind::BusTransceiver,
         ComponentKind::BusTransceiverOe,
     ],
     [ComponentKind::DFlipFlop, ComponentKind::DFlipFlopFalling],
+    [ComponentKind::TFlipFlop, ComponentKind::TFlipFlopFalling],
 ];
 
 /// Bounds on a label's size: small enough to annotate, large enough to
@@ -975,9 +993,11 @@ pub fn show(
         // only reads, so it has neither a resting value nor a say in how
         // many states the interface has — but it does have a width, which
         // is offered to all three below rather than here.
+        // Deliberately not the T flip-flop: there the pins are not a choice,
+        // so a checkbox there could only ever say what it already says.
         ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
             ui.add_space(8.0);
-            let mut async_inputs = properties.async_set_reset();
+            let mut async_inputs = properties.async_set_reset(kind);
             if ui
                 .checkbox(&mut async_inputs, strings.property_async_set_reset)
                 .on_hover_text(strings.property_async_set_reset_hint)
