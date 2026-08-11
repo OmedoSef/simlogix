@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
     Component, ComponentId, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection, PortDrive, Probe,
-    Rail, Splitter, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
+    Rail, SrLatch, Transistor, TriStateBuffer, Xnor, Xor,
 };
 
 use crate::appearance::Appearance;
@@ -940,15 +940,20 @@ impl SimLogixApp {
                 let branches = properties.branch_widths().len();
                 let pins = (0..=branches)
                     .map(|_| Pin {
-                        // Nothing here says which way a value travels: it
-                        // falls out of what is connected, which is what
-                        // makes one component do the merger's job too.
+                        // `InOut` and inert: a splitter neither reads nor
+                        // drives. Its pins exist so wires have something to
+                        // attach to; what they *mean* is said by the net
+                        // rebuild, which joins them at bit offsets.
                         direction: PinDirection::InOut,
                         net: self.circuit.add_net(),
                     })
                     .collect();
-                let id = self.circuit.add_component(Box::new(Splitter), pins);
-                self.circuit.schedule_now(id);
+                // **Not a component that relays.** A splitter is wire — bit
+                // 3 of this net *is* bit 0 of that one — so there is nothing
+                // here to evaluate, and nothing that could cost a tick or
+                // hear its own echo. `CircuitAnchor` is the same nothing an
+                // instance already uses.
+                let id = self.circuit.add_component(Box::new(CircuitAnchor), pins);
                 PlacedComponent::splitter(id, center)
             }
             ComponentKind::InputPort
@@ -1002,9 +1007,7 @@ impl SimLogixApp {
                         net: self.circuit.add_net(),
                     })
                     .collect();
-                let id = self
-                    .circuit
-                    .add_component(Box::new(CircuitAnchor::new(wiring.ports.len())), pins);
+                let id = self.circuit.add_component(Box::new(CircuitAnchor), pins);
                 self.circuit.schedule_now(id);
                 let appearance = self.appearance_of(&path, &wiring.ports);
                 PlacedComponent::instance(id, center, path, wiring, appearance)

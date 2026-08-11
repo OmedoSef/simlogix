@@ -19,24 +19,6 @@ pub trait Component {
     fn propagation_delay(&self) -> u64 {
         1
     }
-
-    /// Whether this component sees its own contribution when it reads a net
-    /// it also drives. True for everything but a **relay**.
-    ///
-    /// Reading the true resolved net — one's own contribution included — is
-    /// the accurate model, and deliberately so: an open-drain pin has to see
-    /// its own pull-down on the wire to arbitrate at all, which is why the
-    /// engine has never hidden it. A relay is the one shape where that is
-    /// wrong rather than merely awkward: it *repeats* what it hears, so
-    /// hearing itself it would repeat its own echo, and go on holding a
-    /// value after whatever really drove it has let go.
-    ///
-    /// The exclusion is per component and touches nothing else: the net's
-    /// own value is unchanged, and every other reader still sees the full
-    /// picture. Only what this one is handed to read is narrowed.
-    fn reads_own_contribution(&self) -> bool {
-        true
-    }
 }
 
 /// Adapts a component written against single levels to the `Signal`

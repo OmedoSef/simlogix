@@ -25,7 +25,6 @@ pub use components::port::{
 };
 pub use components::probe::Probe;
 pub use components::rail::Rail;
-pub use components::splitter::Splitter;
 pub use components::sr_latch::SrLatch;
 pub use components::transistor::Transistor;
 pub use components::tri_state_buffer::TriStateBuffer;

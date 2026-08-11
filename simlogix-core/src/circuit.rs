@@ -523,9 +523,6 @@ impl Circuit {
     ) -> Result<(), UnstableCircuit> {
         let pins = self.components[&component].pins.clone();
 
-        let hears_itself = self.components[&component]
-            .component
-            .reads_own_contribution();
         let inputs: Vec<Signal> = pins
             .iter()
             .enumerate()
@@ -535,15 +532,19 @@ impl Circuit {
             // read the wrong pin's bits.
             .filter(|(_, pin)| pin.direction != PinDirection::Output)
             .map(|(index, pin)| {
-                let whole = if hears_itself {
-                    self.signal_at(pin.net)
-                } else {
-                    self.signal_excluding(component, pin.net)
-                };
                 // Its own bits, not the whole conductor: a pin occupying
                 // part of a net reads that part. Everything is the whole
-                // net until a splitter says otherwise, so this is what it
-                // always was for a plain wire.
+                // net unless a splitter put it somewhere else, so this is
+                // what it always was for a plain wire.
+                //
+                // The net's *true* value, this component's own contribution
+                // included. That was once optional, for the splitter when it
+                // was a relay that would otherwise have heard its own echo;
+                // a splitter is connectivity now and there is no relay left,
+                // so the accurate reading is the only one. An open-drain pin
+                // has to see its own pull-down on the wire to arbitrate at
+                // all, which is why hiding it was never right in general.
+                let whole = self.signal_at(pin.net);
                 let (offset, width) = self.pin_slice((component, index), pin.net);
                 whole.slice(offset, width)
             })
@@ -703,26 +704,6 @@ impl Circuit {
                 })
                 .collect(),
         )
-    }
-
-    /// What `net` carries as far as `component` is concerned: everything on
-    /// it *except* what that component is putting there itself.
-    ///
-    /// Only for a component that says it does not hear itself. The net's own
-    /// value is untouched — every other reader still sees the full picture,
-    /// including this component's contribution.
-    fn signal_excluding(&self, component: ComponentId, net: NetId) -> Signal {
-        let width = self.net_width(net);
-        match self.drivers.get(&net) {
-            Some(drivers) => self.resolve_from(
-                net,
-                drivers
-                    .iter()
-                    .filter(move |((driver, _), _)| *driver != component)
-                    .map(|(&pin, signal)| (pin, signal)),
-            ),
-            None => Signal::splat(Level::Unknown, width),
-        }
     }
 
     /// One bit of [`Circuit::resolve`], which is the rule that has been here

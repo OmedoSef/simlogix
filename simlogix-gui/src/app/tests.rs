@@ -1456,16 +1456,22 @@ fn two_driven_widths_on_one_net_fault_it_rather_than_being_guessed_at() {
     placed.set_properties(properties);
     app.rebuild_nets();
 
-    // Eight against one. The net takes the wider, so the narrower pin then
-    // contributes the wrong width — and the whole net faults rather than
-    // being padded, which is what makes the mistake visible.
+    // Eight against one, joined by a wire — so they are the same conductor
+    // and cannot be two widths. The net takes the wider, and **the narrower
+    // pin is named**: the fault belongs to the thing that is wrong about
+    // itself, not to the net, which is fine.
+    //
+    // It used to fault every bit of the net as well. That went with the
+    // splitter becoming connectivity: a pin narrower than its net is now an
+    // ordinary thing — a branch is exactly that — so narrowness alone can no
+    // longer mean a mistake, and the mistake is reported where it is.
     let net = app.circuit.pins(wide)[0].net;
     assert_eq!(app.circuit.net_width(net), 8);
     app.step(SETTLE_TICKS);
-    let signal = app.circuit.signal_at(net);
-    assert!(
-        signal.levels().iter().all(|&level| level == Level::Error),
-        "expected every bit faulted, got {signal:?}"
+    assert_eq!(
+        app.width_faults,
+        vec![(narrow, 0)],
+        "the narrow pin is the one that disagrees"
     );
 }
 
@@ -1818,12 +1824,30 @@ fn a_splitter_grows_a_pin_per_branch_and_each_carries_its_own_width() {
     let splitter = app.placed[0].id();
     let pins = app.circuit.pins(splitter).to_vec();
     assert_eq!(pins.len(), 3, "a bus and two branches");
-    assert_eq!(app.circuit.net_width(pins[0].net), 4, "the bus");
-    assert_eq!(app.circuit.net_width(pins[1].net), 2, "the low branch");
-    assert_eq!(app.circuit.net_width(pins[2].net), 2, "the high branch");
+
+    // **One conductor.** A splitter is not a component that carries bits
+    // between two nets; it says the branches *are* parts of the bus, so
+    // there is one net and the pins sit at places in it.
+    assert_eq!(pins[0].net, pins[1].net);
+    assert_eq!(pins[0].net, pins[2].net);
+    let net = pins[0].net;
+    assert_eq!(app.circuit.net_width(net), 4, "as wide as the bus");
+
+    assert_eq!(app.circuit.pin_slice((splitter, 0), net), (0, 4), "the bus");
+    assert_eq!(
+        app.circuit.pin_slice((splitter, 1), net),
+        (0, 2),
+        "bits 0-1"
+    );
+    assert_eq!(
+        app.circuit.pin_slice((splitter, 2), net),
+        (2, 2),
+        "bits 2-3"
+    );
+
     assert!(
         app.width_faults.is_empty(),
-        "a splitter's own pins never disagree with their nets: {:?}",
+        "a branch is narrower on purpose, which is not a disagreement: {:?}",
         app.width_faults
     );
 }
@@ -1860,17 +1884,23 @@ fn a_value_driven_onto_a_splitters_bus_comes_out_on_its_branches() {
     app.rebuild_nets();
     app.advance_circuit(SETTLE_TICKS);
 
-    let pins = app.circuit.pins(splitter).to_vec();
+    // One conductor, so the value is simply *on* it — and each branch pin
+    // occupies its own part of it. There is nothing to carry the bits from
+    // one side to the other, which is the whole point.
+    let net = app.circuit.pins(splitter)[0].net;
+    let carried = app.circuit.signal_at(net);
     assert_eq!(
-        app.circuit.signal_at(pins[1].net).levels(),
-        [Level::High, Level::Low],
-        "bits 0-1 of 0b1001"
+        carried.levels(),
+        [Level::High, Level::Low, Level::Low, Level::High],
+        "0b1001 on the bus"
     );
-    assert_eq!(
-        app.circuit.signal_at(pins[2].net).levels(),
-        [Level::Low, Level::High],
-        "bits 2-3"
-    );
+
+    let branch = |index: usize| {
+        let (offset, width) = app.circuit.pin_slice((splitter, index), net);
+        carried.slice(offset, width)
+    };
+    assert_eq!(branch(1).levels(), [Level::High, Level::Low], "bits 0-1");
+    assert_eq!(branch(2).levels(), [Level::Low, Level::High], "bits 2-3");
 }
 
 #[test]
@@ -2010,4 +2040,45 @@ fn a_probe_alone_on_a_wire_leaves_it_one_bit() {
 
     assert_eq!(app.circuit.net_width(app.circuit.pins(probe)[0].net), 1);
     assert!(app.width_faults.is_empty());
+}
+
+#[test]
+fn a_value_crosses_a_splitter_without_costing_a_tick() {
+    // The whole reason the splitter stopped being a component. As a relay
+    // it read one side and drove the other, so a bit that crossed one
+    // arrived a tick after a bit that did not — and a bus half of whose
+    // bits went through one was skewed. Now it is wire: the branches *are*
+    // parts of the bus, and there is nothing in between to take time.
+    let (mut app, _) = wide_splitter();
+    let source = app.place(ComponentKind::Constant, egui::pos2(40.0, 200.0));
+    app.set_component_properties(
+        source,
+        Properties {
+            width: Some(4),
+            value: Some(0b1001),
+            ..Default::default()
+        },
+    );
+    let splitter = app.placed[0].id();
+    let source = app.placed[1].id();
+    app.add_wire(
+        WireEndpoint::Pin(source, 0),
+        WireEndpoint::Pin(splitter, 0),
+        Vec::new(),
+    );
+    app.rebuild_nets();
+
+    // One tick — the constant's own evaluation — and the branches already
+    // carry their bits. A relay would have needed a second.
+    app.circuit.schedule_now(source);
+    app.advance_circuit(1);
+
+    let net = app.circuit.pins(splitter)[0].net;
+    let carried = app.circuit.signal_at(net);
+    let branch = |index: usize| {
+        let (offset, width) = app.circuit.pin_slice((splitter, index), net);
+        carried.slice(offset, width)
+    };
+    assert_eq!(branch(1).levels(), [Level::High, Level::Low], "bits 0-1");
+    assert_eq!(branch(2).levels(), [Level::Low, Level::High], "bits 2-3");
 }

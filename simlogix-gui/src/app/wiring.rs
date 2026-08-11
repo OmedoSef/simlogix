@@ -624,6 +624,46 @@ impl SimLogixApp {
         // until a splitter says otherwise, so a plain drawing comes out of
         // here exactly as it always did.
         type Placed = ((ComponentId, usize), isize);
+        // **What the wires say, before the splitters.** Two pins joined by
+        // a chain of wires carry the same bits to both ends, so they must
+        // agree on how many there are — and that is the only place a width
+        // can disagree. A splitter's branch is narrower than its bus on
+        // purpose, which the old rule could not tell apart from a mistake
+        // because both came out as "narrower than the net".
+        //
+        // So the faults are read from this, and the nets from the same
+        // thing with the splitters applied on top.
+        let plain = parent.clone();
+
+        // A splitter says where its branches sit on its bus, and that is the
+        // whole of what it is: no component in between, so no tick and no
+        // echo. Branch `i` takes the bits after everything before it, and
+        // its bit zero is the bus's bit at that running total.
+        //
+        // Answered false when a loop of splitters says two contradictory
+        // things about one conductor — kept for the fault report rather than
+        // silently resolved, since picking a winner would leave half the
+        // drawing reading bits it does not have.
+        let mut contradictions: Vec<(ComponentId, usize)> = Vec::new();
+        for placed in &self.placed {
+            if placed.kind() != crate::palette::ComponentKind::Splitter {
+                continue;
+            }
+            let mut bit = 0usize;
+            for (branch, width) in placed.properties().branch_widths().iter().enumerate() {
+                let agreed = union(
+                    &mut parent,
+                    Node::Pin(placed.id(), branch + 1),
+                    Node::Pin(placed.id(), 0),
+                    bit as isize,
+                );
+                if !agreed {
+                    contradictions.push((placed.id(), branch + 1));
+                }
+                bit += width;
+            }
+        }
+
         let mut groups: HashMap<Node, Vec<Placed>> = HashMap::new();
         let nodes: Vec<Node> = parent.keys().copied().collect();
         for node in nodes {
@@ -695,31 +735,57 @@ impl SimLogixApp {
             .filter(|group| group.len() > 1 || extent(group).1 > 1)
             .map(|group| {
                 let (base, width) = extent(&group);
-                // **From its offset to the end of the net**, not its own
-                // declared width. A conductor joins pins bit for bit, so a
-                // pin narrower than what is left of the net is wrong about
-                // itself rather than occupying part of it — which is the
-                // fault reported below, and which giving it a slice of its
-                // own width would have quietly made legal.
+                // Its **own declared width, at its offset**. A pin narrower
+                // than the net is not wrong by itself — a splitter's branch
+                // is exactly that — so being narrow is no longer the fault.
+                // What is a fault is two pins *at the same offset*
+                // disagreeing, which is reported below: those are joined bit
+                // for bit by wire, and a conductor cannot be two widths.
+                //
+                // A pin with no opinion takes what is left of the net from
+                // where it sits, which is a probe reading whatever it is on.
                 let members = group
                     .iter()
-                    .map(|(pin, at)| Member::from(*pin, (at - base) as usize))
+                    .map(|(pin, at)| {
+                        let offset = (at - base) as usize;
+                        match declared(pin) {
+                            Some(own) => Member::slice(*pin, offset, own),
+                            None => Member::from(*pin, offset),
+                        }
+                    })
                     .collect();
                 NetGroup::sliced(members, width)
             })
             .collect();
 
-        // Which pins disagree with the net they are on. Worked out here
-        // because here is where both facts are known at once, and recorded
-        // per *pin* rather than per net: the net is fine — one thing
-        // attached to it is wrong about how wide it is, and saying which is
-        // the whole value of the complaint.
-        self.width_faults = groups
-            .iter()
-            .flat_map(|group| {
-                group
-                    .pins()
-                    .filter(|pin| declared(pin).is_some_and(|width| width != group.width))
+        // Which pins disagree with the pins they are wired to. Worked out
+        // here because here is where both facts are known at once, and
+        // recorded per *pin* rather than per net: the net is fine — one
+        // thing attached to it is wrong about how wide it is, and saying
+        // which is the whole value of the complaint.
+        //
+        // **At the same offset**, which is what "joined by wire" comes to
+        // once offsets exist: a conductor carries the same bits to both
+        // ends, so two pins sharing a bit position cannot be two widths. A
+        // splitter's branch sits at an offset of its own and is narrower on
+        // purpose, which is exactly the case the old rule could not tell
+        // apart from a mistake.
+        let mut plain = plain;
+        let mut wired: HashMap<Node, Vec<(ComponentId, usize)>> = HashMap::new();
+        for node in plain.keys().copied().collect::<Vec<_>>() {
+            if let Node::Pin(component, index) = node {
+                let (root, _) = find(&mut plain, node);
+                wired.entry(root).or_default().push((component, index));
+            }
+        }
+        self.width_faults = wired
+            .into_values()
+            .flat_map(|pins| {
+                let widest = pins.iter().filter_map(declared).max();
+                pins.into_iter()
+                    // The narrower one is named, as it always was: the wider
+                    // decides what the conductor carries.
+                    .filter(move |pin| declared(pin).is_some_and(|width| Some(width) != widest))
             })
             .collect();
 

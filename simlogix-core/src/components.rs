@@ -11,7 +11,6 @@ pub mod or;
 pub mod port;
 pub mod probe;
 pub mod rail;
-pub mod splitter;
 pub mod sr_latch;
 pub mod transistor;
 pub mod tri_state_buffer;

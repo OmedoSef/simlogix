@@ -228,19 +228,20 @@ impl Component for CircuitOutput {
 /// pin is only ever a member of an inner net, so unioning this pin with that
 /// net is the whole connection — and an input port that stayed alive would
 /// fight whatever the parent drives into it.
-pub struct CircuitAnchor {
-    pins: usize,
-}
-
-impl CircuitAnchor {
-    pub fn new(pins: usize) -> Self {
-        Self { pins }
-    }
-}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CircuitAnchor;
 
 impl Component for CircuitAnchor {
+    /// **Nothing at all**, not even `HighZ`.
+    ///
+    /// `HighZ` reads as "deliberately not driving", which is true, but it
+    /// is still a *contribution* — and a contribution has a width. One bit
+    /// of it against a pin occupying four faults the net on every bit,
+    /// which is what a splitter's own pins would have done to the bus they
+    /// are supposed to be part of. An anchor is not a driver; the honest
+    /// way to say so is to hand back no signal.
     fn eval(&self, _inputs: &[Signal]) -> Vec<Signal> {
-        scalar_eval(_inputs, |_inputs| vec![Level::HighZ; self.pins])
+        Vec::new()
     }
 }
 
@@ -376,16 +377,18 @@ mod tests {
 
     #[test]
     fn an_anchor_contributes_nothing_to_any_of_its_pins() {
-        // Every pin is `InOut`, so the engine writes a value back to each;
-        // all of them have to be `HighZ` or the instance would drive its own
-        // ports.
-        assert_eq!(
-            eval_levels(
-                &CircuitAnchor::new(3),
-                &[Level::High, Level::Low, Level::Unknown]
-            ),
-            vec![Level::HighZ; 3]
-        );
+        // Nothing at all, not `HighZ` on each. `HighZ` says "deliberately
+        // not driving", which is true, but it is still a contribution — and
+        // a contribution has a width. One bit of it against a pin occupying
+        // four faults the net on every bit, which is what a splitter's own
+        // pins would do to the bus they are part of.
+        assert!(CircuitAnchor
+            .eval(&[
+                Signal::bit(Level::High),
+                Signal::bit(Level::Low),
+                Signal::bit(Level::Unknown),
+            ])
+            .is_empty());
     }
 
     #[test]
