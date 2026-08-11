@@ -599,12 +599,12 @@ impl SimLogixApp {
             // the ports — is declared a member. One rule instead of two, and
             // it still holds when a net has no pins to link together.
             for (group, members) in inner_groups.iter().enumerate() {
-                for &(component, pin) in members {
+                for &((component, pin), offset) in members {
                     union(
                         &mut parent,
                         Node::Inner(placed.id(), group),
                         Node::Pin(component, pin),
-                        0,
+                        offset,
                     );
                 }
             }

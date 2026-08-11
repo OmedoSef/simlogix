@@ -2723,3 +2723,108 @@ fn a_t_flip_flop_always_has_a_way_in() {
     let id = app.place(ComponentKind::DFlipFlop, egui::pos2(400.0, 80.0));
     assert_eq!(app.circuit.pins(id).len(), 4);
 }
+
+#[test]
+fn a_counter_placed_from_the_palette_counts() {
+    let mut app = SimLogixApp::default();
+    let clock = app.place(ComponentKind::InputPort, egui::pos2(40.0, 40.0));
+    let clear = app.place(ComponentKind::InputPort, egui::pos2(40.0, 120.0));
+    let counter = app.place(ComponentKind::Counter, egui::pos2(240.0, 80.0));
+    assert_eq!(
+        app.circuit.pins(counter).len(),
+        4,
+        "clock, CLR, Q and RCO with nothing asked for"
+    );
+
+    for (from, to) in [((clock, 0), (counter, 0)), ((clear, 0), (counter, 1))] {
+        app.add_wire(
+            WireEndpoint::Pin(from.0, from.1),
+            WireEndpoint::Pin(to.0, to.1),
+            Vec::new(),
+        );
+    }
+    widen(&mut app, &[counter], 3);
+
+    let q = app.circuit.pins(counter)[2].net;
+    assert_eq!(app.circuit.net_width(q), 3, "Q carries the width");
+
+    // It has no data path, so it holds nothing until the clear puts a
+    // definite value in — the same reason a T flip-flop's inputs are not
+    // optional.
+    drive(&mut app, clock, 0);
+    drive(&mut app, clear, 1);
+    app.advance_circuit(SETTLE_TICKS);
+    drive(&mut app, clear, 0);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(
+        app.circuit.signal_at(q).levels(),
+        [Level::Low; 3],
+        "cleared"
+    );
+
+    let pulse = |app: &mut SimLogixApp| {
+        for level in [1, 0] {
+            drive(app, clock, level);
+            app.advance_circuit(SETTLE_TICKS);
+        }
+    };
+    for expected in [1u64, 2, 3, 4, 5, 6, 7, 0] {
+        pulse(&mut app);
+        let levels = app.circuit.signal_at(q).levels().to_vec();
+        let value: u64 = levels
+            .iter()
+            .enumerate()
+            .map(|(bit, level)| u64::from(*level == Level::High) << bit)
+            .sum();
+        assert_eq!(value, expected, "every bit at once, and it wraps");
+    }
+}
+
+#[test]
+fn asking_a_counter_for_its_optional_pins_grows_it() {
+    let mut app = SimLogixApp::default();
+    let at = egui::pos2(240.0, 80.0);
+    let id = app.place(ComponentKind::Counter, at);
+    assert_eq!(app.circuit.pins(id).len(), 4);
+
+    let mut edited = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == id)
+        .expect("placed")
+        .properties()
+        .clone();
+    edited.width = Some(4);
+    edited.counter_pins = Some(simlogix_core::CounterPins {
+        enable: true,
+        load: true,
+        direction: true,
+    });
+    app.set_component_properties(id, edited);
+
+    let placed = app
+        .placed
+        .iter()
+        .find(|placed| placed.center() == at)
+        .expect("still there");
+    assert_eq!(
+        app.circuit.pins(placed.id()).len(),
+        8,
+        "CLK, CLR, EN, LD, D, UP, Q and RCO"
+    );
+    // Only the data and the count are wide: a control that widened with them
+    // would be a promise the component does not keep.
+    assert_eq!(
+        (0..8).map(|i| placed.pin_width(i)).collect::<Vec<_>>(),
+        vec![
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(1),
+            Some(4),
+            Some(1),
+            Some(4),
+            Some(1)
+        ],
+    );
+}

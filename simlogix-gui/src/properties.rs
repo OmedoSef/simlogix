@@ -13,7 +13,7 @@
 use egui::{Response, RichText, Ui};
 use serde::{Deserialize, Serialize};
 
-use simlogix_core::{all_ones, PortDrive, PortSetting};
+use simlogix_core::{all_ones, CounterPins, PortDrive, PortSetting};
 
 use crate::appearance::{Appearance, Facing, PinSlot, Shape, TextAlign};
 use crate::canvas;
@@ -130,6 +130,15 @@ pub struct Properties {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub async_set_reset: Option<bool>,
 
+    /// `Counter` only — which optional pins it was given. Unset means none
+    /// of them: a bare clock, `CLR`, `Q` and `RCO`, which is the smallest
+    /// counter that can work.
+    ///
+    /// Held in Core's own type rather than mirrored here, for the reason
+    /// `PortSetting` is: a copy of a setting is a copy free to drift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counter_pins: Option<CounterPins>,
+
     /// Which base this component shows its value in.
     ///
     /// Unset follows the setting, which itself defaults to `Auto` — so "I
@@ -175,6 +184,12 @@ impl Properties {
     /// How many bits this component's pins carry. One unless it says wider.
     pub fn width(&self) -> usize {
         self.width.unwrap_or(1).max(1)
+    }
+
+    /// Which optional pins a counter was given. None of them unless it says
+    /// otherwise, which is the smallest counter that can work.
+    pub fn counter_pins(&self) -> CounterPins {
+        self.counter_pins.unwrap_or_default()
     }
 
     /// Whether this component has asynchronous set and reset pins.
@@ -282,6 +297,10 @@ impl Properties {
                 | ComponentKind::DLatch
                 | ComponentKind::TFlipFlop
                 | ComponentKind::TFlipFlopFalling
+                // `Q` and `D`; the clock, the clear and the controls stay
+                // one bit, which `pin_width` says.
+                | ComponentKind::Counter
+                | ComponentKind::CounterFalling
         )
     }
 
@@ -313,7 +332,7 @@ impl Properties {
 /// one with a switch, the symbol is already drawn from the kind, and a saved
 /// `simlogix:PTransistor` says more than a `Transistor` with a flag beside
 /// it. All the panel adds is the ability to change your mind after placing.
-const VARIANTS: [[ComponentKind; 2]; 4] = [
+const VARIANTS: [[ComponentKind; 2]; 5] = [
     [ComponentKind::NTransistor, ComponentKind::PTransistor],
     [
         ComponentKind::BusTransceiver,
@@ -321,6 +340,7 @@ const VARIANTS: [[ComponentKind; 2]; 4] = [
     ],
     [ComponentKind::DFlipFlop, ComponentKind::DFlipFlopFalling],
     [ComponentKind::TFlipFlop, ComponentKind::TFlipFlopFalling],
+    [ComponentKind::Counter, ComponentKind::CounterFalling],
 ];
 
 /// Bounds on a label's size: small enough to annotate, large enough to
@@ -993,6 +1013,25 @@ pub fn show(
         // only reads, so it has neither a resting value nor a say in how
         // many states the interface has — but it does have a width, which
         // is offered to all three below rather than here.
+        ComponentKind::Counter | ComponentKind::CounterFalling => {
+            ui.add_space(8.0);
+            ui.label(strings.property_counter_pins);
+            let mut pins = properties.counter_pins();
+            let mut changed = false;
+            for (on, label) in [
+                (&mut pins.enable, strings.property_counter_enable),
+                (&mut pins.load, strings.property_counter_load),
+                (&mut pins.direction, strings.property_counter_direction),
+            ] {
+                changed |= ui.checkbox(on, label).changed();
+            }
+            if changed {
+                edit_started = true;
+                // Absent means none of them, so a counter with nothing asked
+                // for is written exactly as one drawn before this existed.
+                properties.counter_pins = (pins != CounterPins::default()).then_some(pins);
+            }
+        }
         // Deliberately not the T flip-flop: there the pins are not a choice,
         // so a checkbox there could only ever say what it already says.
         ComponentKind::DFlipFlop | ComponentKind::DFlipFlopFalling | ComponentKind::DLatch => {
@@ -1335,6 +1374,11 @@ mod tests {
             initial: Some(PortSetting::High),
             width: Some(8),
             async_set_reset: Some(true),
+            counter_pins: Some(CounterPins {
+                enable: true,
+                load: false,
+                direction: true,
+            }),
             base: Some(NumberBase::Binary),
             branches: Some(vec![4, 4]),
             value: Some(0xAB),
@@ -1350,7 +1394,7 @@ mod tests {
         // asserting: `PortLevel` became `PortSetting` on the strength of it.
         assert_eq!(
             json,
-            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"async_set_reset":true,"base":"Binary","branches":[4,4],"value":171}"#
+            r#"{"name":"clk","pressed":true,"color":[1,2,3],"tri_state":true,"initial":"High","width":8,"async_set_reset":true,"counter_pins":{"enable":true,"direction":true},"base":"Binary","branches":[4,4],"value":171}"#
         );
     }
 

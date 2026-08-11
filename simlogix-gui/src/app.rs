@@ -14,8 +14,9 @@ use std::path::PathBuf;
 
 use simlogix_core::{
     And, Buffer, BusTransceiver, Button, Circuit, CircuitAnchor, CircuitOutput, CircuitPort, Clock,
-    Component, ComponentId, DFlipFlop, DLatch, Led, Nand, NetId, Nor, Not, Or, Pin, PinDirection,
-    PortDrive, Probe, Rail, SrLatch, TFlipFlop, Transistor, TriStateBuffer, Xnor, Xor,
+    Component, ComponentId, Counter, DFlipFlop, DLatch, Led, Nand, NetId, Nor, Not, Or, Pin,
+    PinDirection, PortDrive, Probe, Rail, SrLatch, TFlipFlop, Transistor, TriStateBuffer, Xnor,
+    Xor,
 };
 
 use crate::appearance::Appearance;
@@ -23,7 +24,7 @@ use crate::canvas;
 use crate::circuit_tree::{self, RenameTarget, TreeAction};
 use crate::i18n::{Language, Strings};
 use crate::palette::{self, ComponentKind};
-use crate::placed_component::{InstancePort, InstanceWiring, PlacedComponent};
+use crate::placed_component::{InnerMember, InstancePort, InstanceWiring, PlacedComponent};
 use crate::project::{self, SavedCircuit, SavedComponent, SavedEndpoint, SavedProject, SavedWire};
 use crate::properties::{self, Properties};
 use crate::toolbar::{self, Tool};
@@ -1055,6 +1056,31 @@ impl SimLogixApp {
                 );
                 PlacedComponent::sr_latch(id, center)
             }
+            ComponentKind::Counter | ComponentKind::CounterFalling => {
+                // Its pin count is one of its properties, so it goes through
+                // `place_with` for the reason a splitter does.
+                let counter_pins = properties.counter_pins();
+                let ports = crate::placed_component::counter_ports(counter_pins, 1);
+                let outputs = 2;
+                let pins: Vec<Pin> = (0..ports.len())
+                    .map(|index| Pin {
+                        direction: if index + outputs < ports.len() {
+                            PinDirection::Input
+                        } else {
+                            PinDirection::Output
+                        },
+                        net: self.circuit.add_net(),
+                    })
+                    .collect();
+                let component: Box<dyn Component> = if kind == ComponentKind::Counter {
+                    Box::new(Counter::rising(counter_pins))
+                } else {
+                    Box::new(Counter::falling(counter_pins))
+                };
+                let id = self.circuit.add_component(component, pins);
+                self.circuit.schedule_now(id);
+                PlacedComponent::counter(id, center, kind, counter_pins)
+            }
             ComponentKind::DFlipFlop
             | ComponentKind::DFlipFlopFalling
             | ComponentKind::DLatch
@@ -1683,7 +1709,7 @@ impl SimLogixApp {
         // The declared widths go up with it, and for the same reason: the
         // only record of how wide an inner pin is lives in the entry about
         // to be dropped, and `rebuild_nets` has no other way to ask.
-        let mut nested: Vec<Vec<(ComponentId, usize)>> = Vec::new();
+        let mut nested: Vec<Vec<InnerMember>> = Vec::new();
         let mut inner_widths: Vec<((ComponentId, usize), Option<usize>)> = Vec::new();
         for placed in &self.placed[first_inner..] {
             for index in 0..self.circuit.try_pins(placed.id()).map_or(0, <[_]>::len) {
@@ -1696,7 +1722,9 @@ impl SimLogixApp {
             let mut folded = groups.to_vec();
             for (index, port) in ports.iter().enumerate() {
                 if let Some(group) = port.group.and_then(|g| folded.get_mut(g)) {
-                    group.push((placed.id(), index));
+                    // Whole conductor: a sub-circuit's port occupies
+                    // all of its net, which is what a wire means.
+                    group.push(((placed.id(), index), 0));
                 }
             }
             nested.extend(folded);
@@ -1705,10 +1733,12 @@ impl SimLogixApp {
         self.placed.truncate(first_inner);
         self.flattening.pop();
 
-        let live = |group: &Vec<(usize, usize)>| -> Vec<(ComponentId, usize)> {
+        let live = |group: &Vec<(usize, usize)>| -> Vec<InnerMember> {
             group
                 .iter()
-                .filter_map(|&(component, pin)| Some((ids.get(component).copied().flatten()?, pin)))
+                .filter_map(|&(component, pin)| {
+                    Some(((ids.get(component).copied().flatten()?, pin), 0))
+                })
                 .collect()
         };
         let groups = saved.pin_groups();
@@ -1723,7 +1753,7 @@ impl SimLogixApp {
         // ports to each other.
         // Ours first, so a port's `group` index still lands on the right
         // one; anything carried up from a nested instance is appended after.
-        let mut inner_groups: Vec<Vec<(ComponentId, usize)>> = groups.iter().map(live).collect();
+        let mut inner_groups: Vec<Vec<InnerMember>> = groups.iter().map(live).collect();
         inner_groups.extend(nested);
         Some(InstanceWiring {
             ports: ports.into_iter().map(|(_, port)| port).collect(),
@@ -2070,6 +2100,12 @@ impl SimLogixApp {
                             | ComponentKind::TFlipFlopFalling
                     ) && placed.properties().async_set_reset(&kind)
                         != edited.async_set_reset(&kind))
+                    // A counter's optional pins likewise change how many it
+                    // has, which a built component cannot grow.
+                    || (matches!(
+                        kind,
+                        ComponentKind::Counter | ComponentKind::CounterFalling
+                    ) && placed.properties().counter_pins() != edited.counter_pins())
             });
         if rebuild {
             let properties = edited.clone();

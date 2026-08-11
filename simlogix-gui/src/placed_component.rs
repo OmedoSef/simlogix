@@ -5,7 +5,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Ui, Vec2};
-use simlogix_core::{Circuit, ComponentId, Level, NetId, PortDrive, PortHandles, Signal};
+use simlogix_core::{
+    Circuit, ComponentId, CounterPins, Level, NetId, PortDrive, PortHandles, Signal,
+};
 
 use crate::appearance::Appearance;
 use crate::canvas::{self, Rotation, BOX_SIZE, GRID_SPACING};
@@ -27,12 +29,22 @@ use crate::symbol::{self, SymbolState};
 #[derive(Default)]
 pub struct InstanceWiring {
     pub ports: Vec<InstancePort>,
-    pub inner_groups: Vec<Vec<(ComponentId, usize)>>,
+    pub inner_groups: Vec<Vec<InnerMember>>,
     pub inner_widths: Vec<((ComponentId, usize), Option<usize>)>,
 }
 
+/// One pin on an instance's internal net, and where its bit zero sits on
+/// that net.
+///
+/// The offset is zero for everything a sub-circuit contains: a port occupies
+/// the whole conductor, which is what a wire means. It is there for what is
+/// *built* rather than drawn — a ripple counter's stage `i` drives bit `i`
+/// of one bus — and the union-find has carried offsets since the splitter
+/// work, so nothing new had to be invented to read it.
+pub type InnerMember = ((ComponentId, usize), isize);
+
 /// The pair the net rebuild reads back off an instance.
-pub type InstanceWiringRef<'a> = (&'a [InstancePort], &'a [Vec<(ComponentId, usize)>]);
+pub type InstanceWiringRef<'a> = (&'a [InstancePort], &'a [Vec<InnerMember>]);
 
 /// One pin an instance exposes, and where it lands inside the flattened
 /// sub-circuit.
@@ -212,7 +224,7 @@ enum Shape {
         /// The referenced circuit's own connectivity, which the net rebuild
         /// has to re-apply — it derives everything else from the *open*
         /// drawing, and these wires aren't in it.
-        inner_groups: Vec<Vec<(ComponentId, usize)>>,
+        inner_groups: Vec<Vec<InnerMember>>,
         /// What each of the innards' pins declares, since they are not in
         /// the drawing for `rebuild_nets` to ask.
         inner_widths: Vec<((ComponentId, usize), Option<usize>)>,
@@ -255,6 +267,15 @@ enum Shape {
     /// (`Q`, `Q̄`) — the first component with more than one output, which is
     /// why it doesn't fit `TwoInputGate`.
     SrLatch,
+    /// A synchronous counter. `pins` says which optional ones it was given,
+    /// which is what decides how many it has — its ports and its box are
+    /// worked out from that and from the width, never stored: the width can
+    /// change without the document being rebuilt, so a stored copy would go
+    /// stale exactly when it mattered.
+    Counter {
+        kind: ComponentKind,
+        pins: CounterPins,
+    },
     /// A D flip-flop or a D latch: one data pin, one control pin, `Q` and
     /// `Q̄`. `async_inputs` says whether it was given `S` and `R`, which is
     /// what decides between four pins and six — a fact the engine cannot
@@ -263,6 +284,45 @@ enum Shape {
         kind: ComponentKind,
         async_inputs: bool,
     },
+}
+
+/// A counter's pins as ports on a box: the clock and `CLR` always, then
+/// whichever options it was given, then `Q` and `RCO`.
+///
+/// The order is the engine's pin order, since the box lays its pins out in
+/// port order and the two have to be the same list. The widths are here
+/// rather than in a second table for the same reason.
+pub fn counter_ports(pins: CounterPins, width: usize) -> Vec<InstancePort> {
+    let mut ports = Vec::new();
+    let mut input = |name: &str, width: usize| {
+        ports.push(InstancePort {
+            name: name.to_string(),
+            width,
+            kind: ComponentKind::InputPort,
+            group: None,
+        });
+    };
+    input("CLK", 1);
+    input("CLR", 1);
+    if pins.enable {
+        input("EN", 1);
+    }
+    if pins.load {
+        input("LD", 1);
+        input("D", width);
+    }
+    if pins.direction {
+        input("UP", 1);
+    }
+    for (name, width) in [("Q", width), ("RCO", 1)] {
+        ports.push(InstancePort {
+            name: name.to_string(),
+            width,
+            kind: ComponentKind::OutputPort,
+            group: None,
+        });
+    }
+    ports
 }
 
 impl PlacedComponent {
@@ -316,6 +376,10 @@ impl PlacedComponent {
 
     pub fn sr_latch(id: ComponentId, center: Pos2) -> Self {
         Self::new(id, center, Shape::SrLatch)
+    }
+
+    pub fn counter(id: ComponentId, center: Pos2, kind: ComponentKind, pins: CounterPins) -> Self {
+        Self::new(id, center, Shape::Counter { kind, pins })
     }
 
     pub fn storage(id: ComponentId, center: Pos2, kind: ComponentKind, async_inputs: bool) -> Self {
@@ -418,6 +482,15 @@ impl PlacedComponent {
             // A symbol you drew decides its own extent; the generated box
             // reports exactly what it always did.
             return appearance.rect(
+                self.center,
+                symbol::Orientation::new(self.rotation, self.mirrored),
+            );
+        }
+        if let Shape::Counter { pins, .. } = &self.shape {
+            // Same box a sub-circuit instance gets, and for the same reason:
+            // named pins on a rectangle that grows with how many there are,
+            // already laid out on the grid.
+            return Appearance::generated(&counter_ports(*pins, self.properties.width())).rect(
                 self.center,
                 symbol::Orientation::new(self.rotation, self.mirrored),
             );
@@ -527,6 +600,13 @@ impl PlacedComponent {
             // `D` at 0 and the two outputs widen; the clock at 1 and the
             // asynchronous inputs at 2 and 3 are one wire each, the way a
             // tri-state buffer's enable is.
+            // Read off the ports it lays out, so the pin the engine sees and
+            // the pin the box draws cannot come to disagree about a width.
+            Shape::Counter { pins, .. } => Some(
+                counter_ports(*pins, declared)
+                    .get(index)
+                    .map_or(1, |port| port.width),
+            ),
             Shape::Storage { async_inputs, .. } => Some(match index {
                 1 => 1,
                 2 | 3 if *async_inputs => 1,
@@ -622,6 +702,7 @@ impl PlacedComponent {
             Shape::Clock => ComponentKind::Clock,
             Shape::SrLatch => ComponentKind::SrLatch,
             Shape::Storage { kind, .. } => kind.clone(),
+            Shape::Counter { kind, .. } => kind.clone(),
         }
     }
 
@@ -1060,6 +1141,52 @@ impl PlacedComponent {
                     toggled: false,
                     dragged_by: applied_drag(&response),
                     pins: vec![pin],
+                }
+            }
+            Shape::Counter { pins, .. } => {
+                let ports = counter_ports(*pins, properties.width());
+                let appearance = Appearance::generated(&ports);
+                let rect = appearance.rect(*center, orientation);
+                let names: Vec<&str> = ports.iter().map(|port| port.name.as_str()).collect();
+                let pin_positions = appearance.draw(
+                    painter,
+                    *center,
+                    orientation,
+                    symbol_color,
+                    &names,
+                    &text_layer,
+                );
+                if is_selected {
+                    canvas::draw_selection_outline(painter, rect, dark_mode);
+                }
+
+                let response = interact_box(ui, painter, rect, rect_id, center, movable);
+
+                let circuit_pins = circuit.pins(id);
+                let pins = pin_positions
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, at)| {
+                        Some(pin_handle(
+                            ui,
+                            painter,
+                            id,
+                            index,
+                            *at,
+                            circuit_pins.get(index)?.net,
+                            movable,
+                        ))
+                    })
+                    .collect();
+
+                FrameResult {
+                    clicked: response.clicked().then_some(id),
+                    grab_started: response.drag_started(),
+                    settled: response.drag_stopped(),
+                    input_changed,
+                    toggled: false,
+                    dragged_by: applied_drag(&response),
+                    pins,
                 }
             }
             Shape::Storage { async_inputs, .. } => {

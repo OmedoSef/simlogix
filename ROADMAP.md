@@ -41,6 +41,13 @@ no pin of its own, its branches *are* parts of its bus, and a value crossing
 one costs nothing because there is nothing in between. What is left of that
 is the entry on bit mapping below.
 
+And **sequential logic**: a D latch, a D flip-flop and a T flip-flop, each
+rising- or falling-edge and each a register when it is wider than a bit, plus
+a synchronous counter with load, enable, direction and carry out. The
+flip-flops sample what their data pin held *before* the edge — a setup time,
+and what keeps a chain of them on one clock from shifting a value down all of
+it at once.
+
 So the list below is no longer "finishing v1". It's what would make SimLogix
 better at the thing it's for.
 
@@ -259,6 +266,43 @@ better at the thing it's for.
   `Signal` and the engine, so their cost grows with everything stacked on
   top, while this one only waits.
 
+- [ ] **Moving a component that shows a readout** — the ports, the probe and
+  the constant. Romain reported it after using the multibit work; the exact
+  symptom still has to be pinned down, so the first job is reproducing it and
+  saying what "wrong" is.
+
+  Two things about those kinds are unusual and are where I would look first,
+  in this order:
+
+  - **Their box is sized from what they display.** `PlacedComponent.readout`
+    is refreshed every frame from the width and the base — never stored — so
+    `rect()` can change size between one frame and the next, while a drag
+    holds a grab anchor from an earlier one. Every other component's box is a
+    fixed `BOX_SIZE`.
+  - **They keep their body upright** (`symbol::keeps_upright`), so their box
+    is deliberately *not* rotated where every other component's is. That
+    rule was added when a quarter turn left a wide readout lying across a
+    tall narrow box, and a drag reads the box.
+
+  Both are recent and neither is covered by a test that moves one of these
+  specifically — the group-drag test uses plain components.
+
+- [ ] **A drawing fault in the palette's symbols.** Reported by Romain, again
+  without a symptom yet, so the same first step: reproduce, then say what is
+  wrong before changing anything.
+
+  What is worth suspecting, because it is what the palette does differently:
+  an icon is drawn into a rect **smaller than a component box**, and the
+  lengths a symbol uses have to cope with that. `symbol::fixed(width,
+  fraction, at_most)` exists precisely for it — a length proportional below
+  an ordinary box and capped above — and it was introduced when fixed lengths
+  swallowed the icons whole. Any symbol using a raw constant where it should
+  use `fixed` looks right on the canvas and wrong in the palette, which is
+  exactly the shape of a bug nobody notices while drawing it.
+
+  The counter's icon is the newest and is deliberately *not* a small copy of
+  what lands on the canvas, so it is worth ruling in or out first.
+
 - [ ] 🚧 **Libraries: importing another project to place its circuits**
 
   A personal library of gates, reused across projects. The groundwork has
@@ -391,6 +435,13 @@ across projects is a different need with a different answer:
 [importing a circuit from another project](#next), which is worked on when
 that is what's wanted.
 
+**But that argument does not hold for every one of them**, and the T
+flip-flop is where it showed. Drawn — a D flip-flop with `Q` and `T` into an
+XOR into `D` — it costs one extra tick and is otherwise identical. What the
+primitive adds there is one symbol instead of three objects and a wire
+running backwards: legibility, not speed. Worth checking per component
+rather than assuming.
+
 - [ ] Half adder
 - [ ] Adder
 - [ ] Multiplexer
@@ -398,56 +449,83 @@ that is what's wanted.
 - [x] D latch
 - [x] D flip-flop, triggered on the rising or the falling edge
 - [x] T flip-flop
-- [ ] Counter
+- [x] Counter, synchronous
+- [ ] 🚧 Counter, asynchronous (ripple)
 
-**Every one of these wants a width**, now that a wire can carry more than
-one bit: an *n*-bit D flip-flop is a register, which is what a datapath is
-made of, and a counter that counts past one is a counter. The one that
-exists already shows the gap — `SrLatch` takes no width, deliberately,
-because a wide one is a register and what `S` and `R` mean for it is a
-design question rather than a number. That question has to be answered once,
-here, rather than per component: which pins carry the data and which stay
-one bit whatever it is. `PlacedComponent::pin_width` is where the answer
-goes, and it already says exactly that for the transceiver.
+### The ripple counter, and why it is composed rather than written
+
+**It cannot honestly be a primitive.** The only difference between a ripple
+counter and a synchronous one is *time*: its bits settle one after another,
+so a transition shows real intermediate values (3 → 2 → 0 → 4) and its
+maximum frequency falls with the number of stages. A `Component` has one
+propagation delay and returns every output at once, so a "ripple counter"
+written that way would be indistinguishable from the synchronous one — a
+label that lies rather than an approximation.
+
+So it is **built** at place time out of real T flip-flops, the way a
+sub-circuit is flattened: one palette entry and one symbol for the user, N
+genuine flip-flops in the engine, and the skew is real because the
+flip-flops are. This is the one component where the drawn form is *better*
+than a written primitive, and the composition is how it stays that way.
+
+**The enabling change is done**: an instance's internal wiring carries a bit
+offset (`InnerMember`), so a stage can drive one bit of a shared bus. The
+union-find has carried offsets since the splitter work; they simply did not
+reach an instance's innards. Everything is at zero today — a sub-circuit's
+port occupies its whole conductor — so nothing changed behaviour.
+
+What is left:
+
+1. `Shape::RippleCounter` carrying its wiring, reported by `instance_wiring`
+   alongside a real instance's.
+2. The construction: a `CircuitAnchor` with `CLK`, `CLR` and `Q`, N
+   falling-edge T flip-flops, a power rail for every `T` and a ground rail
+   for every `S`; then the groups — the clock on stage 0, each `Q` onto the
+   next stage's clock, `CLR` onto every `R`, and **stage *i*'s `Q` at bit
+   *i*** of the output bus.
+3. The width becomes the number of stages, so changing it has to rebuild the
+   document — one more condition beside the synchronous counter's.
+4. Palette, translations, `SAVED_NAMES`, and a test that counts 0→7 **and
+   asserts the transients**, since those are the only thing distinguishing it
+   from the counter that already exists.
+
+Its pins are deliberately fewer — clock, `CLR`, `Q` — and the real parts
+agree: a 74x93 has a clock and a clear where a 74x161 has load, enable and
+carry. A ripple counter *with* load is not a ripple counter, because its
+load path is synchronous.
+
+### What the built ones settled, for the ones still to come
+
+**A component that can only transform its own state needs a way in, and that
+way in cannot be a setting.** The T flip-flop showed it and the counter
+repeated it: both start holding nothing, and `Unknown` toggled — or
+incremented — is still `Unknown`, for ever. So a T flip-flop's asynchronous
+inputs are not optional and a counter's `CLR` is not optional, where a D
+flip-flop's are, because `D` puts a value in.
+
+**A variant is a `ComponentKind`, not a stored flag**, when the symbol has to
+follow — a falling-edge clock carries a bubble, and that mark is what tells
+two apart on a printed schematic. Two palette entries, one component, and a
+selector in the properties panel. Settled for the transistor's channel, the
+transceiver's polarity, and now all three flip-flops and the counter.
+
+**A pin count that depends on a property goes through the document.** A built
+component's pins are fixed, so asking a flip-flop for `S`/`R`, or a counter
+for `EN`/`LD`/`UP`, rewrites the saved form and reopens — the route a
+splitter's branch count already takes.
 
 The **multiplexer** and **demultiplexer** carry a question of their own:
 how many ways. A selector of *n* bits picks between 2ⁿ, so either the
 width is a property and the symbol grows pins with it, or each width is
-its own entry in the palette.
-Worth settling when they are built rather than now. They wanted
-[multi-bit buses](#next) first — a mux is the component that changes most
-if a wire can carry more than one bit — and that is no longer a reason to
-wait.
+its own entry in the palette. Worth settling when they are built rather than
+now. `Appearance::generated` is the answer to the drawing half — the
+synchronous counter uses it for its own eight named pins, which is the same
+shape of problem.
 
-The flip-flop's edge is a **variant**, and the shape of that answer is
-already settled: it lives in the `ComponentKind`, as the transistor's
-channel and the transceiver's enable polarity do, with a selector in the
-properties panel. From your side it is a property; it just isn't *stored*
-as one, because the symbol has to follow — a falling-edge clock input
-carries a bubble, and that mark is what tells the two apart on a printed
-schematic. Two palette entries, one component.
-
-The counter's **number** needs saying which number before it is built:
-how many bits it counts *in*, or the value it counts *to* — a 4-bit
-counter and a modulo-10 counter are different components, and a divider
-wants the second. It also wants [multi-bit buses](#next) first, or its
-output is one pin per bit.
-
-It carries **two** synchronous-or-not settings, which is what a real part
-names too — they are independent and mean different things:
-
-- the **counter**: every stage on one clock, against a ripple counter where
-  each stage clocks the next. Invisible at rest; it shows only at a
-  transition, as the stages settle one after another. This engine can model
-  that honestly, since every component already carries a delay — one of the
-  few places the discrete-event model would be visible on screen rather than
-  only correct.
-- the **reset**: taken at the next edge, or the moment it is asserted.
-
-Which of the two is a *variant* rather than a stored property is the same
-question the flip-flop's edge answers, and probably gets the same answer for
-the reset — an asynchronous clear is drawn differently — while the counter's
-own kind may be better as two palette entries outright.
+The **adder** is where the one-step argument is strongest of all: a 32-bit
+ripple-carry adder drawn from gates settles in 32 ticks, a primitive in one.
+The half adder is a different case — two gates, no carry chain — so it earns
+its place by legibility rather than by speed, if at all.
 
 ## Internal
 

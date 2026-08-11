@@ -343,6 +343,9 @@ pub fn draw(
             draw_splitter(painter, rect, orientation, stroke, color, state, text_layer)
         }
         ComponentKind::SrLatch => draw_sr_latch(painter, rect, orientation, stroke, text_layer),
+        ComponentKind::Counter | ComponentKind::CounterFalling => {
+            draw_counter_icon(painter, rect, orientation, stroke)
+        }
         ComponentKind::DFlipFlop
         | ComponentKind::DFlipFlopFalling
         | ComponentKind::DLatch
@@ -956,6 +959,74 @@ fn draw_port(
 /// Both outputs are lettered `Q`, and the **bubble** on the lower one is
 /// what says which is the complement — a mark rather than a glyph, so
 /// nothing has to be in a font for it to appear.
+/// The palette's counter: a box with a clock triangle and a rising
+/// staircase, which is what a counter does.
+///
+/// On the canvas a counter draws the same labelled box a sub-circuit
+/// instance gets, since it has up to eight named pins and no shape of its
+/// own would say which is which. That box is too big and too wordy to be an
+/// icon, so this is a picture of one rather than a small copy — the one
+/// place in this file where the two deliberately differ.
+fn draw_counter_icon(
+    painter: &Painter,
+    rect: Rect,
+    orientation: Orientation,
+    stroke: Stroke,
+) -> PinPositions {
+    let c = rect.center();
+    let r = |p: Pos2| orientation.place(p, c);
+    let inset = rect.width() * 0.2;
+    let body = Rect::from_min_max(
+        pos2(rect.left() + inset, rect.top()),
+        pos2(rect.right() - inset, rect.bottom()),
+    );
+    let corners = [
+        pos2(body.left(), body.top()),
+        pos2(body.right(), body.top()),
+        pos2(body.right(), body.bottom()),
+        pos2(body.left(), body.bottom()),
+        pos2(body.left(), body.top()),
+    ];
+    painter.line(corners.into_iter().map(r).collect(), stroke);
+
+    // The clock triangle, the mark that says edge-triggered.
+    let tip = fixed(rect.width(), 0.075, 6.0);
+    let middle = body.bottom() - tip;
+    painter.line(
+        [
+            pos2(body.left(), middle - tip),
+            pos2(body.left() + tip * 1.4, middle),
+            pos2(body.left(), middle + tip),
+        ]
+        .into_iter()
+        .map(r)
+        .collect(),
+        stroke,
+    );
+
+    // Three steps up, drawn rather than written so no font is involved.
+    let step = fixed(rect.width(), 0.07, 5.5);
+    let start = pos2(body.left() + step * 1.6, body.bottom() - step);
+    let mut staircase = vec![start];
+    for index in 0..3 {
+        let x = start.x + step * (index as f32 * 2.0 + 1.0);
+        let y = start.y - step * (index as f32 + 1.0);
+        staircase.push(pos2(x - step, y));
+        staircase.push(pos2(x + step, y));
+    }
+    painter.line(staircase.into_iter().map(r).collect(), stroke);
+
+    let input = pos2(rect.left(), rect.bottom());
+    let output = pos2(rect.right(), rect.top());
+    for pin in [input, output] {
+        draw_pin(painter, r(pin), stroke.color);
+    }
+    PinPositions {
+        inputs: vec![r(input)],
+        outputs: vec![r(output)],
+    }
+}
+
 /// A D flip-flop or a D latch: the same body as [`draw_sr_latch`], the
 /// control pin on its lower left, and — when it was given them — an
 /// asynchronous set on the top edge and a reset on the bottom.

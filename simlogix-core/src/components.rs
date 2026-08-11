@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod bus_transceiver;
 pub mod button;
 pub mod clock;
+pub mod counter;
 pub mod d_flip_flop;
 pub mod d_latch;
 pub mod led;

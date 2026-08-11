@@ -15,6 +15,7 @@ pub use components::buffer::Buffer;
 pub use components::bus_transceiver::BusTransceiver;
 pub use components::button::Button;
 pub use components::clock::Clock;
+pub use components::counter::{Counter, CounterPins};
 pub use components::d_flip_flop::DFlipFlop;
 pub use components::d_latch::DLatch;
 pub use components::led::Led;

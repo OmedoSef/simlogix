@@ -59,6 +59,8 @@ pub enum ComponentKind {
     DLatch,
     TFlipFlop,
     TFlipFlopFalling,
+    Counter,
+    CounterFalling,
     TriStateBuffer,
     BusTransceiver,
     BusTransceiverOe,
@@ -98,7 +100,7 @@ impl ComponentKind {
     /// One table read in both directions, rather than a match per
     /// direction: a kind added to the writer and forgotten in the reader
     /// would be a project that saves and then won't open.
-    const SAVED_NAMES: [(ComponentKind, &'static str); 32] = [
+    const SAVED_NAMES: [(ComponentKind, &'static str); 34] = [
         (ComponentKind::Button, "Button"),
         (ComponentKind::Led, "Led"),
         (ComponentKind::NTransistor, "NTransistor"),
@@ -121,6 +123,8 @@ impl ComponentKind {
         (ComponentKind::DLatch, "DLatch"),
         (ComponentKind::TFlipFlop, "TFlipFlop"),
         (ComponentKind::TFlipFlopFalling, "TFlipFlopFalling"),
+        (ComponentKind::Counter, "Counter"),
+        (ComponentKind::CounterFalling, "CounterFalling"),
         (ComponentKind::TriStateBuffer, "TriStateBuffer"),
         (ComponentKind::BusTransceiver, "BusTransceiver"),
         (ComponentKind::BusTransceiverOe, "BusTransceiverOe"),
@@ -268,6 +272,8 @@ pub fn show(ui: &mut Ui, strings: &Strings, active: &Tool) -> Option<Tool> {
                 ComponentKind::DFlipFlopFalling,
                 ComponentKind::TFlipFlop,
                 ComponentKind::TFlipFlopFalling,
+                ComponentKind::Counter,
+                ComponentKind::CounterFalling,
             ],
         ),
         (
