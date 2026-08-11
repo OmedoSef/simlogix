@@ -1381,6 +1381,21 @@ impl Orientation {
         Self { rotation, mirrored }
     }
 
+    /// A rectangle placed the same way, still axis-aligned.
+    ///
+    /// Two opposite corners through [`Orientation::place`] and normalised:
+    /// a quarter turn and a reflection both map an axis-aligned rectangle
+    /// onto another one, so this is exact rather than an approximation.
+    ///
+    /// It matters for a symbol whose drawing is **not centred on its
+    /// origin** — which is what you get the moment a pin has been dragged
+    /// out in the appearance editor. A box that only turned would sit where
+    /// the drawing used to be, and the component could not be clicked at
+    /// all.
+    pub fn place_rect(self, rect: Rect, center: Pos2) -> Rect {
+        Rect::from_two_pos(self.place(rect.min, center), self.place(rect.max, center))
+    }
+
     /// Where `point` ends up, given `center` as the symbol's own origin.
     ///
     /// **Only geometry passes through here.** Text never does: glyphs are

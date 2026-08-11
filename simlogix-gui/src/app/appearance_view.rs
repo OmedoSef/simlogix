@@ -81,7 +81,10 @@ impl SimLogixApp {
             crate::symbol::TextLayer::for_ui(ui).text(
                 egui::pos2(
                     center.x,
-                    appearance.rect(center, canvas::Rotation::Deg0).bottom() + 12.0,
+                    appearance
+                        .rect(center, crate::symbol::Orientation::default())
+                        .bottom()
+                        + 12.0,
                 ),
                 egui::Align2::CENTER_TOP,
                 strings.appearance_no_ports,

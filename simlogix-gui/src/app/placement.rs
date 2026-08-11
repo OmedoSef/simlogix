@@ -34,7 +34,7 @@ impl SimLogixApp {
         let faint = ui.visuals().strong_text_color().gamma_multiply(0.45);
         // Drawn where it will *land*, which for a symbol drawn away from its
         // own origin is not under the pointer.
-        let at = self.drop_origin(kind, at, self.place_rotation);
+        let at = self.drop_origin(kind, at, self.place_rotation, self.place_mirrored);
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
 
         // An instance has no fixed symbol: its box is generated from the
@@ -81,7 +81,12 @@ impl SimLogixApp {
             return;
         };
         self.record_edit();
-        let at = self.drop_origin(&kind, canvas::snap_to_grid(pos), self.place_rotation);
+        let at = self.drop_origin(
+            &kind,
+            canvas::snap_to_grid(pos),
+            self.place_rotation,
+            self.place_mirrored,
+        );
         let id = self.place(kind, at);
         if let Some(placed) = self.placed.iter_mut().find(|placed| placed.id() == id) {
             placed.set_rotation(self.place_rotation);

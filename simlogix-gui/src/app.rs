@@ -1440,7 +1440,7 @@ impl SimLogixApp {
     fn content_rect(&self) -> Option<egui::Rect> {
         if self.view == toolbar::View::Appearance {
             let (_, appearance) = self.active_appearance();
-            return Some(appearance.rect(egui::Pos2::ZERO, canvas::Rotation::Deg0));
+            return Some(appearance.rect(egui::Pos2::ZERO, crate::symbol::Orientation::default()));
         }
 
         let mut bounds: Option<egui::Rect> = None;
@@ -1567,12 +1567,18 @@ impl SimLogixApp {
         kind: &ComponentKind,
         at: egui::Pos2,
         rotation: canvas::Rotation,
+        mirrored: bool,
     ) -> egui::Pos2 {
         let Some(path) = kind.circuit_path() else {
             return at;
         };
         let (_, appearance) = self.instance_preview(path);
-        let middle = appearance.rect(egui::Pos2::ZERO, rotation).center();
+        let middle = appearance
+            .rect(
+                egui::Pos2::ZERO,
+                crate::symbol::Orientation::new(rotation, mirrored),
+            )
+            .center();
         at - canvas::snap_to_grid(middle).to_vec2()
     }
 

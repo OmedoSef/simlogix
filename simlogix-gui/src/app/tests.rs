@@ -341,7 +341,7 @@ fn a_symbol_drawn_away_from_its_origin_still_lands_under_the_pointer() {
 
     let kind = ComponentKind::Circuit("sub".to_string());
     let at = egui::pos2(200.0, 200.0);
-    let origin = app.drop_origin(&kind, at, canvas::Rotation::Deg0);
+    let origin = app.drop_origin(&kind, at, canvas::Rotation::Deg0, false);
     // The origin is *not* where the pointer is, which is the whole point —
     // and it is still a whole number of grid steps away, or the pins would
     // no longer land on the grid.

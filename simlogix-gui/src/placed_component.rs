@@ -405,7 +405,10 @@ impl PlacedComponent {
         if let Shape::Instance { appearance, .. } = &self.shape {
             // A symbol you drew decides its own extent; the generated box
             // reports exactly what it always did.
-            return appearance.rect(self.center, self.rotation);
+            return appearance.rect(
+                self.center,
+                symbol::Orientation::new(self.rotation, self.mirrored),
+            );
         }
         if matches!(self.shape, Shape::Splitter) {
             // One grid row per branch, and never shorter than a box: the
@@ -910,7 +913,7 @@ impl PlacedComponent {
                 appearance,
                 ..
             } => {
-                let rect = appearance.rect(*center, *rotation);
+                let rect = appearance.rect(*center, orientation);
                 let pin_positions = symbol::draw_instance(
                     painter,
                     *center,

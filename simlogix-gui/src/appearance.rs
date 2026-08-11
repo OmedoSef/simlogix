@@ -32,10 +32,10 @@
 use egui::{pos2, Align2, Color32, Painter, Pos2, Stroke};
 use serde::{Deserialize, Serialize};
 
-use crate::canvas::{self, Rotation};
+use crate::canvas::{self};
 use crate::palette::ComponentKind;
 use crate::placed_component::{instance_height, InstancePort};
-use crate::symbol::{self, draw_pin, rotate_rect, Orientation, TextLayer};
+use crate::symbol::{self, draw_pin, Orientation, TextLayer};
 
 /// How wide the generated box's body is, as a fraction of the box.
 ///
@@ -521,8 +521,8 @@ impl Appearance {
     /// 120 below when turned half a circle, while the box stayed where the
     /// drawing used to be — nothing left to click, so the component could no
     /// longer be selected or moved at all.
-    pub fn rect(&self, center: Pos2, rotation: Rotation) -> egui::Rect {
-        rotate_rect(self.bounds().translate(center.to_vec2()), center, rotation)
+    pub fn rect(&self, center: Pos2, orientation: Orientation) -> egui::Rect {
+        orientation.place_rect(self.bounds().translate(center.to_vec2()), center)
     }
 
     /// The symbol's extent about its centre — **not symmetric**.
@@ -730,8 +730,8 @@ mod tests {
         });
 
         let center = pos2(100.0, 100.0);
-        let upright = symbol.rect(center, Rotation::Deg0);
-        let turned = symbol.rect(center, Rotation::Deg180);
+        let upright = symbol.rect(center, Orientation::default());
+        let turned = symbol.rect(center, Orientation::new(canvas::Rotation::Deg180, false));
 
         // Half a circle takes the corner at (-30, -140) to (30, 140), so
         // that is where the box has to reach.
@@ -741,6 +741,38 @@ mod tests {
         // used to stay where the drawing had been, which for a symbol this
         // far off its origin left the two with nothing in common.
         assert!(!upright.contains(landed));
+
+        assert!(!upright.contains(landed));
+    }
+
+    #[test]
+    fn a_mirrored_symbol_is_clickable_where_the_reflection_lands() {
+        // The same demand as above, made a different way: a reflection maps
+        // a box onto itself only when the drawing is centred on its origin,
+        // which a hand-drawn symbol is exactly not. Drawn **off to one
+        // side** on purpose — a shape symmetric about the origin would be
+        // its own mirror image and prove nothing.
+        let mut symbol = Appearance::generated(&ports(1, 1));
+        symbol.shapes.push(Shape::Polyline {
+            points: vec![(-140.0, -10.0), (-20.0, -10.0), (-20.0, 10.0)],
+            closed: true,
+        });
+
+        let center = pos2(100.0, 100.0);
+        let upright = symbol.rect(center, Orientation::default());
+        let mirrored = symbol.rect(center, Orientation::new(canvas::Rotation::Deg0, true));
+
+        // The far corner at x -140 reflects to +140, and that is where the
+        // box has to reach.
+        let landed = center + egui::vec2(140.0, 0.0);
+        assert!(
+            mirrored.contains(landed),
+            "the box has to follow the reflection: {mirrored:?}"
+        );
+        assert!(
+            !upright.contains(landed),
+            "and it did not, which is what made this worth asserting"
+        );
     }
 
     #[test]

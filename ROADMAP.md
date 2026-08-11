@@ -27,170 +27,20 @@ pipeline producing installers for Linux, Windows and macOS.
 Since then, the tools for finding out what a circuit is *doing*: stepping by
 a tick, to the next event or by a clock edge, a speed control, and a clock
 source that can be a port — so a circuit meant to sit inside another can be
-driven on its own.
+driven on its own. And an engine-state inspector, which exists because every
+bug found in this project so far was found by printing exactly that.
+
+**Multi-bit buses are in**, engine and editor alike: a signal is a list of
+levels, a net takes its width from the drawing, the ports and gates carry
+one, and there is a splitter, a constant, a base to read values in and a
+symbol that grows to hold what it shows. What that cost and why it was done
+that way is in [CLAUDE.md](CLAUDE.md); what is left of it is the two entries
+below.
 
 So the list below is no longer "finishing v1". It's what would make SimLogix
 better at the thing it's for.
 
 ## Next
-
-- [ ] 🚧 **Multi-bit buses**
-
-  A byte-wide datapath drawn in single-bit wires is eight times everything:
-  eight wires, eight pins per port, eight probes to read one value. For a CPU
-  this is the difference between feasible and not.
-
-  It reaches into `Signal` and therefore into the engine, which is the
-  argument for doing it sooner rather than later — the cost grows with
-  everything built on top of the current shape.
-
-  ### How a signal is represented — **done**
-
-  The seven-state scalar is now **`Level`**, and **`Signal` is a list of
-  `Level`**, least significant bit first, a plain wire being a list of one.
-  Every truth table still works on `Level` untouched.
-
-  The alternative, recorded because it was considered and refused: pack the
-  whole bus into fixed-size masks — `value`, `known`, `driving` over 64 bits
-  — which stays `Copy`, allocates nothing, and does a 32-bit operation in one
-  instruction. Seven states do not fit in two masks, so it needs three and an
-  encoding to remember, and every truth table stops being a readable `match`
-  and becomes mask algebra. The engine's core is what gets re-read most —
-  it is where the transistor bug and the CMOS NAND bug were both found — and
-  that is not worth trading for speed nobody has needed yet.
-
-  Two things made the change cheap, and are worth knowing before the next
-  one:
-
-  - **`component::scalar_eval`** wraps a component whose body is written in
-    levels. Every one of them is, today, so the conversion is named once
-    rather than written out twenty times — and the name says the truth:
-    *this component has no meaning on a bus yet*. It stops being true one
-    component at a time, as each learns what a bus means for it.
-  - **`component::eval_levels`** does the same for the tests, so all 108
-    call sites still say exactly what they said before. They are the
-    evidence that nothing changed meaning; rewriting their expectations by
-    hand is how that evidence would have been lost.
-
-  `resolve` already works **bit by bit**, by the rule a plain wire has always
-  used, and contributions of differing widths already come out `Error` on
-  every bit. `Signal::only_level` answers `Error` for anything but width one,
-  so a component with no meaning on a bus says so on the wire rather than
-  reporting its first bit.
-
-  Everything is still one bit wide: nothing yet *makes* a signal wider. That
-  is the next step, and it is where this starts to show.
-
-  ### Width belongs to the net, not to the wire
-
-  A wire does not know what it carries; it takes it from what it joins. So
-  width is derived in `rebuild_nets`, alongside connectivity, by the same
-  pass and from the same drawing. **One bit unless something on the net says
-  otherwise**, which is why every project that exists stays exactly as it is,
-  with no migration.
-
-  Two pins of different widths on one net is a **fault to report, not to
-  guess at** — and a different fault from `Error`. "Two drivers disagree" is
-  fixed by unplugging one; "four bits against eight" is fixed by changing a
-  property. Two messages, not one.
-
-  **Done.** The net takes the widest declared, the offending pin is ringed
-  in red on the schematic and counted in the status bar, and the inspector
-  lists the *reading* pins as well as the contributions — a reader makes no
-  contribution, so it was invisible to the window that exists to answer
-  *why*. The fault sits on the pin rather than the net, since the net is
-  fine and one thing attached to it is not.
-
-  ### What has to exist
-
-  - [x] **A splitter**, one component and bidirectional: its pins are
-    `InOut`, and which side drives falls out of what is connected, so there
-    is no separate merger. The question flagged here turned out to be the
-    whole difficulty, and it needed an engine answer:
-    `Component::reads_own_contribution`, false for a **relay** alone.
-
-    **Deliberately provisional, and Romain chose it knowingly.** A splitter
-    is not a relay — it is *wire*, and wire takes no time and cannot echo.
-    Modelled as a component it costs a tick, so bits crossing one arrive
-    after bits that do not, which on a datapath can latch a value half old
-    and half new. It ships now because it is usable now.
-
-  - [x] **A constant**, whose value is typed in a base of your choosing. It
-    works on a one-bit wire too, where it is simply 0 or 1. **No new engine
-    component**: driving a value on N bits is exactly what an input port
-    does, and what differs — that the value is a *setting* rather than
-    something clicked through — lives in the document and the symbol.
-    Shown by the same rule the value panel uses, hex past four bits and
-    decimal below, extracted so there is one rule rather than two.
-  - [x] **A value a port can be set to**, rather than every bit alike. A
-    port drives all its bits the same today, so a two-bit one can only be 0
-    or 3 — and that was the wrong justification: a port does not stand for a
-    switch, it stands for *what a parent will drive*, and a parent drives
-    whatever it likes.
-
-    It goes in a **panel of its own** beside the properties, because there
-    are two things here and they must not be confused: the **value**, which
-    is what the port sends *now* — runtime state, no undo step, never saved
-    — and the **resting value**, which is where it sits when the project
-    opens and is a property like any other. The same digits, two different
-    natures; one field for both would have to lie about one of them.
-
-    Typed in a base, and by the same widget the constant uses — literally
-    the same one since the constant landed: `value_field` is shared, because
-    the two ask the identical question and building it twice is how the two
-    answers drift. The undriven position stays alongside: a value and *not driving*
-    are different claims, and a three-state port needs both. On a one-bit
-    port it degenerates to the 0/1/undriven cycle that exists, so nothing is
-    lost.
-  - [x] **A width property** on the components that are built in rather
-    than drawn. **The ports and the plain gates have it**, and `rebuild_nets`
-    reads it — the same pass that says what a net joins now says how wide it
-    is. The widest pin on a net wins, so a narrower one contributes the wrong
-    width and the engine faults every bit: taking the maximum rather than
-    refusing is what makes a mismatch *visible* instead of quietly dropped.
-    A gate on a bus is that gate applied bit by bit, so its truth table is
-    untouched and every one of its pins is that same width.
-  - [x] **A width per pin, not per component.** `rebuild_nets` declares a
-    width per *pin* (`PlacedComponent::pin_width`), so a tri-state buffer's
-    enable and a transceiver's direction stay one bit while their data pins
-    widen, and an instance's pins are as wide as the ports they stand for,
-    one by one. A sub-circuit's innards carry their declared widths up with
-    their wiring, since they are in the engine but not in the drawing.
-    Turned out to be a **prerequisite for the splitter**, whose bus pin and
-    branch pins are of different widths by definition — not the optional
-    tidy-up it looked like. The SR latch is still left out: a wide one is a
-    register, and what `S` and `R` mean for it is a design question.
-  - [x] **Reading a bus.** The base is a **choice**, on the probe, the
-    three ports, the tri-state source and the constant alike: a global
-    default in the settings, which a property on any one of them can
-    override. `Auto` is a choice *not made* rather than a fourth base, so
-    changing the default still moves everything that never asked for
-    something else.
-
-    Its **width is derived from its net**: a probe *declares nothing*, so
-    it neither widens a net nor can disagree with one.
-
-    It also closed a fault nobody had named: there were **two formatting
-    rules**, so a constant showed `10` where a probe on the same value
-    showed `A`. One rule now, with a prefix only where a value is typed
-    back in.
-  - [x] **Seeing a bus.** **Drawn thicker**, and a selected wire says how
-    many bits it carries. Not proportional to the width — what matters is
-    one bit against several, and a 32-bit wire as thick as a component is a
-    schematic nobody can read. And **readable on hover**, without selecting:
-    hovering already lights the whole net, so the hint says the net's width
-    once rather than the segment's. A one-bit wire says nothing — the
-    default over every wire in the drawing would be noise, not information.
-
-  **Bit 0 is the least significant**, fixed once and written down, because
-  the splitter has to say which bits go where and that convention is
-  expensive to leave implicit.
-
-  ### Order
-
-  The engine first, with width defaulting to one and the existing tests as
-  the net: if all of them still pass, the semantics that exist are intact.
-  Then the drawing, then the components.
 
 - [ ] **The splitter as connectivity, not a component**
 
@@ -248,6 +98,19 @@ better at the thing it's for.
   before it: offsets in the net model are the same question asked once, and
   a bit list is what a weighted union-find would carry anyway.
 
+- [ ] **Whether a click should still flip a switch while drawing**
+
+  A port only drives in the simulation view: a click in the schematic
+  *selects* it, so picking one to set its width no longer pokes the circuit.
+  A switch is the exception — a click flips it in either view — and the
+  reason it was left that way is that flipping one while drawing is
+  something Romain uses.
+
+  Both are runtime state now, so the argument that split them is gone. What
+  is left is a question of habit rather than of principle, which is why it
+  is a note and not a decision: if a click on a switch ever changes one that
+  was only meant to be selected, this is the answer.
+
 - [ ] **Getting to a width fault**
 
   The status bar says how many pins disagree with their net, and each is
@@ -283,6 +146,33 @@ better at the thing it's for.
   per component, and period and phase are both arguments to the scheduling a
   `Clock` already does — first fire *here*, then every *this many* ticks.
   What is missing in all three cases is a property and a way to type it.
+
+- [ ] **Does it hold up at the size of a CPU, and how would we know**
+
+  Nothing has ever been measured. The largest circuit anyone has drawn is a
+  few dozen components, and the answer for a few thousand is simply unknown
+  — which is the honest problem, not slowness that has been observed.
+
+  What is worth knowing before optimising anything, because each of these is
+  proportional to the **whole document** rather than to what changed:
+
+  - **`record_edit` clones the entire project**, every edit, and keeps up to
+    64 of them. On a CPU-sized drawing that is the document copied on every
+    keystroke that counts as one.
+  - **`rebuild_nets` re-derives all connectivity** and `Circuit::rewire`
+    then throws away and reallocates *every* net — on any change to the
+    topology. That is the geometric net model working as designed; the
+    question is only what it costs when there are thousands of pins.
+  - **Every frame** resolves every wire's route, measures every readout and
+    draws everything, and the application asks for a repaint unconditionally
+    so that a clock keeps ticking. So the per-frame cost is paid sixty times
+    a second whether or not anything moved.
+
+  **The first step is a measurement, not a change**: a generated circuit of a
+  few thousand components, and a look at where the time actually goes. Any of
+  the three above could turn out to be free at that size, and optimising the
+  wrong one is worse than leaving all three alone. Only then is it worth
+  asking whether an edit can touch less than everything.
 
 - [ ] **A waveform view**
 
