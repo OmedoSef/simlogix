@@ -55,6 +55,21 @@ impl Member {
         }
     }
 
+    /// A pin occupying the net from `offset` to its end.
+    ///
+    /// What a plain wire means once offsets exist: a conductor joins pins
+    /// bit for bit, so a pin that spans less than what is left of it is
+    /// **wrong about its own width**, not occupying a slice. Only a
+    /// splitter can say otherwise, and it says so with [`Member::slice`].
+    pub fn from(pin: (ComponentId, usize), offset: usize) -> Self {
+        Self {
+            component: pin.0,
+            pin: pin.1,
+            offset,
+            width: None,
+        }
+    }
+
     /// A pin occupying `width` bits from `offset`.
     pub fn slice(pin: (ComponentId, usize), offset: usize, width: usize) -> Self {
         Self {

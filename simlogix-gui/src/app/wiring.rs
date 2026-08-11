@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use simlogix_core::{ComponentId, NetGroup};
+use simlogix_core::{ComponentId, Member, NetGroup};
 
 use crate::placed_component::PinHandle;
 
@@ -22,6 +22,72 @@ pub(super) struct ResolvedRoute {
     pub from: egui::Pos2,
     pub to: egui::Pos2,
     pub waypoints: Vec<egui::Pos2>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Node {
+    Pin(ComponentId, usize),
+    Wire(u64),
+    /// One of an instance's internal nets, which has no pin of this
+    /// drawing's own to stand for it.
+    Inner(ComponentId, usize),
+}
+
+// **Weighted**: each node knows not only which group it is in but
+// *where in it* — which bit of the group its own bit zero is. A
+// plain wire joins two things at the same bit, and only a splitter
+// ever asks for anything else, which is what lets "bit 3 of this
+// net is bit 0 of that one" be said without a component between
+// them to relay it.
+//
+// Offsets are signed while the sets are being built, because which
+// of two nodes becomes the root is arbitrary and the other one may
+// well sit below it. They are normalised to start at zero once the
+// groups are known.
+type Parents = HashMap<Node, (Node, isize)>;
+/// The group `node` belongs to, and where its bit zero sits in it.
+fn find(parent: &mut Parents, node: Node) -> (Node, isize) {
+    let mut root = node;
+    let mut from_node = 0;
+    while let Some(&(next, delta)) = parent.get(&root) {
+        if next == root {
+            break;
+        }
+        from_node += delta;
+        root = next;
+    }
+    // Path compression, so a long chain of taps stays cheap — and
+    // now carrying the accumulated offset with it, or the shortcut
+    // would forget where the node sat.
+    let mut walk = node;
+    let mut walked = 0;
+    while let Some(&(next, delta)) = parent.get(&walk) {
+        if next == root {
+            break;
+        }
+        parent.insert(walk, (root, from_node - walked));
+        walked += delta;
+        walk = next;
+    }
+    parent.entry(node).or_insert((root, from_node));
+    (root, from_node)
+}
+
+/// Says that `a`'s bit zero is `b`'s bit `delta`.
+///
+/// Answers false when the two are already in one group and placed
+/// differently — a drawing that says two contradictory things about
+/// the same conductor, which only a loop of splitters can produce.
+fn union(parent: &mut Parents, a: Node, b: Node, delta: isize) -> bool {
+    let (root_a, from_a) = find(parent, a);
+    let (root_b, from_b) = find(parent, b);
+    if root_a == root_b {
+        return from_a - from_b == delta;
+    }
+    // Hanging `root_a` under `root_b`: whatever puts `a` exactly
+    // `delta` above `b` once both are read through their roots.
+    parent.insert(root_a, (root_b, delta - from_a + from_b));
+    true
 }
 
 impl SimLogixApp {
@@ -489,42 +555,7 @@ impl SimLogixApp {
     /// that wire reaches, however deep the chain goes and in whatever order
     /// they were drawn.
     pub(super) fn rebuild_nets(&mut self) {
-        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-        enum Node {
-            Pin(ComponentId, usize),
-            Wire(u64),
-            /// One of an instance's internal nets, which has no pin of this
-            /// drawing's own to stand for it.
-            Inner(ComponentId, usize),
-        }
-
-        let mut parent: HashMap<Node, Node> = HashMap::new();
-        fn find(parent: &mut HashMap<Node, Node>, node: Node) -> Node {
-            let mut root = node;
-            while let Some(&next) = parent.get(&root) {
-                if next == root {
-                    break;
-                }
-                root = next;
-            }
-            // Path compression, so a long chain of taps stays cheap.
-            let mut walk = node;
-            while let Some(&next) = parent.get(&walk) {
-                if next == root {
-                    break;
-                }
-                parent.insert(walk, root);
-                walk = next;
-            }
-            parent.entry(node).or_insert(root);
-            root
-        }
-        fn union(parent: &mut HashMap<Node, Node>, a: Node, b: Node) {
-            let (a, b) = (find(parent, a), find(parent, b));
-            if a != b {
-                parent.insert(a, b);
-            }
-        }
+        let mut parent: Parents = HashMap::new();
 
         for placed in &self.placed {
             let pin_count = self
@@ -534,20 +565,20 @@ impl SimLogixApp {
                 .unwrap_or(0);
             for index in 0..pin_count {
                 let node = Node::Pin(placed.id(), index);
-                parent.entry(node).or_insert(node);
+                parent.entry(node).or_insert((node, 0));
             }
         }
 
         for wire in &self.wires {
             let self_node = Node::Wire(wire.id);
-            parent.entry(self_node).or_insert(self_node);
+            parent.entry(self_node).or_insert((self_node, 0));
             for end in [wire.from, wire.to] {
                 match end {
                     WireEndpoint::Pin(component, index) => {
-                        union(&mut parent, self_node, Node::Pin(component, index));
+                        union(&mut parent, self_node, Node::Pin(component, index), 0);
                     }
                     WireEndpoint::Junction { wire: host, .. } => {
-                        union(&mut parent, self_node, Node::Wire(host));
+                        union(&mut parent, self_node, Node::Wire(host), 0);
                     }
                     // A loose end connects nothing, so it contributes no
                     // union at all.
@@ -573,6 +604,7 @@ impl SimLogixApp {
                         &mut parent,
                         Node::Inner(placed.id(), group),
                         Node::Pin(component, pin),
+                        0,
                     );
                 }
             }
@@ -582,17 +614,25 @@ impl SimLogixApp {
                         &mut parent,
                         Node::Inner(placed.id(), group),
                         Node::Pin(placed.id(), index),
+                        0,
                     );
                 }
             }
         }
 
-        let mut groups: HashMap<Node, Vec<(ComponentId, usize)>> = HashMap::new();
+        // Each pin with where it sits in its group. Everything is at zero
+        // until a splitter says otherwise, so a plain drawing comes out of
+        // here exactly as it always did.
+        type Placed = ((ComponentId, usize), isize);
+        let mut groups: HashMap<Node, Vec<Placed>> = HashMap::new();
         let nodes: Vec<Node> = parent.keys().copied().collect();
         for node in nodes {
             if let Node::Pin(component, index) = node {
-                let root = find(&mut parent, node);
-                groups.entry(root).or_default().push((component, index));
+                let (root, offset) = find(&mut parent, node);
+                groups
+                    .entry(root)
+                    .or_default()
+                    .push(((component, index), offset));
             }
         }
 
@@ -630,22 +670,42 @@ impl SimLogixApp {
                 None => inner_widths.get(&(component, index)).copied().flatten(),
             }
         };
-        // The widest pin on the net wins, and a narrower one then contributes
-        // the wrong width — which the engine already faults, on every bit.
-        // Taking the maximum rather than refusing here is what makes the
-        // mismatch *visible* instead of silently dropped.
-        let width_of =
-            |group: &[(ComponentId, usize)]| group.iter().filter_map(declared).max().unwrap_or(1);
+        // How far the net reaches: the pin that ends highest, measured from
+        // the one that starts lowest. With everything at offset zero — which
+        // is every drawing until a splitter is in it — that is the widest
+        // pin, which is what it always was. A narrower pin then contributes
+        // the wrong width and the engine faults it, on every bit: taking the
+        // maximum rather than refusing is what makes the mismatch *visible*
+        // instead of silently dropped.
+        let extent = |group: &[Placed]| -> (isize, usize) {
+            let base = group.iter().map(|(_, at)| *at).min().unwrap_or(0);
+            let width = group
+                .iter()
+                .filter_map(|(pin, at)| declared(pin).map(|w| (at - base) as usize + w))
+                .max()
+                .unwrap_or(1);
+            (base, width)
+        };
 
         // A lone pin is its own net anyway, which `rewire` already does for
         // anything it isn't told about — but only at one bit, so a wide pin
         // on its own has to be named.
         let groups: Vec<NetGroup> = groups
             .into_values()
-            .filter(|group| group.len() > 1 || width_of(group) > 1)
+            .filter(|group| group.len() > 1 || extent(group).1 > 1)
             .map(|group| {
-                let width = width_of(&group);
-                NetGroup::bus(group, width)
+                let (base, width) = extent(&group);
+                // **From its offset to the end of the net**, not its own
+                // declared width. A conductor joins pins bit for bit, so a
+                // pin narrower than what is left of the net is wrong about
+                // itself rather than occupying part of it — which is the
+                // fault reported below, and which giving it a slice of its
+                // own width would have quietly made legal.
+                let members = group
+                    .iter()
+                    .map(|(pin, at)| Member::from(*pin, (at - base) as usize))
+                    .collect();
+                NetGroup::sliced(members, width)
             })
             .collect();
 
@@ -667,7 +727,7 @@ impl SimLogixApp {
 
         let mut wire_groups: HashMap<Node, Vec<u64>> = HashMap::new();
         for wire in &self.wires {
-            let root = find(&mut parent, Node::Wire(wire.id));
+            let (root, _) = find(&mut parent, Node::Wire(wire.id));
             wire_groups.entry(root).or_default().push(wire.id);
         }
         self.inherit_wire_colors(wire_groups.into_values());
@@ -764,5 +824,107 @@ impl SimLogixApp {
             }
         }
         hasher.finish()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Any node will do — the structure makes no distinction between its
+    /// kinds, and a wire's id is a plain number where a `ComponentId` is
+    /// only handed out by a real `Circuit`.
+    fn pin(index: u64) -> Node {
+        Node::Wire(index)
+    }
+
+    #[test]
+    fn joining_at_the_same_bit_is_what_a_wire_means() {
+        let mut parent = Parents::new();
+        assert!(union(&mut parent, pin(0), pin(1), 0));
+        assert!(union(&mut parent, pin(1), pin(2), 0));
+
+        let (root, _) = find(&mut parent, pin(0));
+        for index in 0..3 {
+            let (other, offset) = find(&mut parent, pin(index));
+            assert_eq!(other, root, "all three are one conductor");
+            assert_eq!(offset, 0, "and all at the same bit");
+        }
+    }
+
+    #[test]
+    fn offsets_add_up_along_a_chain() {
+        // What a splitter says, twice over: pin 1's bit zero is pin 0's bit
+        // 2, and pin 2's is pin 1's bit 3 — so pin 2 sits at bit 5 of the
+        // same conductor. Nothing carries the value there; it *is* there.
+        let mut parent = Parents::new();
+        assert!(union(&mut parent, pin(1), pin(0), 2));
+        assert!(union(&mut parent, pin(2), pin(1), 3));
+
+        let base = find(&mut parent, pin(0)).1;
+        assert_eq!(find(&mut parent, pin(1)).1 - base, 2);
+        assert_eq!(find(&mut parent, pin(2)).1 - base, 5);
+    }
+
+    #[test]
+    fn a_loop_that_agrees_with_itself_is_not_a_contradiction() {
+        // Two paths to the same place, saying the same thing. Redundant
+        // wiring is ordinary, and it must not read as a fault.
+        let mut parent = Parents::new();
+        assert!(union(&mut parent, pin(1), pin(0), 2));
+        assert!(union(&mut parent, pin(2), pin(1), 3));
+        assert!(
+            union(&mut parent, pin(2), pin(0), 5),
+            "5 is 2 then 3, which is what the other path already said"
+        );
+    }
+
+    #[test]
+    fn a_loop_that_disagrees_is_reported_rather_than_resolved() {
+        // The drawing says two contradictory things about one conductor,
+        // which only a loop of splitters can produce. Picking a winner
+        // would leave half the circuit reading bits it does not have.
+        let mut parent = Parents::new();
+        assert!(union(&mut parent, pin(1), pin(0), 2));
+        assert!(union(&mut parent, pin(2), pin(1), 3));
+        assert!(
+            !union(&mut parent, pin(2), pin(0), 4),
+            "the other path put pin 2 at bit 5, not 4"
+        );
+    }
+
+    #[test]
+    fn compression_keeps_the_offsets_it_shortens_past() {
+        // The trap in a weighted union-find: the shortcut a lookup writes
+        // has to carry the whole distance it skipped, or the second lookup
+        // answers a different place from the first.
+        //
+        // Built by hand rather than by `union`, which calls `find` and so
+        // compresses as it goes — a chain assembled that way is never deep
+        // enough for this to be exercised at all.
+        let mut parent = Parents::new();
+        parent.insert(pin(0), (pin(0), 0));
+        for step in 1..8 {
+            parent.insert(pin(step), (pin(step - 1), 1));
+        }
+
+        // The **deepest** node first, and that is the whole point: asked in
+        // order, every lookup walks one step and compresses one node at
+        // distance nothing — where carrying the distance and forgetting it
+        // give the same answer, so nothing is being tested.
+        assert_eq!(find(&mut parent, pin(7)).1, 7);
+
+        // Everything on that path now points straight at the root, so this
+        // reads through the shortcuts rather than down the chain.
+        let after: Vec<isize> = (0..8).map(|i| find(&mut parent, pin(i)).1).collect();
+        assert_eq!(
+            after,
+            vec![0, 1, 2, 3, 4, 5, 6, 7],
+            "the shortcuts have to carry the distance they skipped"
+        );
     }
 }
