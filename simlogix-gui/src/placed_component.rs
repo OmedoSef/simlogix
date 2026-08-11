@@ -455,6 +455,18 @@ impl PlacedComponent {
         }
     }
 
+    /// Where a `Switch` is **now**, as the engine reads it.
+    ///
+    /// Runtime state, like a port's drive: its property says where it
+    /// *rests* when the project opens, and flipping it by hand is not an
+    /// edit to the drawing. `None` for everything else.
+    pub fn switch_position(&self) -> Option<&Rc<Cell<bool>>> {
+        match &self.shape {
+            Shape::Switch { on } => Some(on),
+            _ => None,
+        }
+    }
+
     /// The width its pins carry, as its properties say.
     pub fn width(&self) -> usize {
         self.properties.width()
@@ -540,11 +552,12 @@ impl PlacedComponent {
         }
         // A switch needs the same push for the same reason: it latches, so
         // there is no "held" state for it to settle itself from the way a
-        // button does.
+        // button does. Its property is where it *rests*, so setting one
+        // puts the switch there — the same as a port's resting level.
         if let Shape::Switch { on } = &self.shape {
-            let starts_on = properties.pressed.unwrap_or(false);
-            if starts_on != self.properties.pressed.unwrap_or(false) {
-                on.set(starts_on);
+            let at_rest = properties.pressed.unwrap_or(false);
+            if at_rest != self.properties.pressed.unwrap_or(false) {
+                on.set(at_rest);
             }
         }
         self.properties = properties;

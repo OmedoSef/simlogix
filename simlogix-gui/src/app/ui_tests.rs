@@ -1168,3 +1168,51 @@ fn a_click_in_the_schematic_selects_a_port_without_driving_it() {
         "and left what it carries alone"
     );
 }
+
+#[test]
+fn flipping_a_switch_is_not_an_edit_but_its_resting_position_is() {
+    // Romain's: a switch used to write its position into the document, so
+    // flipping one to see what happened filled the undo history and marked
+    // the project modified. Where it is *now* is runtime state; where it
+    // rests is the property.
+    let mut harness = harness();
+    let at = egui::pos2(200.0, 200.0);
+    let id = harness.state_mut().place(ComponentKind::Switch, at);
+    step(&mut harness);
+    harness.state_mut().dirty = false;
+
+    let closed = |harness: &Harness<'_, SimLogixApp>| {
+        harness.state().placed[0]
+            .switch_position()
+            .expect("a switch has a position")
+            .get()
+    };
+    assert!(!closed(&harness));
+
+    click_at(&mut harness, at);
+    step(&mut harness);
+    assert!(closed(&harness), "the click flipped it");
+    assert!(
+        !harness.state().dirty,
+        "and did not mark the project changed"
+    );
+    assert_eq!(
+        harness.state().placed[0].properties().pressed,
+        None,
+        "nor write where it rests"
+    );
+
+    // The property is still an edit, and still decides where it starts.
+    harness.state_mut().set_component_properties(
+        id,
+        crate::properties::Properties {
+            pressed: Some(true),
+            ..Default::default()
+        },
+    );
+    step(&mut harness);
+    assert!(
+        harness.state().dirty,
+        "setting the resting position is an edit"
+    );
+}

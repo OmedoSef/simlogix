@@ -417,6 +417,27 @@ pub fn format_value(bits: u128, width: usize, base: NumberBase, prefix: bool) ->
     format!("{}{digits}", if prefix { base.prefix() } else { "" })
 }
 
+/// The **value** panel for a switch: where it is right now.
+///
+/// A section of its own beside a port's, and for the same reason — this is
+/// runtime state, so it takes no undo step and is never saved, while
+/// *closed at rest* above it is a property and is. The same position, two
+/// natures; one control for both would have to lie about one of them.
+///
+/// Returns the new position when it changed.
+pub fn show_switch_value(ui: &mut Ui, strings: &Strings, closed: bool) -> Option<bool> {
+    ui.add_space(12.0);
+    ui.separator();
+    ui.label(RichText::new(strings.value_heading).strong());
+    ui.label(RichText::new(strings.value_runtime).weak());
+    ui.add_space(4.0);
+
+    let mut now = closed;
+    ui.checkbox(&mut now, strings.value_switch_closed)
+        .changed()
+        .then_some(now)
+}
+
 /// Reads a value written in hex, binary or decimal.
 ///
 /// All three because a value copied from a datasheet, from code, or from a
@@ -871,12 +892,12 @@ pub fn show(
         ComponentKind::Button | ComponentKind::Switch => {
             ui.add_space(8.0);
             let mut pressed = properties.pressed.unwrap_or(false);
-            // The same stored value, said two ways. For a button it is a
-            // *resting* state, since a press springs back and is never
-            // saved. For a switch it is the position itself: a latched
-            // switch stays where it was put, so where it is *is* how the
-            // circuit was left — something the user set, not something the
-            // simulation produced, and the line the document draws.
+            // The same stored value, said two ways, and now the same
+            // *nature* too: a **resting** state. A press springs back, and
+            // a switch is put back where this says when the project opens.
+            // Where a switch is right now is runtime state, edited in the
+            // value panel — which is what stops flipping one to see what
+            // happens from filling the undo history.
             let (label, hint) = if *kind == ComponentKind::Switch {
                 (strings.property_switch_on, strings.property_switch_on_hint)
             } else {

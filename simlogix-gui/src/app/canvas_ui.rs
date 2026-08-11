@@ -218,18 +218,19 @@ impl SimLogixApp {
                     }
 
                     if let Some(id) = toggled_switch {
-                        self.record_edit();
-                        if let Some(placed) = self.placed.iter_mut().find(|p| p.id() == id) {
-                            let mut properties = placed.properties().clone();
-                            let now_on = !properties.pressed.unwrap_or(false);
-                            // Unset when it's back to the default, so a
-                            // project that never touched it keeps saying
-                            // nothing — the rule every property follows.
-                            properties.pressed = now_on.then_some(true);
-                            // `set_properties` pushes it into the cell the
-                            // engine reads, so there's one path for a flip
-                            // by hand and one by the properties panel.
-                            placed.set_properties(properties);
+                        // Straight into the cell the engine reads, never
+                        // through the document: where a switch is *now* is
+                        // runtime state, and its property is where it rests
+                        // when the project opens. So no snapshot, no dirty
+                        // flag, and no undo step — flipping one to see what
+                        // happens is not an edit to the drawing.
+                        if let Some(on) = self
+                            .placed
+                            .iter()
+                            .find(|p| p.id() == id)
+                            .and_then(|placed| placed.switch_position())
+                        {
+                            on.set(!on.get());
                         }
                         self.circuit.schedule_now(id);
                         input_changed = true;

@@ -161,7 +161,7 @@ project file.
 | **Name** | every component | Drawn under the symbol, as your own annotation. |
 | **Type** | transistors, transceivers | Switches between the pair — the symbol follows. |
 | **Pressed at rest** | Button | The button rests pressed, so clicking it *releases* it. |
-| **Closed** | Switch | Where the switch is now, and how it will be saved. |
+| **Closed at rest** | Switch | Where the switch sits when the project opens. |
 | **Three-state** | Input, Bidirectional | Whether clicking can also leave the port undriven. |
 | **Resting value** | Input, Bidirectional, Tri-state source | Where it sits when the project opens. |
 | **Value** (panel) | Input, Bidirectional, Tri-state source | What it is driving *now* — runtime, never saved. Clicking the component steps it by one. |
@@ -202,16 +202,16 @@ The SR latch is deliberately left out: a wide one would be a register, and
 what `S` and `R` should mean for it is a design question rather than a
 width.
 
-Two of those look alike and are not. A **button's** setting is its *resting*
-state: a press springs back, so what is saved is where it returns to. A
-**switch's** is its *position*, because a latched switch stays where you put
-it — so flipping one counts as an edit, marks the project modified and takes
-an undo step, exactly like moving a component.
+A **button** and a **switch** now say the same thing: where it *rests*. A
+press springs back on its own; a switch is put back there when the project
+opens. Where a switch is right now — like what a port is driving right now —
+is in the **Value** panel below the properties, and flipping one there or on
+the canvas takes no undo step and doesn't mark the project modified.
 
 That's the line the project file draws, and it is worth stating plainly:
 **what you set is kept; what the simulation produced is not.** Signal levels,
-a clock's phase and a button's press are produced. A switch's position and a
-port's resting value are set.
+a clock's phase, a button's press and where a switch has been flipped to are
+produced. A resting position and a port's resting value are set.
 
 Setting a property is an ordinary edit, so `Ctrl+Z` undoes it. Typing a name
 counts as one step from the moment you click into the field; the colour

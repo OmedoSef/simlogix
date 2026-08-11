@@ -3150,6 +3150,18 @@ impl SimLogixApp {
                                     // applied straight to the cell the
                                     // engine reads rather than through the
                                     // document — no snapshot, no dirty flag.
+                                    // A switch's position is the same
+                                    // nature as a port's drive, so it sits
+                                    // in the same place: runtime, straight
+                                    // into the cell, no undo step.
+                                    if let Some(on) = placed.switch_position() {
+                                        if let Some(now) =
+                                            properties::show_switch_value(ui, strings, on.get())
+                                        {
+                                            on.set(now);
+                                            pending_drive = Some(placed.id());
+                                        }
+                                    }
                                     if let Some(drive) = placed.hand_set_level() {
                                         if let Some(next) = properties::show_value(
                                             ui,
