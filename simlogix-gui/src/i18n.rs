@@ -995,14 +995,18 @@ static FRENCH: Strings = Strings {
     component_power: "PWR",
     component_probe: "Sonde",
     component_clock: "Horloge",
-    component_and: "ET",
-    component_or: "OU",
-    component_nand: "NON-ET",
-    component_nor: "NON-OU",
-    component_xor: "OU-EXCL",
-    component_xnor: "NON-OU-EXCL",
-    component_not: "NON",
-    component_buffer: "Tampon",
+    // The gates keep their English names, as they do in Italian: AND, NAND
+    // and XOR are what a datasheet, a symbol library and a schematic print
+    // in any language. They are the names of the parts rather than words to
+    // be translated — and `NON-OU-EXCL` is longer than the symbol it labels.
+    component_and: "AND",
+    component_or: "OR",
+    component_nand: "NAND",
+    component_nor: "NOR",
+    component_xor: "XOR",
+    component_xnor: "XNOR",
+    component_not: "NOT",
+    component_buffer: "Buffer",
     component_sr_latch: "Bascule SR",
     component_tri_state: "Tampon 3 états",
     component_bus_transceiver: "Transceiver (EN)",
