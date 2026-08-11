@@ -58,31 +58,47 @@ pub fn signal_color(signal: Level, dark_mode: bool) -> Color32 {
 /// borrowing either would claim the bus was all one thing. The readout
 /// beside it is what says *which* value.
 pub fn bus_color(signal: &Signal, dark_mode: bool) -> Color32 {
+    match bus_level(signal) {
+        Some(level) => signal_color(level, dark_mode),
+        None if dark_mode => Color32::from_rgb(96, 190, 200),
+        None => Color32::from_rgb(18, 106, 116),
+    }
+}
+
+/// The one state a wire is in, or `None` when it has none to report.
+///
+/// A plain wire always has one — that is what a level *is*. A **bus** only
+/// does when something is wrong or missing: a fault anywhere, a bit nobody
+/// knows, or every bit let go of. A bus whose bits are all definite carries
+/// a *value*, not a level, and there is no colour that says `0x35`.
+///
+/// That `None` is what the drawing reads to decide whether the core is
+/// worth keeping: with no level to report, a user's colour takes the whole
+/// wire instead of ringing it — the same rule that already applies when the
+/// signal state is switched off entirely.
+pub fn bus_level(signal: &Signal) -> Option<Level> {
     if signal.width() == 1 {
-        return signal_color(signal.only_level(), dark_mode);
+        return Some(signal.only_level());
     }
     let levels: Vec<Level> = signal
         .levels()
         .iter()
         .map(|level| level.strengthened())
         .collect();
-    let dominant = if levels.contains(&Level::Error) {
-        Level::Error
+    if levels.contains(&Level::Error) {
+        Some(Level::Error)
     } else if levels
         .iter()
         .any(|&level| level != Level::High && level != Level::Low && level != Level::HighZ)
     {
-        Level::Unknown
+        Some(Level::Unknown)
     } else if levels.iter().all(|&level| level == Level::HighZ) {
-        Level::HighZ
+        Some(Level::HighZ)
     } else if levels.contains(&Level::HighZ) {
-        Level::Unknown
-    } else if dark_mode {
-        return Color32::from_rgb(96, 190, 200);
+        Some(Level::Unknown)
     } else {
-        return Color32::from_rgb(18, 106, 116);
-    };
-    signal_color(dominant, dark_mode)
+        None
+    }
 }
 
 /// How much a weakly driven net's colour is faded.
@@ -276,4 +292,55 @@ pub fn draw_selection_outline(painter: &Painter, rect: Rect, dark_mode: bool) {
         Stroke::new(2.0, accent_color(dark_mode)),
         StrokeKind::Outside,
     );
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_wire_always_has_a_level_to_report() {
+        for level in [Level::High, Level::Low, Level::Unknown, Level::HighZ] {
+            assert_eq!(bus_level(&Signal::bit(level)), Some(level));
+        }
+    }
+
+    #[test]
+    fn a_healthy_bus_has_a_value_rather_than_a_level() {
+        // Which is the whole reason the casing comes off it: a bus of
+        // definite bits carries `0x35`, and there is no colour that says
+        // that. Ringing a core reporting nothing is just a thicker wire.
+        let value = Signal::from_levels(vec![Level::High, Level::Low, Level::High, Level::Low]);
+        assert_eq!(bus_level(&value), None);
+        // Even all-high: it is a value, not a level.
+        assert_eq!(bus_level(&Signal::splat(Level::High, 4)), None);
+    }
+
+    #[test]
+    fn a_bus_gets_a_level_back_the_moment_something_is_wrong() {
+        // And that is what makes the rule worth having rather than just
+        // "no casing on a bus": the core — and the casing around it —
+        // return exactly when they have something to say.
+        let mut bits = vec![Level::High; 4];
+        bits[2] = Level::Error;
+        assert_eq!(bus_level(&Signal::from_levels(bits)), Some(Level::Error));
+
+        let mut bits = vec![Level::High; 4];
+        bits[1] = Level::Unknown;
+        assert_eq!(bus_level(&Signal::from_levels(bits)), Some(Level::Unknown));
+
+        // Everything let go of is a bus that is floating, which is a state.
+        assert_eq!(
+            bus_level(&Signal::splat(Level::HighZ, 4)),
+            Some(Level::HighZ)
+        );
+        // And one bit let go of while the rest are driven is not knowable.
+        let mut bits = vec![Level::Low; 4];
+        bits[3] = Level::HighZ;
+        assert_eq!(bus_level(&Signal::from_levels(bits)), Some(Level::Unknown));
+    }
 }

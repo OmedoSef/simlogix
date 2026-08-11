@@ -454,23 +454,26 @@ impl SimLogixApp {
 
                         let user_color =
                             wire_color.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b));
-                        // With the signal state showing, the core is the
-                        // level and a colour of your own rings it. With the
-                        // state hidden the core has nothing left to say, so
-                        // the colour takes it over — a casing around a core
-                        // that reports nothing is just a thicker wire.
-                        let color = if self.show_signal_state {
+                        // **Its own bits.** A branch off a bus shares the
+                        // net, so reading that would paint a one-bit wire in
+                        // the neutral colour a bus of mixed bits takes — and
+                        // it would never show its level.
+                        let carried = self.wire_signal(wire_id, net);
+                        // Whether the core has a level to report at all. A
+                        // plain wire always has one; a bus only when
+                        // something faults, floats or is unknown — a bus of
+                        // definite bits carries a *value*, and no colour
+                        // says `0x35`.
+                        let reports = canvas::bus_level(&carried).is_some();
+                        // With a level in the core, a colour of your own
+                        // rings it. Without one — the state switched off, or
+                        // a healthy bus — the core has nothing to say and
+                        // the colour takes it over: ringing a core that
+                        // reports nothing is just a thicker wire.
+                        let color = if self.show_signal_state && reports {
                             match net {
                                 Some(net) => {
-                                    // **Its own bits.** A branch off a bus
-                                    // shares the net, so reading that would
-                                    // paint a one-bit wire in the neutral
-                                    // colour a bus of mixed bits takes —
-                                    // and it would never show its level.
-                                    let level = canvas::bus_color(
-                                        &self.wire_signal(wire_id, Some(net)),
-                                        ui.visuals().dark_mode,
-                                    );
+                                    let level = canvas::bus_color(&carried, ui.visuals().dark_mode);
                                     // Faded when nothing but a pass
                                     // transistor is holding it up: the level
                                     // is real, the noise margin is gone, and
@@ -485,6 +488,13 @@ impl SimLogixApp {
                             }
                         } else {
                             user_color.unwrap_or_else(|| match net {
+                                // No colour of your own and nothing to
+                                // report: a healthy bus still reads as one
+                                // in its own hue, and a wire with the state
+                                // switched off reads as plain structure.
+                                Some(_) if self.show_signal_state => {
+                                    canvas::bus_color(&carried, ui.visuals().dark_mode)
+                                }
                                 Some(_) => ui.visuals().strong_text_color(),
                                 None => ui.visuals().weak_text_color(),
                             })
@@ -553,10 +563,17 @@ impl SimLogixApp {
                         // the signal colour keeps the full width of the core,
                         // so the thing that changes during simulation stays
                         // the thing the eye reads first.
-                        // Only while the core carries the level. Once the
-                        // colour *is* the core, a casing would be the same
-                        // colour twice.
-                        if self.show_signal_state {
+                        //
+                        // **Only while the core has something to say.** With
+                        // the signal state switched off it has nothing, and
+                        // on a **bus of definite bits** it has nothing
+                        // either — a bus carries a value, and no colour says
+                        // `0x35`. Ringing a core that reports nothing is
+                        // just a thicker wire, so there the colour takes the
+                        // whole width. A bus does get a level back the
+                        // moment something faults or floats, and then the
+                        // core is worth having again.
+                        if self.show_signal_state && reports {
                             if let Some(casing) = user_color {
                                 canvas::draw_path(
                                     &painter,

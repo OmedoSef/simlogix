@@ -150,9 +150,18 @@ swatches don't cover. The colour is drawn as a casing *around* the wire, so the
 signal colour keeps the middle — what's changing during simulation stays
 what you read first.
 
-The colour belongs to the whole net, not to one wire: a net is a single
-conductor, so colouring any of its wires colours all of them, and a wire
-you draw onto a coloured net picks the colour up. Join two nets that have
+On a **bus** the colour takes the whole wire rather than ringing it. A
+casing exists to leave the middle for the level, and a healthy bus has no
+level — it carries a value, and no colour says `0x35`. The casing comes
+back the moment the middle has something to say again: a bit in fault, a
+bit nobody knows, or a bus nobody drives. That change of appearance is
+worth noticing, which is the point of it.
+
+The colour belongs to the wires joined to the one you clicked, not to the
+whole net: colouring any of them colours all of them, and a wire you draw
+onto a coloured one picks the colour up. A splitter's branch is *part* of
+its bus's net, so it is deliberately **not** repainted — colouring a branch
+to tell it apart would otherwise repaint the bus and its siblings. Join two nets that have
 *different* colours and both are kept — the result is visibly two-tone, so
 you can see it happened and re-colour it, rather than one colour silently
 winning.
