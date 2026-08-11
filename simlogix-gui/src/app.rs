@@ -478,6 +478,14 @@ pub struct SimLogixApp {
     /// the drawing is changed — so it is reported in the status bar and on
     /// the pin itself, never in the transient notice over the canvas.
     width_faults: Vec<(ComponentId, usize)>,
+    /// How many bits each wire carries — from what the *wires* alone say,
+    /// not from the net's width.
+    ///
+    /// Once a splitter joins branches to their bus they are one net, so a
+    /// branch wire's net is as wide as the whole bus. Drawing it that way
+    /// would say something false about it: thick, and reporting a value it
+    /// does not hold.
+    wire_widths: HashMap<u64, usize>,
     /// The net that refused to settle, if the engine reported one. Set only
     /// alongside `running = false`: a fault pauses rather than crashing or
     /// silently looping, and stays on screen until the user resumes.
@@ -633,6 +641,7 @@ impl Default for SimLogixApp {
             pending_attach: None,
             net_fingerprint: 0,
             width_faults: Vec::new(),
+            wire_widths: HashMap::new(),
             running: true,
             clock_source_index: None,
             free_running_source: false,
@@ -1930,10 +1939,13 @@ impl SimLogixApp {
                 // A probe declares no width of its own — it reads whatever
                 // its net carries, so that is what it has to have room for.
                 let bits = if kind == ComponentKind::Probe {
+                    // Its pin's slice, not the net's width: on a branch it
+                    // reads two bits of an eight-bit conductor, and a box
+                    // sized for eight would be five characters of nothing.
                     self.circuit
                         .try_pins(placed.id())
                         .and_then(|pins| pins.first())
-                        .map_or(1, |pin| self.circuit.net_width(pin.net))
+                        .map_or(1, |pin| self.circuit.pin_slice((placed.id(), 0), pin.net).1)
                 } else {
                     placed.properties().width()
                 };
@@ -1944,6 +1956,11 @@ impl SimLogixApp {
         for (placed, room) in self.placed.iter_mut().zip(room) {
             placed.set_readout(room);
         }
+    }
+
+    /// How many bits a wire carries — see `wire_widths`.
+    pub(crate) fn wire_width(&self, wire: u64) -> usize {
+        self.wire_widths.get(&wire).copied().unwrap_or(1)
     }
 
     /// What the inspector needs to name each component and say how wide its
@@ -3134,10 +3151,7 @@ impl SimLogixApp {
                                 .lone_wire()
                                 .and_then(|id| self.wires.iter().find(|wire| wire.id == id));
                             if let Some(wire) = selected_wire {
-                                let width = self
-                                    .wire_net(wire)
-                                    .map(|net| self.circuit.net_width(net))
-                                    .unwrap_or(1);
+                                let width = self.wire_width(wire.id);
                                 if let Some(color) = ui
                                     .add_enabled_ui(editable, |ui| {
                                         properties::show_wire(ui, strings, wire.color, width)
@@ -3397,7 +3411,15 @@ impl SimLogixApp {
             let named = self.named_components(strings);
             let focus: Vec<ComponentId> = self.selection.components.iter().copied().collect();
             let mut open = true;
-            crate::inspector::show(ui.ctx(), strings, &self.circuit, &named, &focus, &mut open);
+            crate::inspector::show(
+                ui.ctx(),
+                strings,
+                &self.circuit,
+                &named,
+                &self.width_faults,
+                &focus,
+                &mut open,
+            );
             self.show_inspector = open;
         }
         crate::licenses::show(ui.ctx(), strings, &mut self.licenses);

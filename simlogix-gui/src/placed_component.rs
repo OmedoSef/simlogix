@@ -791,11 +791,10 @@ impl PlacedComponent {
                 }
             }
             Shape::Led => {
-                let signal = circuit
-                    .pins(id)
-                    .first()
-                    .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or_default();
+                // Its own bits, not the whole conductor: on a splitter's
+                // branch a pin occupies part of the net, and reading all of
+                // it would show what the rest of the bus carries.
+                let signal = circuit.signal_at_pin((id, 0));
                 // A LED lights on a definite high — on a bus, only when
                 // every bit of it is high, since a LED has one lamp and
                 // cannot report eight different bits.
@@ -964,11 +963,10 @@ impl PlacedComponent {
                 // Every port shows what its net resolves to, driving or not:
                 // on an output that's the whole point, and on the other two
                 // it's what tells you a value you set is being fought over.
-                let signal = circuit
-                    .pins(id)
-                    .first()
-                    .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or_default();
+                // Its own bits, not the whole conductor: on a splitter's
+                // branch a pin occupies part of the net, and reading all of
+                // it would show what the rest of the bus carries.
+                let signal = circuit.signal_at_pin((id, 0));
                 let readout = signal_text(&signal, base);
                 // The readout follows the signal, the body doesn't: which way
                 // the value crosses the boundary is structure and shouldn't
@@ -1273,11 +1271,10 @@ impl PlacedComponent {
                 }
             }
             Shape::Probe => {
-                let signal = circuit
-                    .pins(id)
-                    .first()
-                    .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or_default();
+                // Its own bits, not the whole conductor: on a splitter's
+                // branch a pin occupies part of the net, and reading all of
+                // it would show what the rest of the bus carries.
+                let signal = circuit.signal_at_pin((id, 0));
                 // A probe reads out the net it's attached to, so it uses the
                 // very colour code that net is drawn in — its own duplicate
                 // of the five states was the one place they could disagree.
@@ -1323,11 +1320,10 @@ impl PlacedComponent {
                 }
             }
             Shape::Clock => {
-                let signal = circuit
-                    .pins(id)
-                    .first()
-                    .map(|pin| circuit.signal_at(pin.net))
-                    .unwrap_or_default();
+                // Its own bits, not the whole conductor: on a splitter's
+                // branch a pin occupies part of the net, and reading all of
+                // it would show what the rest of the bus carries.
+                let signal = circuit.signal_at_pin((id, 0));
                 // A clock is a signal source, so its symbol follows the same
                 // colour code as the wire it drives (`canvas::signal_color`)
                 // rather than a lit/unlit one of its own — green while high,

@@ -640,6 +640,23 @@ impl Circuit {
         self.widths.get(&net).copied().unwrap_or(1)
     }
 
+    /// What a pin reads: the bits of its net that it occupies.
+    ///
+    /// The whole conductor unless a splitter put it on part of one, so this
+    /// is `signal_at` for everything that is not on a branch — and the only
+    /// honest answer for everything that is.
+    pub fn signal_at_pin(&self, pin: (ComponentId, usize)) -> Signal {
+        let Some(net) = self
+            .try_pins(pin.0)
+            .and_then(|pins| pins.get(pin.1))
+            .map(|p| p.net)
+        else {
+            return Signal::default();
+        };
+        let (offset, width) = self.pin_slice(pin, net);
+        self.signal_at(net).slice(offset, width)
+    }
+
     /// Which bits of its net a pin occupies: where its bit zero sits, and
     /// how many it takes.
     ///

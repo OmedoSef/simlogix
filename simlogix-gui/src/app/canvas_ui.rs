@@ -511,7 +511,7 @@ impl SimLogixApp {
                             //
                             // Once per frame, since hovering lights the whole
                             // net and several wires may be part of it.
-                            let width = net.map_or(1, |net| self.circuit.net_width(net));
+                            let width = self.wire_width(wire_id);
                             if width > 1 && !bus_hint_shown {
                                 bus_hint_shown = true;
                                 self.show_bus_hint(
@@ -530,7 +530,7 @@ impl SimLogixApp {
                         // width: what matters is one bit against several,
                         // and a 32-bit wire as thick as a component would
                         // be a schematic nobody can read.
-                        let bus = net.is_some_and(|net| self.circuit.net_width(net) > 1);
+                        let bus = self.wire_width(wire_id) > 1;
                         let heavier = if bus { 2.0 } else { 0.0 };
                         let stroke = if is_selected_wire {
                             egui::Stroke::new(

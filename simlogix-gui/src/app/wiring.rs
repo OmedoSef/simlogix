@@ -710,6 +710,32 @@ impl SimLogixApp {
                 None => inner_widths.get(&(component, index)).copied().flatten(),
             }
         };
+        // **What the wires alone say**, before any splitter joined those
+        // groups to the rest of a bus. Two things come out of it: how wide a
+        // wire is — a branch carries two bits of an eight-bit conductor, and
+        // drawing it as eight would say something false — and what a pin
+        // with *no opinion* takes, which is whatever its wire carries.
+        let mut plain = plain;
+        let mut wired: HashMap<Node, Vec<(ComponentId, usize)>> = HashMap::new();
+        for node in plain.keys().copied().collect::<Vec<_>>() {
+            if let Node::Pin(component, index) = node {
+                let (root, _) = find(&mut plain, node);
+                wired.entry(root).or_default().push((component, index));
+            }
+        }
+        let wire_width: HashMap<Node, usize> = wired
+            .iter()
+            .map(|(&root, pins)| (root, pins.iter().filter_map(declared).max().unwrap_or(1)))
+            .collect();
+        let carried = |pin: &(ComponentId, usize)| -> usize {
+            let root = plain
+                .get(&Node::Pin(pin.0, pin.1))
+                .map(|_| find(&mut plain.clone(), Node::Pin(pin.0, pin.1)).0);
+            root.and_then(|root| wire_width.get(&root))
+                .copied()
+                .unwrap_or(1)
+        };
+
         // How far the net reaches: the pin that ends highest, measured from
         // the one that starts lowest. With everything at offset zero — which
         // is every drawing until a splitter is in it — that is the widest
@@ -742,16 +768,16 @@ impl SimLogixApp {
                 // disagreeing, which is reported below: those are joined bit
                 // for bit by wire, and a conductor cannot be two widths.
                 //
-                // A pin with no opinion takes what is left of the net from
-                // where it sits, which is a probe reading whatever it is on.
+                // A pin with no opinion takes **what its wire carries** —
+                // a probe reads whatever it is attached to. Not what is left
+                // of the net from where it sits: on a splitter's branch that
+                // is the rest of the bus, so a probe on bit 1 of eight read
+                // seven bits and showed the value shifted.
                 let members = group
                     .iter()
                     .map(|(pin, at)| {
                         let offset = (at - base) as usize;
-                        match declared(pin) {
-                            Some(own) => Member::slice(*pin, offset, own),
-                            None => Member::from(*pin, offset),
-                        }
+                        Member::slice(*pin, offset, declared(pin).unwrap_or_else(|| carried(pin)))
                     })
                     .collect();
                 NetGroup::sliced(members, width)
@@ -770,14 +796,6 @@ impl SimLogixApp {
         // splitter's branch sits at an offset of its own and is narrower on
         // purpose, which is exactly the case the old rule could not tell
         // apart from a mistake.
-        let mut plain = plain;
-        let mut wired: HashMap<Node, Vec<(ComponentId, usize)>> = HashMap::new();
-        for node in plain.keys().copied().collect::<Vec<_>>() {
-            if let Node::Pin(component, index) = node {
-                let (root, _) = find(&mut plain, node);
-                wired.entry(root).or_default().push((component, index));
-            }
-        }
         self.width_faults = wired
             .into_values()
             .flat_map(|pins| {
@@ -786,6 +804,19 @@ impl SimLogixApp {
                     // The narrower one is named, as it always was: the wider
                     // decides what the conductor carries.
                     .filter(move |pin| declared(pin).is_some_and(|width| Some(width) != widest))
+            })
+            .collect();
+        // A loop of splitters that disagrees with itself puts a pin in two
+        // places at once. Reported beside the width faults rather than
+        // resolved: picking one of the two would leave half the drawing
+        // reading bits it does not have, silently.
+        self.width_faults.extend(contradictions);
+        self.wire_widths = self
+            .wires
+            .iter()
+            .map(|wire| {
+                let (root, _) = find(&mut plain, Node::Wire(wire.id));
+                (wire.id, wire_width.get(&root).copied().unwrap_or(1))
             })
             .collect();
 

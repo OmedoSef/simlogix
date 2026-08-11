@@ -2082,3 +2082,106 @@ fn a_value_crosses_a_splitter_without_costing_a_tick() {
     assert_eq!(branch(1).levels(), [Level::High, Level::Low], "bits 0-1");
     assert_eq!(branch(2).levels(), [Level::Low, Level::High], "bits 2-3");
 }
+
+#[test]
+fn a_branch_wire_carries_its_own_bits_not_the_whole_bus() {
+    // The consequence of a splitter becoming connectivity: its branches and
+    // its bus are one net, so a branch wire's *net* is as wide as the bus.
+    // Drawing it that way would say something false — thick, and reporting
+    // a value it does not hold.
+    let (mut app, _) = wide_splitter();
+    app.place(ComponentKind::Probe, egui::pos2(400.0, 200.0));
+    let splitter = app.placed[0].id();
+    let probe = app.placed[1].id();
+    // Onto the *high* branch, which is bits 2-3 of the four-bit bus.
+    let wire = app.add_wire(
+        WireEndpoint::Pin(splitter, 2),
+        WireEndpoint::Pin(probe, 0),
+        Vec::new(),
+    );
+    app.rebuild_nets();
+
+    let net = app.circuit.pins(splitter)[0].net;
+    assert_eq!(app.circuit.net_width(net), 4, "one conductor, four bits");
+    assert_eq!(
+        app.wire_width(wire),
+        2,
+        "but the wire off that branch carries two"
+    );
+    // And the probe reads those two bits, at their place in the bus.
+    assert_eq!(app.circuit.pin_slice((probe, 0), net), (2, 2));
+}
+
+#[test]
+fn a_probe_on_a_branch_reads_that_branch_and_not_the_rest_of_the_bus() {
+    // Romain's screenshot: eight one-bit branches off an eight-bit bus
+    // carrying 0xAA, and the probes read AA, 55, 2A, 15, A, 5, 2, 1 —
+    // each taking the bus *from* its own bit to the end. A probe declares
+    // no width of its own, and "the rest of the net" is the wrong thing for
+    // it to take once a net has parts: what it should take is whatever its
+    // wire carries.
+    let mut app = SimLogixApp::default();
+    let source = app.place(ComponentKind::Constant, egui::pos2(40.0, 40.0));
+    let splitter = app.place(ComponentKind::Splitter, egui::pos2(200.0, 40.0));
+    app.set_component_properties(
+        source,
+        Properties {
+            width: Some(8),
+            value: Some(0b1010_1010),
+            ..Default::default()
+        },
+    );
+    let splitter = app
+        .placed
+        .iter()
+        .find(|placed| placed.kind() == ComponentKind::Splitter)
+        .map(|placed| placed.id())
+        .unwrap_or(splitter);
+    app.set_component_properties(
+        splitter,
+        Properties {
+            width: Some(8),
+            ..Default::default()
+        },
+    );
+
+    let ids: Vec<ComponentId> = app.placed.iter().map(|placed| placed.id()).collect();
+    let (source, splitter) = (ids[0], ids[1]);
+    app.add_wire(
+        WireEndpoint::Pin(source, 0),
+        WireEndpoint::Pin(splitter, 0),
+        Vec::new(),
+    );
+    let probes: Vec<ComponentId> = (0..8)
+        .map(|branch| {
+            let probe = app.place(
+                ComponentKind::Probe,
+                egui::pos2(400.0, 40.0 * branch as f32),
+            );
+            app.add_wire(
+                WireEndpoint::Pin(splitter, branch + 1),
+                WireEndpoint::Pin(probe, 0),
+                Vec::new(),
+            );
+            probe
+        })
+        .collect();
+    app.rebuild_nets();
+    app.advance_circuit(SETTLE_TICKS);
+
+    // 0xAA is 1010_1010, bit 0 first: low, high, low, high, …
+    for (branch, probe) in probes.iter().enumerate() {
+        let reading = app.circuit.signal_at_pin((*probe, 0));
+        assert_eq!(
+            reading.width(),
+            1,
+            "probe on branch {branch} reads one bit, not the rest of the bus"
+        );
+        let expected = if branch % 2 == 0 {
+            Level::Low
+        } else {
+            Level::High
+        };
+        assert_eq!(reading.levels(), [expected], "branch {branch} of 0xAA");
+    }
+}

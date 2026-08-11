@@ -48,7 +48,12 @@ pub struct Named {
 ///
 /// Deliberately not the project itself: a circuit is the user's, and a
 /// window with a *copy* button should not quietly hand over the drawing.
-pub fn report(strings: &Strings, circuit: &Circuit, named: &[Named]) -> String {
+pub fn report(
+    strings: &Strings,
+    circuit: &Circuit,
+    named: &[Named],
+    faults: &[(ComponentId, usize)],
+) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "SimLogix {}{}  ·  {}  ·  tick {}\n",
@@ -91,15 +96,24 @@ pub fn report(strings: &Strings, circuit: &Circuit, named: &[Named]) -> String {
         }
         for (component, index) in circuit.readers(net) {
             let declared = width_of(named, component, index);
+            // The bits this pin **occupies**, not the whole net: a
+            // splitter's branch is two bits of an eight-bit conductor, and
+            // measuring it against eight would report a fault on every
+            // branch there is.
+            let occupies = circuit.pin_slice((component, index), net).1;
             out.push_str(&format!(
                 "    {} · pin {} · {} bits · reads{}\n",
                 label_of(named, component),
                 index,
-                declared.unwrap_or_else(|| circuit.net_width(net)),
-                if declared.is_none_or(|width| width == circuit.net_width(net)) {
-                    ""
-                } else {
+                declared.unwrap_or(occupies),
+                // **Asked, not worked out again.** Whether a pin disagrees
+                // with what it is wired to is decided once, where the
+                // drawing is read; a second judgement here would be a second
+                // thing to keep in step, and the first to go wrong.
+                if faults.contains(&(component, index)) {
                     "  (width mismatch)"
+                } else {
+                    ""
                 },
             ));
         }
@@ -119,6 +133,7 @@ pub fn show(
     strings: &Strings,
     circuit: &Circuit,
     named: &[Named],
+    faults: &[(ComponentId, usize)],
     focus: &[ComponentId],
     open: &mut bool,
 ) {
@@ -152,7 +167,7 @@ pub fn show(
                 .on_hover_text(strings.inspector_copy_hint)
                 .clicked()
             {
-                ui.ctx().copy_text(report(strings, circuit, named));
+                ui.ctx().copy_text(report(strings, circuit, named, faults));
             }
             ui.separator();
 
@@ -170,7 +185,7 @@ pub fn show(
                 .max_height(420.0)
                 .show(ui, |ui| {
                     for net in nets {
-                        net_row(ui, strings, circuit, named, net);
+                        net_row(ui, strings, circuit, named, faults, net);
                     }
                 });
         });
@@ -192,7 +207,14 @@ fn nets_to_show(circuit: &Circuit, focus: &[ComponentId]) -> Vec<NetId> {
     nets
 }
 
-fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], net: NetId) {
+fn net_row(
+    ui: &mut Ui,
+    strings: &Strings,
+    circuit: &Circuit,
+    named: &[Named],
+    faults: &[(ComponentId, usize)],
+    net: NetId,
+) {
     let signal = circuit.signal_at(net);
     let width = circuit.net_width(net);
     let heading = format!(
@@ -236,16 +258,19 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
             // this is the one line that shows it.
             for (component, index) in circuit.readers(net) {
                 let declared = width_of(named, component, index);
+                // The bits this pin occupies, not the whole net — see the
+                // same reasoning in `report`.
+                let occupies = circuit.pin_slice((component, index), net).1;
                 let mut row = format!(
                     "{} · {} · {} · {}",
                     label_of(named, component),
                     strings.inspector_pin.replace("{}", &index.to_string()),
                     strings
                         .inspector_bits
-                        .replace("{}", &declared.unwrap_or(width).to_string()),
+                        .replace("{}", &declared.unwrap_or(occupies).to_string()),
                     strings.inspector_reads,
                 );
-                if declared.is_some_and(|declared| declared != width) {
+                if faults.contains(&(component, index)) {
                     row.push_str(&format!("  ⚠ {}", strings.inspector_mismatch));
                 }
                 ui.label(row);
@@ -255,9 +280,9 @@ fn net_row(ui: &mut Ui, strings: &Strings, circuit: &Circuit, named: &[Named], n
 
 /// What a reading pin says it is, and whether that is a claim at all.
 ///
-/// `None` means the pin declares nothing and takes the net's width, so it
-/// is reported *at* that width and never marked — a probe is an instrument
-/// reading a net, not something that can be wrong about it.
+/// `None` means the pin declares nothing and takes whatever its wire
+/// carries, so it is reported at *that* width and never marked — a probe is
+/// an instrument reading a net, not something that can be wrong about it.
 fn width_of(named: &[Named], component: ComponentId, index: usize) -> Option<usize> {
     named
         .iter()

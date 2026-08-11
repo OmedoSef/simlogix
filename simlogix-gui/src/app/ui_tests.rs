@@ -404,7 +404,8 @@ fn the_inspector_shows_a_reader_that_disagrees_about_the_width() {
 
     let strings = crate::i18n::Strings::for_language(harness.state().language);
     let named = harness.state().named_components(strings);
-    let report = crate::inspector::report(strings, &harness.state().circuit, &named);
+    let faults = harness.state().width_faults.clone();
+    let report = crate::inspector::report(strings, &harness.state().circuit, &named, &faults);
 
     // Not the net's number, which is handed out afresh on every rebuild.
     assert!(report.contains("· 4 bits ·"), "{report}");
@@ -438,7 +439,7 @@ fn the_bug_report_carries_the_build_and_what_drives_each_net() {
     let app = harness.state();
     let strings = crate::i18n::Strings::for_language(app.language);
     let named = app.named_components(strings);
-    let report = crate::inspector::report(strings, &app.circuit, &named);
+    let report = crate::inspector::report(strings, &app.circuit, &named, &app.width_faults);
 
     // The first three questions any report has to answer before anyone can
     // help: which build, on what, and what the engine thinks.

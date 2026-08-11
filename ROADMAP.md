@@ -34,8 +34,12 @@ bug found in this project so far was found by printing exactly that.
 levels, a net takes its width from the drawing, the ports and gates carry
 one, and there is a splitter, a constant, a base to read values in and a
 symbol that grows to hold what it shows. What that cost and why it was done
-that way is in [CLAUDE.md](CLAUDE.md); what is left of it is the two entries
-below.
+that way is in [CLAUDE.md](CLAUDE.md).
+
+And the **splitter is connectivity rather than a component**: it contributes
+no pin of its own, its branches *are* parts of its bus, and a value crossing
+one costs nothing because there is nothing in between. What is left of that
+is the entry on bit mapping below.
 
 So the list below is no longer "finishing v1". It's what would make SimLogix
 better at the thing it's for.
@@ -86,44 +90,6 @@ better at the thing it's for.
   the one refusing. This fixes the future — which is the argument for doing
   it before the format changes again, rather than after.
 
-- [ ] **The splitter as connectivity, not a component**
-
-  The one that ships today is a **relay**: it reads what is on one side and
-  drives it onto the other. That is not what a splitter is. A splitter is
-  *wire* — bit 3 of this net **is** bit 0 of that one — and wire takes no
-  time and cannot echo.
-
-  Two consequences of the relay, both real and both accepted on purpose:
-
-  - **It costs a tick.** Bits that cross a splitter arrive after bits that
-    do not, so a bus half of whose bits go through one is skewed. On a
-    datapath that can latch a value half old and half new — which is the
-    kind of fault you go looking for in the logic, because nothing on the
-    schematic suggests the wire is to blame.
-  - **Two splitters bridging the same nets hold each other's stale value.**
-    Each relays what the other is saying, so the pair goes on driving after
-    everything real has let go. Redundant wire is not supposed to be a
-    latch.
-
-  The fix is to stop modelling it as evaluation. It would contribute no pin
-  of its own, exactly as a `Wire` contributes none in the union-find. Nets
-  gain **offsets**: a member joins at a bit position with its own width,
-  `resolve` gathers each bit from whoever covers it, and a reader is handed
-  its own slice. The GUI's union-find becomes *weighted* — each pin's offset
-  relative to the group's root — and a contradiction, a splitter loop that
-  disagrees with itself, is reported as a fault rather than resolved.
-
-  Two questions it has to answer that the relay does not. The **width-fault
-  rule** must tell "narrower because a splitter said so" from "narrower by
-  mistake" — today every member of a net is expected to span all of it. And
-  `Component::reads_own_contribution` exists for the relay alone, so it
-  leaves with it.
-
-  **The trigger** is the skew biting: a clocked circuit that reads wrong for
-  no visible reason, or a design where splitters sit on a critical path. Not
-  before — the relay is honest about what it is, and this is a rework of the
-  net model rather than an afternoon.
-
 - [ ] **Which bits go to which branch, freely**
 
   A splitter's branches take bits **in order from 0**, each a contiguous
@@ -133,14 +99,14 @@ better at the thing it's for.
   splitters and a merge that is really a third.
 
   What it needs is for a branch to be *a list of bit positions* rather than
-  a width — the widths become the lengths of those lists, and everything
-  downstream still works, since the component already reads its widths off
-  the shapes it is handed. The cost is the editor: a table of branch against
-  bit is the honest control, and a width spinner is not.
+  a width. The cost is the editor: a table of branch against bit is the
+  honest control, and a width spinner is not.
 
-  Worth settling **with** [the splitter as connectivity](#next) rather than
-  before it: offsets in the net model are the same question asked once, and
-  a bit list is what a weighted union-find would carry anyway.
+  **This is the moment it is cheapest.** The splitter is connectivity now,
+  so a branch is already placed at an offset by a weighted union-find — a
+  list of positions is that same machinery asked for each bit instead of
+  once per branch. Left much longer and the editor is built around
+  contiguous runs.
 
 - [ ] **Whether a click should still flip a switch while drawing**
 

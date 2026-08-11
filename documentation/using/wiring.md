@@ -88,10 +88,11 @@ several, and a 32-bit wire as thick as a component would be a schematic
 nobody can read.
 
 To know *how many*, **hover it**: a bus says its width beside the pointer,
-and, while signal state is showing, its value with it. Hovering already
-lights the whole net, so the answer is the net's width, not the segment's.
-A one-bit wire says nothing — that's the default of every wire in the
-drawing, and repeating it everywhere would be noise rather than
+and, while signal state is showing, its value with it. What it reports is
+what *that wire* carries — a splitter's branch is two bits of an eight-bit
+conductor, and saying eight there would be a lie about the wire under the
+pointer. A one-bit wire says nothing — that's the default of every wire in
+the drawing, and repeating it everywhere would be noise rather than
 information.
 
 Selecting a wire says the same thing in the properties panel, which is
@@ -105,11 +106,23 @@ drive the bus and the branches follow, drive the branches and the bus does,
 so there is no separate merger to look for. Which happens simply falls out
 of what you connected.
 
-Two things worth knowing about it. Its branches take bits **from 0 upward**,
-in order, so the first branch carries the low bits. And a splitter is a
-component, so a value crossing one takes a tick — bits that go through a
-splitter arrive just after bits that do not, which is visible when you step
-a circuit one tick at a time.
+Its branches take bits **from 0 upward**, in order, so the first branch
+carries the low bits.
+
+**A splitter is wire, not a component.** It takes no time at all: bit 3 of
+the bus *is* bit 0 of the branch, so a value is on both sides the moment
+anything drives either — there is nothing in between to carry it. That has
+two consequences worth expecting.
+
+A splitter's bus and its branches are **one net**. Hovering any of them
+lights all of them, because they really are one conductor. But each wire
+still shows the bits *it* carries: a branch off an eight-bit bus is drawn
+thin and reports two bits, not eight.
+
+And a **loop of splitters that contradicts itself** — one that would put a
+bit in two places at once — is flagged rather than resolved, the same way a
+width that disagrees is. Picking one of the two readings would leave half
+the drawing reading bits it does not have, without saying so.
 
 A wire has no width of its own: it takes it from what it joins. Set the
 width on the components — see [**Bits**](editor-basics.md#component-properties) in the
