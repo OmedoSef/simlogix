@@ -266,6 +266,88 @@ better at the thing it's for.
   `Signal` and the engine, so their cost grows with everything stacked on
   top, while this one only waits.
 
+- [ ] **A bus says how wide it is on the schematic**, the way a printed one
+  does: a short stroke across the wire near the pin, with the number beside
+  it.
+
+  Everything that reports a width today has to be *asked* — hover it, or
+  select it and read the panel. The thickness says "more than one bit" and
+  stops there, so reading a drawing means interrogating it wire by wire,
+  which is exactly what a printed schematic does not make you do.
+
+  **It goes on the wire at the pin**, not on the pin itself: a width belongs
+  to the conductor, and a component's pin already gets its number from
+  whatever it is wired to. Which also settles the splitter case for free —
+  `wire_slice` already answers per wire, so a branch marks *its* bits and the
+  bus marks all of them, rather than eight wires all claiming eight.
+
+  Three things to decide before drawing anything:
+
+  - **Only buses are marked.** One bit is what every wire is until something
+    says otherwise, so marking them all is noise rather than information —
+    the same rule the hover hint already follows.
+  - **Where exactly**, when a wire has two ends and both are pins. Both ends
+    is the printed convention and is probably right; one mark per wire would
+    leave you hunting for which end has it.
+  - **Whether it can be switched off**, and if so where. It is a standing
+    mark on every bus in the drawing, so a dense schematic may want it gone —
+    which makes it the same kind of thing as hiding the signal state (`C`,
+    Simulation menu): something you flip while working, not a preference. If
+    it turns out never to be in the way, it needs no control at all, and that
+    is the better answer.
+
+  The text goes in `symbol::TextLayer` like every other label, or it is
+  resampled by the zoom.
+
+- [ ] **Hovering a splitter's branch lights the whole net**, bus and
+  siblings included, which is the opposite of what hovering is for: following
+  *one* wire across a crossing.
+
+  **The answer already exists and simply is not used here.** Colouring a wire
+  spreads over `wire_colour_groups` — what the *wires* say, splitters left
+  out — precisely because colouring a branch would otherwise repaint the bus
+  and its seven siblings. The highlight in
+  [canvas_ui.rs](simlogix-gui/src/app/canvas_ui.rs) still compares `NetId`s,
+  so it lights everything a splitter joined.
+
+  **The two halves of the same gesture already disagree**, which is the
+  sharpest argument for the change: the hover *hint* reports what that wire
+  carries — two bits of an eight-bit bus, since `wire_slice` — while the
+  hover *highlight* reports the net. One says "this wire", the other says
+  "this whole conductor", at the same moment and under the same pointer.
+
+  The comment on `hovered_net` says hovering "has to light up the whole net",
+  and it was true when it was written: before splitters, a net *was* one
+  conductor. It is the same shape of mistake as `switch_view`'s doc comment,
+  which described two views and was inherited unchanged by a third.
+
+- [ ] **Opening a project by double-clicking it.** It starts SimLogix and
+  then shows an empty canvas — the file is never read.
+
+  **The packaging side is already right**, which narrows this to one place:
+  `packaging/simlogix.desktop` runs `simlogix %f`, so the path *is* handed
+  over, and `packaging/simlogix.xml` declares the type the file manager
+  matches `.slgx` against. What is missing is that
+  [main.rs](simlogix-gui/src/main.rs) never looks at `std::env::args()` at
+  all — `SimLogixApp::new(cc)` takes the context and nothing else.
+
+  So the work is a path argument threaded to startup, and then the same
+  three things any open does, which is what stops this being a one-liner:
+
+  - it goes through `reopen`, not a bare load, so the circuit tree and the
+    camera arrive in the same state as a File → Open;
+  - `name_library_after` runs, since a first open is one of the two moments
+    a file name is allowed to name the project's library;
+  - it joins *Open recent*, which is exactly the project you will want back.
+
+  No unsaved-changes guard is needed, uniquely: nothing has been edited yet.
+
+  **A failure has to be visible.** A path that does not open — moved,
+  deleted, an older build's format — must say so rather than leaving an
+  empty canvas that looks like a successful start. That is the same reasoning
+  as *Open recent* dropping an entry at the moment it fails, and it is worth
+  deciding before writing rather than after.
+
 - [ ] **Moving a component that shows a readout** — the ports, the probe and
   the constant. Romain reported it after using the multibit work; the exact
   symptom still has to be pinned down, so the first job is reproducing it and
