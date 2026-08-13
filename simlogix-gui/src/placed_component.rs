@@ -565,6 +565,20 @@ impl PlacedComponent {
         }
     }
 
+    /// What a `Constant` is driving **now**, as the engine reads it.
+    ///
+    /// Deliberately not [`PlacedComponent::hand_set_level`], which is what
+    /// decides the click cycle: a constant has none, and clicking one must
+    /// do nothing. Its property is the value it *rests* at — saved, undoable,
+    /// restored on load — and this is what it carries at the moment, which is
+    /// runtime state like a port's drive or a switch's position.
+    pub fn constant_drive(&self) -> Option<&Rc<Cell<PortDrive>>> {
+        match &self.shape {
+            Shape::Constant { handles } => Some(&handles.drive),
+            _ => None,
+        }
+    }
+
     /// Where a `Switch` is **now**, as the engine reads it.
     ///
     /// Runtime state, like a port's drive: its property says where it
@@ -1398,11 +1412,19 @@ impl PlacedComponent {
                     pins: vec![pin],
                 }
             }
-            Shape::Constant { .. } => {
+            Shape::Constant { handles } => {
                 // Its own value, not the net's: a constant is not reporting
-                // what it sees, it is saying what it puts there.
+                // what it sees, it is saying what it puts there — and what
+                // it puts there is the cell, which the value panel can move
+                // while the circuit runs. Reading the property instead would
+                // leave the tag showing the resting value while the net
+                // carried another.
+                let driving = match handles.drive.get() {
+                    PortDrive::Driving(value) => value,
+                    PortDrive::Undriven => properties.constant_value(),
+                };
                 let label = crate::properties::format_value(
-                    u128::from(properties.constant_value()),
+                    u128::from(driving),
                     properties.width(),
                     base,
                     false,

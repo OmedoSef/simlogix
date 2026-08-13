@@ -3333,6 +3333,26 @@ impl SimLogixApp {
                                             pending_drive = Some(placed.id());
                                         }
                                     }
+                                    // A constant's value is two things: the
+                                    // property above rests, this drives now.
+                                    if let Some(cell) = placed.constant_drive() {
+                                        let driving = match cell.get() {
+                                            PortDrive::Driving(value) => value,
+                                            PortDrive::Undriven => {
+                                                placed.properties().constant_value()
+                                            }
+                                        };
+                                        if let Some(next) = properties::show_constant_value(
+                                            ui,
+                                            strings,
+                                            driving,
+                                            placed.width(),
+                                            placed.properties().base.unwrap_or(self.base),
+                                        ) {
+                                            cell.set(PortDrive::Driving(next));
+                                            pending_drive = Some(placed.id());
+                                        }
+                                    }
                                     if let Some(drive) = placed.hand_set_level() {
                                         if let Some(next) = properties::show_value(
                                             ui,

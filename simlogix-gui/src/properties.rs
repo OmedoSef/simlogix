@@ -431,6 +431,33 @@ pub fn show_value(
     edited
 }
 
+/// The **value** panel for a constant: what it is driving right now.
+///
+/// The same two natures a port has, and the same separation: the property
+/// above is the value it *rests* at — saved, undoable, restored on load —
+/// and this is what it carries at the moment. Typing here is not an edit to
+/// the drawing, so there is no undo step and nothing reaches the file.
+///
+/// No "driving" checkbox, unlike a port's: a constant always drives, which
+/// is an invariant of its constructor rather than a position it can be put
+/// in.
+pub fn show_constant_value(
+    ui: &mut Ui,
+    strings: &Strings,
+    value: u64,
+    width: usize,
+    base: NumberBase,
+) -> Option<u64> {
+    ui.add_space(12.0);
+    ui.separator();
+    ui.label(RichText::new(strings.value_heading).strong());
+    ui.label(RichText::new(strings.value_runtime).weak());
+    ui.add_space(4.0);
+    let edited = value_field(ui, "constant_value", value, width, base).0;
+    ui.label(RichText::new(strings.value_bases).weak());
+    edited
+}
+
 /// The field a value is typed into: shown by [`format_value`], read by
 /// `parse_value`, and masked to `width` so what is typed can never drive
 /// bits that do not exist.

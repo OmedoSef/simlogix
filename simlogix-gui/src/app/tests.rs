@@ -2828,3 +2828,66 @@ fn asking_a_counter_for_its_optional_pins_grows_it() {
         ],
     );
 }
+
+#[test]
+fn a_constant_can_be_driven_by_hand_without_becoming_an_edit() {
+    // Two natures, the same as a port's: the property is what it *rests* at
+    // and is saved, this is what it carries now and is not.
+    let mut app = SimLogixApp::default();
+    let constant = app.place(ComponentKind::Constant, egui::pos2(40.0, 40.0));
+    let out = app.place(ComponentKind::OutputPort, egui::pos2(200.0, 40.0));
+    app.add_wire(
+        WireEndpoint::Pin(constant, 0),
+        WireEndpoint::Pin(out, 0),
+        Vec::new(),
+    );
+
+    let mut edited = Properties {
+        width: Some(8),
+        value: Some(0x0F),
+        ..Default::default()
+    };
+    app.set_component_properties(constant, edited.clone());
+    app.rebuild_nets();
+    app.advance_circuit(SETTLE_TICKS);
+    let net = app.circuit.pins(out)[0].net;
+    let read = |app: &SimLogixApp| -> u64 {
+        app.circuit
+            .signal_at(net)
+            .levels()
+            .iter()
+            .enumerate()
+            .map(|(bit, level)| u64::from(*level == Level::High) << bit)
+            .sum()
+    };
+    assert_eq!(read(&app), 0x0F, "the resting value");
+
+    // What the value panel does: straight into the cell.
+    let placed = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == constant)
+        .expect("placed");
+    placed
+        .constant_drive()
+        .expect("a constant drives")
+        .set(PortDrive::Driving(0xA5));
+    app.circuit.schedule_now(constant);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(read(&app), 0xA5, "and it follows while the circuit runs");
+
+    // Nothing reached the document: the property still says what it rests at.
+    let placed = app
+        .placed
+        .iter()
+        .find(|placed| placed.id() == constant)
+        .expect("placed");
+    assert_eq!(placed.properties().value, Some(0x0F));
+
+    // And editing the property puts it back, which is what makes the resting
+    // value mean something: it is what a load or a reset returns to.
+    edited.value = Some(0x33);
+    app.set_component_properties(constant, edited);
+    app.advance_circuit(SETTLE_TICKS);
+    assert_eq!(read(&app), 0x33);
+}
