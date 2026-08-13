@@ -1599,6 +1599,7 @@ impl SimLogixApp {
             .iter()
             .find(|circuit| circuit.path() == path)
             .and_then(|circuit| circuit.appearance.clone())
+            .map(|appearance| appearance.reconciled(ports))
             .unwrap_or_else(|| Appearance::generated(ports))
     }
 
@@ -1733,11 +1734,14 @@ impl SimLogixApp {
         self.placed.truncate(first_inner);
         self.flattening.pop();
 
-        let live = |group: &Vec<(usize, usize)>| -> Vec<InnerMember> {
+        // The offsets come with them: a splitter inside the circuit says
+        // where each branch sits on its bus, and that has to survive being
+        // flattened or the bits never reach the port.
+        let live = |group: &Vec<crate::project::SavedMember>| -> Vec<InnerMember> {
             group
                 .iter()
-                .filter_map(|&(component, pin)| {
-                    Some(((ids.get(component).copied().flatten()?, pin), 0))
+                .filter_map(|&((component, pin), offset)| {
+                    Some(((ids.get(component).copied().flatten()?, pin), offset))
                 })
                 .collect()
         };
@@ -1745,7 +1749,16 @@ impl SimLogixApp {
 
         let mut ports = Self::port_slots(&saved);
         for (index, port) in &mut ports {
-            port.group = groups.iter().position(|g| g.contains(&(*index, 0)));
+            // Matched on the pin alone: a port sits wherever its group put
+            // it, and asking for offset zero would miss one on a splitter's
+            // branch. Its offset comes back with it, for the same reason.
+            let found = groups.iter().enumerate().find_map(|(at, g)| {
+                g.iter()
+                    .find(|&&(pin, _)| pin == (*index, 0))
+                    .map(|&(_, offset)| (at, offset))
+            });
+            port.group = found.map(|(at, _)| at);
+            port.offset = found.map_or(0, |(_, offset)| offset);
         }
         // Kept whole — not filtered down to the groups that have live pins —
         // so a port's index still lands on the right one. A group with no
@@ -1800,6 +1813,7 @@ impl SimLogixApp {
                         // disagree about it either.
                         width: component.properties.width(),
                         // Only `flatten` knows the sub-circuit's nets.
+                        offset: 0,
                         group: None,
                     },
                 )

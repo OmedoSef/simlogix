@@ -314,6 +314,33 @@ impl Appearance {
         }
     }
 
+    /// Brings a stored symbol's pins into line with the ports it has to
+    /// show.
+    ///
+    /// **The ports are the truth**: a symbol says only *where* each pin comes
+    /// out, and can neither invent one nor drop one. A stored appearance
+    /// falls out of step the moment a circuit's ports change — and both ways
+    /// are silent, because the appearance view has no ports on screen to
+    /// compare against. A port removed leaves a slot with nothing behind it,
+    /// drawn as a pin that no wire can attach to; a port added leaves a pin
+    /// with nowhere to come out at all, which is worse for being invisible.
+    ///
+    /// Extra slots are dropped. Missing ones take the position the generated
+    /// box would have given them, which is the only answer that isn't
+    /// arbitrary: it is where the pin would be had nothing been drawn, it is
+    /// on the grid, and it can be seen and dragged.
+    #[must_use]
+    pub fn reconciled(mut self, ports: &[InstancePort]) -> Self {
+        if self.pins.len() == ports.len() {
+            return self;
+        }
+        self.pins.truncate(ports.len());
+        let fallback = Self::generated(ports);
+        self.pins
+            .extend(fallback.pins.into_iter().skip(self.pins.len()));
+        self
+    }
+
     /// Draws the symbol centred on `center`, and reports where each pin
     /// ended up — in `pins` order, which is port order.
     ///
@@ -613,6 +640,7 @@ mod tests {
             name: String::new(),
             kind,
             width: 1,
+            offset: 0,
             group: None,
         }
     }
@@ -1036,5 +1064,83 @@ mod tests {
         assert!(!json.contains("inverted"));
         let back: Appearance = serde_json::from_str(&json).expect("readable");
         assert_eq!(back, symbol);
+    }
+
+    #[test]
+    fn a_symbol_drops_the_pins_of_ports_that_are_gone() {
+        // Romain's `counter_4`: four separate outputs, then one bus through
+        // a splitter — and the three old pins were still drawn, unlabelled,
+        // attached to nothing.
+        let four = named(&[
+            ("CLK", ComponentKind::InputPort),
+            ("Q0", ComponentKind::OutputPort),
+            ("Q1", ComponentKind::OutputPort),
+            ("Q2", ComponentKind::OutputPort),
+        ]);
+        let drawn = Appearance::generated(&four);
+        assert_eq!(drawn.pins.len(), 4);
+
+        let fewer = named(&[
+            ("CLK", ComponentKind::InputPort),
+            ("Q", ComponentKind::OutputPort),
+        ]);
+        let reconciled = drawn.clone().reconciled(&fewer);
+        assert_eq!(reconciled.pins.len(), 2);
+        // And the ones that remain are exactly where they were: a port that
+        // did not move must not have its pin moved either.
+        assert_eq!(reconciled.pins[0].at, drawn.pins[0].at);
+        assert_eq!(reconciled.pins[1].at, drawn.pins[1].at);
+    }
+
+    #[test]
+    fn a_port_added_after_the_symbol_was_drawn_gets_a_pin() {
+        // The other half, and the worse one for being invisible: without
+        // this the new port has nowhere to come out and no wire can reach it.
+        let two = named(&[
+            ("CLK", ComponentKind::InputPort),
+            ("Q", ComponentKind::OutputPort),
+        ]);
+        let drawn = Appearance::generated(&two);
+
+        let three = named(&[
+            ("CLK", ComponentKind::InputPort),
+            ("EN", ComponentKind::InputPort),
+            ("Q", ComponentKind::OutputPort),
+        ]);
+        let reconciled = drawn.reconciled(&three);
+        assert_eq!(reconciled.pins.len(), 3);
+        // Where the generated box would have put it — the only answer that
+        // is not arbitrary, and one that lands on the grid.
+        assert_eq!(
+            reconciled.pins[2].at,
+            Appearance::generated(&three).pins[2].at
+        );
+    }
+
+    #[test]
+    fn a_symbol_that_still_matches_its_ports_is_left_alone() {
+        let two = named(&[
+            ("CLK", ComponentKind::InputPort),
+            ("Q", ComponentKind::OutputPort),
+        ]);
+        let mut drawn = Appearance::generated(&two);
+        // A pin the user dragged somewhere of their own.
+        drawn.pins[1].at = (123.0, -45.0);
+        let reconciled = drawn.clone().reconciled(&two);
+        assert_eq!(reconciled.pins[1].at, (123.0, -45.0));
+    }
+
+    /// Named ports, where `ports(inputs, outputs)` above only counts them.
+    fn named(names: &[(&str, ComponentKind)]) -> Vec<InstancePort> {
+        names
+            .iter()
+            .map(|(name, kind)| InstancePort {
+                name: (*name).to_string(),
+                width: 1,
+                kind: kind.clone(),
+                offset: 0,
+                group: None,
+            })
+            .collect()
     }
 }

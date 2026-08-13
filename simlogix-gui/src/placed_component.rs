@@ -59,6 +59,14 @@ pub struct InstancePort {
     /// `InputPort`, `OutputPort` or `InOutPort` — which side of the box it
     /// goes on, and which way the arrow points.
     pub kind: ComponentKind,
+    /// Where this port's bit zero sits on that net.
+    ///
+    /// Zero for a port on a plain wire, which is nearly all of them. A port
+    /// wired to a splitter's branch sits at that branch's bit, and the
+    /// anchor pin standing in for it out here has to sit at the same one —
+    /// joining it at zero would put the sub-circuit's bits at the wrong
+    /// place in the parent's net.
+    pub offset: isize,
     /// Which of the sub-circuit's internal nets this port sits on, as an
     /// index into the instance's `inner_groups`.
     ///
@@ -299,6 +307,7 @@ pub fn counter_ports(pins: CounterPins, width: usize) -> Vec<InstancePort> {
             name: name.to_string(),
             width,
             kind: ComponentKind::InputPort,
+            offset: 0,
             group: None,
         });
     };
@@ -319,6 +328,7 @@ pub fn counter_ports(pins: CounterPins, width: usize) -> Vec<InstancePort> {
             name: name.to_string(),
             width,
             kind: ComponentKind::OutputPort,
+            offset: 0,
             group: None,
         });
     }
@@ -1891,6 +1901,7 @@ mod tests {
             name: String::new(),
             kind,
             width: 1,
+            offset: 0,
             group: None,
         }
     }

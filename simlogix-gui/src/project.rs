@@ -200,25 +200,34 @@ impl SavedCircuit {
     }
 
     /// Which `(component index, pin index)` pairs this circuit's wires hold
-    /// together — its connectivity, read straight off the saved drawing.
+    /// together, and where each one's bit zero sits on its net — its
+    /// connectivity, read straight off the saved drawing.
     ///
     /// The same union-find `SimLogixApp::rebuild_nets` runs on the live
     /// drawing, done here on saved data because instantiating this circuit
     /// somewhere else needs its internal connections without opening it.
     /// Groups of one are left out: a lone pin is its own net anyway.
-    pub fn pin_groups(&self) -> Vec<Vec<(usize, usize)>> {
+    ///
+    /// **The splitters have to be applied here too**, and for a long while
+    /// they were not: this read the wires alone, so a sub-circuit containing
+    /// one was right when opened — where the live rebuild applies them — and
+    /// silently inert when instantiated. Its bus and its branches came out as
+    /// separate nets, so nothing reached the port. That is why the offsets
+    /// are part of the answer rather than a detail: a branch is not merely
+    /// *joined* to its bus, it sits at a particular bit of it.
+    pub fn pin_groups(&self) -> Vec<Vec<SavedMember>> {
         let mut parent = std::collections::HashMap::new();
 
         for (index, wire) in self.wires.iter().enumerate() {
             let self_node = SavedNode::Wire(index);
-            parent.entry(self_node).or_insert(self_node);
+            parent.entry(self_node).or_insert((self_node, 0));
             for end in [&wire.from, &wire.to] {
                 match *end {
                     SavedEndpoint::Pin(component, pin) => {
-                        union(&mut parent, self_node, SavedNode::Pin(component, pin));
+                        union(&mut parent, self_node, SavedNode::Pin(component, pin), 0);
                     }
                     SavedEndpoint::Junction { wire: host, .. } => {
-                        union(&mut parent, self_node, SavedNode::Wire(host));
+                        union(&mut parent, self_node, SavedNode::Wire(host), 0);
                     }
                     // A loose end connects nothing.
                     SavedEndpoint::Free(_, _) => {}
@@ -226,13 +235,36 @@ impl SavedCircuit {
             }
         }
 
-        let mut groups: std::collections::HashMap<SavedNode, Vec<(usize, usize)>> =
+        // Branch `i` takes the bits after everything before it, so its bit
+        // zero is the bus's bit at that running total — the same rule the
+        // live rebuild applies, and it has to be the same or a circuit would
+        // mean one thing open and another instantiated.
+        for (index, component) in self.components.iter().enumerate() {
+            if component.kind != ComponentKind::Splitter {
+                continue;
+            }
+            let mut bit = 0usize;
+            for (branch, width) in component.properties.branch_widths().iter().enumerate() {
+                union(
+                    &mut parent,
+                    SavedNode::Pin(index, branch + 1),
+                    SavedNode::Pin(index, 0),
+                    bit as isize,
+                );
+                bit += width;
+            }
+        }
+
+        let mut groups: std::collections::HashMap<SavedNode, Vec<SavedMember>> =
             std::collections::HashMap::new();
         let nodes: Vec<SavedNode> = parent.keys().copied().collect();
         for node in nodes {
             if let SavedNode::Pin(component, pin) = node {
-                let root = find(&mut parent, node);
-                groups.entry(root).or_default().push((component, pin));
+                let (root, offset) = find(&mut parent, node);
+                groups
+                    .entry(root)
+                    .or_default()
+                    .push(((component, pin), offset));
             }
         }
         groups
@@ -242,6 +274,10 @@ impl SavedCircuit {
     }
 }
 
+/// One pin on a saved circuit's internal net, and where its bit zero sits
+/// on that net. Zero unless a splitter says otherwise.
+pub type SavedMember = ((usize, usize), isize);
+
 /// A node of a saved circuit's connectivity graph — the same shape
 /// `SimLogixApp::rebuild_nets` uses on the live drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -250,36 +286,46 @@ enum SavedNode {
     Wire(usize),
 }
 
-fn find(
-    parent: &mut std::collections::HashMap<SavedNode, SavedNode>,
-    node: SavedNode,
-) -> SavedNode {
-    let mut root = node;
-    while let Some(&next) = parent.get(&root) {
-        if next == root {
-            break;
-        }
-        root = next;
+/// A node's root, and how far its bit zero sits above the root's.
+///
+/// Weighted, like the live rebuild's: a splitter's branch is not merely on
+/// its bus's net, it starts at a particular bit of it, and a plain union-find
+/// cannot say that. Path compression has to carry the accumulated distance
+/// with it — forgetting it is the bug that leaves a deep chain reading its
+/// own offset instead of the total.
+type SavedParents = std::collections::HashMap<SavedNode, (SavedNode, isize)>;
+
+fn find(parent: &mut SavedParents, node: SavedNode) -> (SavedNode, isize) {
+    let Some(&(up, step)) = parent.get(&node) else {
+        return (node, 0);
+    };
+    if up == node {
+        return (node, 0);
     }
-    // Path compression, so a long chain of taps doesn't cost a walk each time.
-    let mut walk = node;
-    while let Some(&next) = parent.get(&walk) {
-        if next == walk {
-            break;
-        }
-        parent.insert(walk, root);
-        walk = next;
-    }
-    root
+    let (root, rest) = find(parent, up);
+    let total = step + rest;
+    parent.insert(node, (root, total));
+    (root, total)
 }
 
-fn union(parent: &mut std::collections::HashMap<SavedNode, SavedNode>, a: SavedNode, b: SavedNode) {
-    parent.entry(a).or_insert(a);
-    parent.entry(b).or_insert(b);
-    let (ra, rb) = (find(parent, a), find(parent, b));
-    if ra != rb {
-        parent.insert(ra, rb);
+/// Joins `a` and `b` so that `a` sits exactly `delta` bits above `b`.
+///
+/// The same convention as the live rebuild's, deliberately down to the
+/// expression: the two answer the same question about the same drawing, and
+/// a sign that differs between them is a circuit that means one thing open
+/// and another instantiated — which is exactly the bug this was written to
+/// fix, so getting it inverted here would only have moved it.
+fn union(parent: &mut SavedParents, a: SavedNode, b: SavedNode, delta: isize) {
+    parent.entry(a).or_insert((a, 0));
+    parent.entry(b).or_insert((b, 0));
+    let (root_a, from_a) = find(parent, a);
+    let (root_b, from_b) = find(parent, b);
+    if root_a == root_b {
+        return;
     }
+    // Hanging `root_a` under `root_b`: whatever puts `a` exactly `delta`
+    // above `b` once both are read through their roots.
+    parent.insert(root_a, (root_b, delta - from_a + from_b));
 }
 
 impl SavedProject {
@@ -832,7 +878,36 @@ mod tests {
         assert_eq!(groups.len(), 1);
         let mut group = groups[0].clone();
         group.sort();
-        assert_eq!(group, vec![(0, 0), (1, 0), (2, 0)]);
+        // Every pin on a plain wire sits at bit zero of its net, which is
+        // what a conductor means — only a splitter says otherwise.
+        assert_eq!(group, vec![((0, 0), 0), ((1, 0), 0), ((2, 0), 0)]);
+    }
+
+    #[test]
+    fn a_splitter_inside_a_circuit_joins_its_branches_to_its_bus() {
+        // Read from the saved form, because instantiating a circuit needs
+        // its connectivity without opening it — and for a long while this
+        // read the wires alone, so a sub-circuit containing a splitter was
+        // right when opened and silently inert when placed. Romain's
+        // `counter_4` merges four bits into one `Q` that way.
+        let mut circuit = circuit("main");
+        circuit.components = vec![circuit.components[0].clone(); 2];
+        circuit.components[1].kind = ComponentKind::Splitter;
+        circuit.components[1].properties.width = Some(4);
+        circuit.components[1].properties.branches = Some(vec![2, 2]);
+        // A port on the bus, and nothing else drawn: the splitter alone has
+        // to hold its own pins together.
+        circuit.wires = vec![wire(SavedEndpoint::Pin(0, 0), SavedEndpoint::Pin(1, 0))];
+
+        let groups = circuit.pin_groups();
+        assert_eq!(groups.len(), 1, "bus and branches are one net");
+        let mut group = groups[0].clone();
+        group.sort();
+        // Branch 0 at bit 0, branch 1 at bit 2 — after the two before it.
+        assert_eq!(
+            group,
+            vec![((0, 0), 0), ((1, 0), 0), ((1, 1), 0), ((1, 2), 2)]
+        );
     }
 
     #[test]

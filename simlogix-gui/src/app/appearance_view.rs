@@ -31,9 +31,15 @@ impl SimLogixApp {
             .into_iter()
             .map(|(_, port)| port)
             .collect();
+        // Reconciled on the way out rather than on the way in: a symbol
+        // drawn before a port was added or removed is stale in the file
+        // until it is next edited, and healing it here means the view and
+        // the instance agree without the file having to be rewritten to
+        // open a circuit.
         let appearance = self.circuits[self.active]
             .appearance
             .clone()
+            .map(|appearance| appearance.reconciled(&ports))
             .unwrap_or_else(|| Appearance::generated(&ports));
         (ports, appearance)
     }

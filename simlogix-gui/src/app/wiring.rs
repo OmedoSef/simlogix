@@ -600,21 +600,26 @@ impl SimLogixApp {
             // it still holds when a net has no pins to link together.
             for (group, members) in inner_groups.iter().enumerate() {
                 for &((component, pin), offset) in members {
+                    // The pin sits `offset` above the group's node, not the
+                    // other way round: `union(a, b, delta)` puts *`a`* above
+                    // `b`, and the offset says where the pin sits on its net.
                     union(
                         &mut parent,
-                        Node::Inner(placed.id(), group),
                         Node::Pin(component, pin),
+                        Node::Inner(placed.id(), group),
                         offset,
                     );
                 }
             }
             for (index, port) in ports.iter().enumerate() {
                 if let Some(group) = port.group {
+                    // Same way round, and the same reason: the anchor pin
+                    // stands in for the port, so it sits where the port sat.
                     union(
                         &mut parent,
-                        Node::Inner(placed.id(), group),
                         Node::Pin(placed.id(), index),
-                        0,
+                        Node::Inner(placed.id(), group),
+                        port.offset,
                     );
                 }
             }
